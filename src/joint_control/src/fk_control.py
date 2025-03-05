@@ -50,7 +50,7 @@ class EndEffectorController(Node):
 def main(args=None):
     rclpy.init(args=args)
     controller = EndEffectorController()
-    
+
     while rclpy.ok():
         try:
             # 사용자 입력 받기 (6개 조인트 각도를 직접 입력)

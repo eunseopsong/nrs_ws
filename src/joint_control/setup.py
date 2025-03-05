@@ -23,9 +23,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'basic_control = joint_control.basic_control:main',
-            'fk_control = joint_control.fk_control:main',
-            'ik_control = joint_control.ik_control:main',
+            'basic_control = src.basic_control:main',
+            'fk_control = src.fk_control:main',
+            'ik_control = src.ik_control:main',
         ],
     },
 )

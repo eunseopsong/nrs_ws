@@ -44,9 +44,9 @@ class IKController(Node):
 
     def inverse_kinematics(self, x, y, z, roll, pitch, yaw):
         """ Compute inverse kinematics using UR10 kinematic model """
-        d = np.sqrt(x**2 + y**2) - self.L4 - self.L5 - self.L6  # Effective reach excluding wrist
+        d = np.sqrt(x**2 + y**2)  # Effective horizontal reach
         h = z - self.L1  # Height from base to EE
-        
+
         # Law of Cosines for theta2
         c2 = (d**2 + h**2 - self.L2**2 - self.L3**2) / (2 * self.L2 * self.L3)
         if abs(c2) > 1.0:
@@ -60,10 +60,10 @@ class IKController(Node):
         theta3 = np.arctan2(h, d) - np.arctan2(self.L3 * s2, self.L2 + self.L3 * c2)
 
         # Compute wrist angles
-        wrist_rotation = self.euler_to_rotation_matrix(roll, pitch, yaw)
-        theta4 = np.arctan2(wrist_rotation[1, 0], wrist_rotation[0, 0])  # Wrist yaw
-        theta5 = np.arctan2(np.sqrt(wrist_rotation[0, 0]**2 + wrist_rotation[1, 0]**2), wrist_rotation[2, 0])  # Wrist pitch
-        theta6 = np.arctan2(wrist_rotation[2, 1], wrist_rotation[2, 2])  # Wrist roll
+        rotation_matrix = self.euler_to_rotation_matrix(roll, pitch, yaw)
+        theta4 = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])  # Wrist roll
+        theta5 = np.arctan2(np.sqrt(rotation_matrix[2, 0]**2 + rotation_matrix[2, 2]**2), rotation_matrix[2, 1])  # Wrist pitch
+        theta6 = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])  # Wrist yaw
 
         joints = [theta1, theta3, theta2, theta4, theta5, theta6]
 
@@ -89,10 +89,11 @@ class IKController(Node):
         self.publisher_.publish(self.joint_state)
         self.get_logger().info(f"Moved to EE position: {target_position}, orientation: {roll, pitch, yaw}")
 
+
 def main(args=None):
     rclpy.init(args=args)
     controller = IKController()
-    
+
     while rclpy.ok():
         try:
             user_input = input("Enter x y z roll pitch yaw (meters & degrees): ")
@@ -104,7 +105,7 @@ def main(args=None):
             break
         except Exception as e:
             print(f"Invalid input: {e}")
-    
+
     controller.destroy_node()
     rclpy.shutdown()
 
