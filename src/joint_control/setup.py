@@ -24,6 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             'basic_control = joint_control.basic_control:main',
+            'fk_control = joint_control.fk_control:main',
+            'ik_control = joint_control.ik_control:main',
         ],
     },
 )
