@@ -45,7 +45,7 @@ class IKController(Node):
     def inverse_kinematics(self, x, y, z, roll, pitch, yaw):
         """ Compute inverse kinematics using UR10 kinematic model """
         d = np.sqrt(x**2 + y**2)  # Effective horizontal reach
-        h = z - self.L1  # Height from base to EE
+        h = -z + self.L1  # Fixing Z-axis inversion
 
         # Law of Cosines for theta2
         c2 = (d**2 + h**2 - self.L2**2 - self.L3**2) / (2 * self.L2 * self.L3)
@@ -59,11 +59,11 @@ class IKController(Node):
         theta1 = np.arctan2(y, x)
         theta3 = np.arctan2(h, d) - np.arctan2(self.L3 * s2, self.L2 + self.L3 * c2)
 
-        # Compute wrist angles
+        # Compute wrist angles using inverse kinematics
         rotation_matrix = self.euler_to_rotation_matrix(roll, pitch, yaw)
-        theta4 = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])  # Wrist roll
-        theta5 = np.arctan2(np.sqrt(rotation_matrix[2, 0]**2 + rotation_matrix[2, 2]**2), rotation_matrix[2, 1])  # Wrist pitch
-        theta6 = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])  # Wrist yaw
+        theta4 = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])  # Wrist yaw
+        theta5 = np.arctan2(np.sqrt(rotation_matrix[0, 0]**2 + rotation_matrix[1, 0]**2), rotation_matrix[2, 0])  # Wrist pitch
+        theta6 = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])  # Wrist roll
 
         joints = [theta1, theta3, theta2, theta4, theta5, theta6]
 
