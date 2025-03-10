@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'basic_control = src.basic_control:main',
             'fk_control = src.fk_control:main',
+            'fk_effort_control = src.fk_effort_control:main',
             'ik_control = src.ik_control:main',
         ],
     },
