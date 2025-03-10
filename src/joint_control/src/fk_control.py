@@ -7,6 +7,8 @@ import numpy as np
 import threading
 from scipy.spatial.transform import Rotation as R  # scipy 사용
 
+# backup 2025.03.10
+
 class EndEffectorController(Node):
     def __init__(self):
         super().__init__('fk_controller')
