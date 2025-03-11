@@ -174,9 +174,10 @@ def main(args=None):
                 x, y, z, roll, pitch, yaw = vals
                 # IK 계산
                 q_sol, success = controller.compute_ik(x, y, z, roll, pitch, yaw, degrees=True)
+                q_sol = np.round(q_sol, 4)
 
                 if success:
-                    print(f"IK 성공! 조인트(rad] = {q_sol}")
+                    print(f"IK 성공! 조인트(rad) = {q_sol}")
                     controller.move_to_pose(q_sol.tolist())
                 else:
                     print("IK 실패: 최대 반복 횟수 내 수렴하지 못함.")

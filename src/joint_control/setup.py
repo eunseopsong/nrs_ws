@@ -23,10 +23,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'basic_control = src.basic_control:main',
             'fk_control = src.fk_control:main',
-            'pub_effort = src.pub_effort:main',
             'ik_control = src.ik_control:main',
+            'pub_effort = src.pub_effort:main',
             'sub_joint_states = src.sub_joint_states:main'
         ],
     },

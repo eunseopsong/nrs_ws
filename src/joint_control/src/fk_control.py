@@ -14,7 +14,7 @@ from scipy.spatial.transform import Rotation as R  # scipy 사용
 class EndEffectorController(Node):
 
     def __init__(self):
-        super().__init__('fk_control')
+        super().__init__('fk_controller')
         qos_profile = QoSProfile(depth=10)
         self.publisher_ = self.create_publisher(JointState, '/isaac_joint_commands', qos_profile)
 
