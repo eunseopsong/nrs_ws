@@ -2,6 +2,9 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile
+from std_msgs.msg import String
+
 from sensor_msgs.msg import JointState
 import numpy as np
 import threading
@@ -10,9 +13,11 @@ from scipy.spatial.transform import Rotation as R  # scipy 사용
 # backup 2025.03.10
 
 class EndEffectorController(Node):
+
     def __init__(self):
-        super().__init__('fk_controller')
-        self.publisher_ = self.create_publisher(JointState, '/isaac_joint_commands', 10)
+        super().__init__('fk_control')
+        qos_profile = QoSProfile(depth=10)
+        self.publisher_ = self.create_publisher(JointState, '/isaac_joint_commands', qos_profile)
 
         # Create a JointState message
         self.joint_state = JointState()
@@ -33,9 +38,9 @@ class EndEffectorController(Node):
 
         # 100Hz 타이머 (주기적으로 메시지 발행)
         self.timer_period = 0.01
-        self.timer = self.create_timer(self.timer_period, self.timer_callback)
+        self.timer = self.create_timer(self.timer_period, self.publish_command_msg)
 
-    def timer_callback(self):
+    def publish_command_msg(self):
         """
         주기적으로 JointState 퍼블리시.
         -> 사용자가 마지막으로 설정한 position이 계속 송신됨.
