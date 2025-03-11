@@ -17,11 +17,11 @@ class EndEffectorController(Node):
         # Create a JointState message
         self.joint_state = JointState()
         self.joint_state.name = [
-            "shoulder_pan_joint", 
-            "shoulder_lift_joint", 
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
             "elbow_joint",
-            "wrist_1_joint", 
-            "wrist_2_joint", 
+            "wrist_1_joint",
+            "wrist_2_joint",
             "wrist_3_joint"
         ]
         self.num_joints = len(self.joint_state.name)
@@ -65,10 +65,10 @@ class EndEffectorController(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    controller = EndEffectorController()
+    node = EndEffectorController()
 
     # rclpy.spin을 별도 쓰레드로 실행
-    spin_thread = threading.Thread(target=rclpy.spin, args=(controller,), daemon=True)
+    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
 
     try:
@@ -83,7 +83,7 @@ def main(args=None):
                 # deg -> rad
                 joint_angles_rad = np.radians(joint_angles_deg)
                 # 설정
-                controller.move_to_pose(joint_angles_rad.tolist())
+                node.move_to_pose(joint_angles_rad.tolist())
 
             except ValueError:
                 print("유효하지 않은 입력입니다. (예: 30 45 0 -90 0 45)")
@@ -91,12 +91,14 @@ def main(args=None):
                 break
 
     except KeyboardInterrupt:
-        print("\nExiting...")
+        # print("\nExiting...")
+        node.get_logger().info("Keyboard Interrupt (SIGINT)")
 
     # 정리
-    controller.destroy_node()
-    rclpy.shutdown()
-    spin_thread.join()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+        spin_thread.join()
 
 
 if __name__ == '__main__':
