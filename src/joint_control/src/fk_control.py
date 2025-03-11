@@ -82,6 +82,7 @@ def main(args=None):
 
                 # deg -> rad
                 joint_angles_rad = np.radians(joint_angles_deg)
+                joint_angles_rad = np.round(joint_angles_rad, 4)
                 # 설정
                 node.move_to_pose(joint_angles_rad.tolist())
 
@@ -98,7 +99,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-        spin_thread.join()
+        # spin_thread.join() # spin_thread가 daemon이므로 join()은 필요 없음 (Is is right??)
 
 
 if __name__ == '__main__':
