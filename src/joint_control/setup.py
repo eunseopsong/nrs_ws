@@ -25,8 +25,9 @@ setup(
         'console_scripts': [
             'basic_control = src.basic_control:main',
             'fk_control = src.fk_control:main',
-            'fk_effort_control = src.fk_effort_control:main',
+            'pub_effort = src.pub_effort:main',
             'ik_control = src.ik_control:main',
+            'sub_joint_states = src.sub_joint_states:main'
         ],
     },
 )

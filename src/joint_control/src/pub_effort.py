@@ -10,7 +10,7 @@ import threading
 
 class FKEffortController(Node):
     def __init__(self):
-        super().__init__('fk_effort_controller')
+        super().__init__('pub_effort_controller')
         
         # 퍼블리셔: PD 제어로 계산된 토크 명령 발행
         self.effort_pub = self.create_publisher(JointState, '/isaac_joint_commands', 10)

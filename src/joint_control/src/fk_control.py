@@ -3,7 +3,6 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile
-from std_msgs.msg import String
 
 from sensor_msgs.msg import JointState
 import numpy as np
@@ -85,9 +84,9 @@ def main(args=None):
                     print("6개의 실수를 입력하세요.")
                     continue
 
-                # deg -> rad
-                joint_angles_rad = np.radians(joint_angles_deg)
-                joint_angles_rad = np.round(joint_angles_rad, 4)
+                # deg -> rad & 소수점 4자리까지 반올림
+                joint_angles_rad = np.round(np.radians(joint_angles_deg), 4)
+
                 # 설정
                 node.move_to_pose(joint_angles_rad.tolist())
 
