@@ -10,7 +10,7 @@ import numpy as np
 import threading
 from scipy.spatial.transform import Rotation as R  # scipy 사용
 
-# backup 2025.03.10
+# backup 2025.03.11
 
 class EndEffectorController(Node):
 
