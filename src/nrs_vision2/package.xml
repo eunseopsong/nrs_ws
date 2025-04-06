@@ -3,15 +3,22 @@
 <package format="3">
   <name>nrs_vision2</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>MoveIt2와 Isaac Sim 연동 예제를 위한 패키지입니다.</description>
   <maintainer email="lexondms1@g.skku.edu">eunseop</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
+  <!-- Build tool -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- Dependencies -->
   <depend>rclcpp</depend>
   <depend>moveit_ros_planning_interface</depend>
+  <depend>geometry_msgs</depend>
 
+  <!-- Optional: 추가 메시지 패키지 (필요 시) -->
+  <!-- <depend>trajectory_msgs</depend> -->
+
+  <!-- Test dependencies -->
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
