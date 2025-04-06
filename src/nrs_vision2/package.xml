@@ -1,26 +1,18 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>nrs_vision2</name>
   <version>0.0.0</version>
-  <description>MoveIt2와 Isaac Sim 연동 예제를 위한 패키지입니다.</description>
-  <maintainer email="lexondms1@g.skku.edu">eunseop</maintainer>
+  <description>Example package for Isaac Sim + Rviz integration</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- Build tool -->
+  <!-- 빌드 도구 의존성 -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- Dependencies -->
-  <depend>rclcpp</depend>
-  <depend>moveit_ros_planning_interface</depend>
-  <depend>geometry_msgs</depend>
-
-  <!-- Optional: 추가 메시지 패키지 (필요 시) -->
-  <!-- <depend>trajectory_msgs</depend> -->
-
-  <!-- Test dependencies -->
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <!-- 실행 시 필요한 의존성 (예시) -->
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>roslaunch</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
