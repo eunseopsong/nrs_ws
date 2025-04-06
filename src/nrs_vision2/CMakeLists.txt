@@ -11,17 +11,15 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 
 # 예시 실행 파일(토커, 리스너)
-add_executable(talker src/talker.cpp)
-ament_target_dependencies(talker rclcpp std_msgs)
+# add_executable(talker src/talker.cpp)
+# ament_target_dependencies(talker rclcpp std_msgs)
 
-add_executable(listener src/listener.cpp)
-ament_target_dependencies(listener rclcpp std_msgs)
+# add_executable(listener src/listener.cpp)
+# ament_target_dependencies(listener rclcpp std_msgs)
 
 # 빌드된 실행 파일 설치
 install(
   TARGETS
-    talker
-    listener
   DESTINATION lib/${PROJECT_NAME}
 )
 
