@@ -4,6 +4,8 @@
   <xacro:include filename="$(find ur5_robot_description)/urdf/ur5_joint_limited_robot.urdf.xacro" />
   <xacro:include filename="$(find ur5_robot_description)/urdf/robotiq/robotiq_85_gripper.urdf.xacro" />
 
+  <!-- Let's try convert this ur5 urdf to iur10 -->
+
   <!-- Robotiq Coupler -->
   <!--  + Height added by the coupler: 8mm -->
   <!--  + Reference frame: at the middle (4mm) -->
