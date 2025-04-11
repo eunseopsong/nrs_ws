@@ -4,8 +4,6 @@
   <xacro:include filename="$(find ur5_robot_description)/urdf/ur5_joint_limited_robot.urdf.xacro" />
   <xacro:include filename="$(find ur5_robot_description)/urdf/robotiq/robotiq_85_gripper.urdf.xacro" />
 
-  <!-- Let's try convert this ur5 urdf to ur10 (2025.04.11) -->
-
   <!-- Robotiq Coupler -->
   <!--  + Height added by the coupler: 8mm -->
   <!--  + Reference frame: at the middle (4mm) -->
@@ -37,7 +35,7 @@
     <mu1>0.9</mu1>
     <mu2>0.9</mu2>
   </gazebo>
-
+  
   <!-- Equivalent to the OpenRAVE manipulator denso_robotiq_85_gripper -->
   <!-- <link name="denso_robotiq_85_gripper" /> -->
   <!-- <joint name="manipulator_dummy_joint" type="fixed"> -->
@@ -45,10 +43,10 @@
   <!--   <parent link="robotiq_coupler"/> -->
   <!--   <child link="denso_robotiq_85_gripper"/> -->
   <!-- </joint> -->
-
+  
   <!-- Attach the robotiq 85 gripper -->
-  <!-- <xacro:robotiq_85_gripper prefix="" parent="robotiq_coupler" >
+  <xacro:robotiq_85_gripper prefix="" parent="robotiq_coupler" >
     <origin xyz="0 0 0.004" rpy="0 ${-pi/2} ${pi}"/>
-  </xacro:robotiq_85_gripper>  -->
-
+  </xacro:robotiq_85_gripper> 
+  
 </robot>
