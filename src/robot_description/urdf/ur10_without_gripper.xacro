@@ -6,6 +6,7 @@
   
   <!-- try convert ur5 to ur10 -->
   <!-- 01: delete gripper-->
+  <!-- 02: success that launch 'ros2 launch ur10_moveit_config demo.launch.py' (2025.04.12) -->
 
 
   <!-- Robotiq Coupler -->
