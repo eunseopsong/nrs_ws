@@ -7,7 +7,7 @@ moveit_setup_assistant_config:
   package_settings:
     author_name: eunseopsong
     author_email: lexondms1@g.skku.edu
-    generated_timestamp: 1744445522
+    generated_timestamp: 1744543515
   control_xacro:
     command:
       - position
