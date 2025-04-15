@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'nrs_planning_node = nrs_planning2.planning_node:main',
         ],
     },
 )
