@@ -1,5 +1,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <vector>
+#include <array>
+#include <iostream>
 
 using std::placeholders::_1;
 using Float64MultiArray = std_msgs::msg::Float64MultiArray;
@@ -10,69 +13,61 @@ public:
   WaypointPublisher()
   : Node("waypoint_publisher")
   {
-    pub_ = this->create_publisher<Float64MultiArray>("waypoints", 10);
+    // 퍼블리셔 생성
+    pub_ = create_publisher<Float64MultiArray>("waypoints", 10);
 
-    // 사용자로부터 waypoint 한 번만 입력받기
-    read_waypoints();
+    // 사용자로부터 입력받기
+    get_user_input();
 
-    // 1Hz 타이머로 계속 publish
-    timer_ = this->create_wall_timer(
+    // 타이머 생성 (1Hz)
+    timer_ = create_wall_timer(
       std::chrono::seconds(1),
-      std::bind(&WaypointPublisher::on_timer, this)
-    );
+      std::bind(&WaypointPublisher::on_timer, this));
 
     RCLCPP_INFO(this->get_logger(), "WaypointPublisher ready, publishing at 1Hz.");
   }
 
 private:
-  void read_waypoints()
+  void get_user_input()
   {
-    int count;
+    int num;
     std::cout << "생성할 waypoint의 개수를 입력하세요: ";
-    std::cin >> count;
+    std::cin >> num;
 
-    coords_.clear();
-    for (int i = 1; i <= count; ++i) {
-      double x, y, z;
-      std::cout << "Waypoint " << i << " (x y z): ";
-      std::cin >> x >> y >> z;
-      coords_.push_back(x);
-      coords_.push_back(y);
-      coords_.push_back(z);
+    for (int i = 0; i < num; ++i) {
+      std::array<double, 3> pt;
+      std::cout << "Waypoint " << i+1 << " (x y z): ";
+      std::cin >> pt[0] >> pt[1] >> pt[2];
+      waypoints_.push_back(pt);
     }
 
-    RCLCPP_INFO(
-      this->get_logger(),
-      "입력된 waypoints: [%s]",
-      vector_to_string(coords_).c_str()
-    );
+    RCLCPP_INFO(this->get_logger(), "입력된 waypoints:");
+    for (const auto& pt : waypoints_) {
+      RCLCPP_INFO(this->get_logger(), "[%.1f, %.1f, %.1f]", pt[0], pt[1], pt[2]);
+    }
   }
 
   void on_timer()
   {
-    auto msg = Float64MultiArray();
-    msg.data = coords_;
-    pub_->publish(msg);
-  }
-
-  static std::string vector_to_string(const std::vector<double>& v)
-  {
-    std::ostringstream ss;
-    for (size_t i = 0; i < v.size(); ++i) {
-      ss << v[i] << (i + 1 < v.size() ? ", " : "");
+    Float64MultiArray msg;
+    for (const auto& pt : waypoints_) {
+      msg.data.push_back(pt[0]);
+      msg.data.push_back(pt[1]);
+      msg.data.push_back(pt[2]);
     }
-    return ss.str();
+    pub_->publish(msg);
   }
 
   rclcpp::Publisher<Float64MultiArray>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
-  std::vector<double> coords_;
+  std::vector<std::array<double, 3>> waypoints_;
 };
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<WaypointPublisher>());
+  auto node = std::make_shared<WaypointPublisher>();
+  rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;
 }
