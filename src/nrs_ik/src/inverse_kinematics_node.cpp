@@ -26,18 +26,19 @@ public:
 private:
   void ik_callback(const Float64MultiArray::SharedPtr msg)
   {
-    if (msg->data.size() < 3) return;
+    if (msg->data.size() < 6) return;
     double x = msg->data[0];
     double y = msg->data[1];
     double z = msg->data[2];
+    double roll = msg->data[3];
+    double pitch = msg->data[4];
+    double yaw = msg->data[5];
 
     // Geometric IK for UR-10 (simplified 6 DOF planar assumption)
     // This is **not** a full implementation. Replace with full UR-10 geometry if needed.
 
     std::vector<double> joint_angles(6, 0.0);
 
-    // Example: planar inverse kinematics (just for demonstration)
-    // Replace with actual UR10 geometry-based solution
     double L1 = 0.1273;  // link lengths based on URDF
     double L2 = 0.612;
     double L3 = 0.5723;
@@ -59,18 +60,26 @@ private:
     double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(L3 * sin(q3), L2 + L3 * cos(q3));
 
-    // Assign to joint_angles
+    // Basic approximation: keep wrist orientation aligned with RPY = 0
+    double q4 = 0.0;
+    double q5 = 0.0;
+    double q6 = 0.0;
+
     joint_angles[0] = q1;
     joint_angles[1] = q2;
     joint_angles[2] = q3;
-    // rest angles set to 0 (you can set desired wrist orientation if needed)
+    joint_angles[3] = q4;
+    joint_angles[4] = q5;
+    joint_angles[5] = q6;
 
     Float64MultiArray out;
     out.data = joint_angles;
     pub_->publish(out);
 
-    RCLCPP_INFO(get_logger(), "Published joint angles: [%.3f, %.3f, %.3f]",
-                q1, q2, q3);
+    RCLCPP_INFO(get_logger(),
+      "Published joint angles: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+      joint_angles[0], joint_angles[1], joint_angles[2],
+      joint_angles[3], joint_angles[4], joint_angles[5]);
   }
 
   rclcpp::Subscription<Float64MultiArray>::SharedPtr sub_;
