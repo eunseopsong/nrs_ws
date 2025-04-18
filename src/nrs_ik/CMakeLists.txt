@@ -17,9 +17,13 @@ include_directories(include)
 add_executable(inverse_kinematics_node src/inverse_kinematics_node.cpp)
 ament_target_dependencies(inverse_kinematics_node rclcpp std_msgs sensor_msgs)
 
+add_executable(forward_kinematics_node src/forward_kinematics_node.cpp)
+ament_target_dependencies(forward_kinematics_node rclcpp std_msgs)
+
 # 설치 설정
 install(TARGETS
   inverse_kinematics_node
+  forward_kinematics_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
