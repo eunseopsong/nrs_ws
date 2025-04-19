@@ -10,15 +10,23 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)  # ✅ Eigen3 추가
 
-include_directories(include)
+include_directories(
+  include
+  ${EIGEN3_INCLUDE_DIRS}       # ✅ Eigen include 경로 추가
+)
 
 # 노드 실행 파일
 add_executable(inverse_kinematics_node src/inverse_kinematics_node.cpp)
-ament_target_dependencies(inverse_kinematics_node rclcpp std_msgs sensor_msgs)
+ament_target_dependencies(inverse_kinematics_node
+  rclcpp std_msgs sensor_msgs
+)
 
 add_executable(forward_kinematics_node src/forward_kinematics_node.cpp)
-ament_target_dependencies(forward_kinematics_node rclcpp std_msgs)
+ament_target_dependencies(forward_kinematics_node
+  rclcpp std_msgs
+)
 
 # 설치 설정
 install(TARGETS
