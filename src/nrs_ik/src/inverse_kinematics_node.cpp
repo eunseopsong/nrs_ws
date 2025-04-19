@@ -5,6 +5,8 @@
 #include <cmath>
 #include <vector>
 
+// way -> pla -> ik -> isaac sim (success: 2025.04.19)
+
 using std::placeholders::_1;
 using std::vector;
 using Eigen::Matrix4d;
