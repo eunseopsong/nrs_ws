@@ -62,6 +62,7 @@ private:
         double y = y0*(1-t) + y1*t;
         double z = z0*(1-t) + z1*t;
         trajectory_.push_back({x, y, z, 0.0, 0.0, 0.0});
+        // trajectory_.push_back({x, y, z, 0.7854, 0.7854, 0.7854});
       }
     }
 
