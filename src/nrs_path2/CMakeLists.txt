@@ -13,6 +13,26 @@ find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
+
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Waypoint.msg"
+  "msg/Waypoints.msg"
+  "srv/Command.srv"
+)
+
+install(DIRECTORY urdf/
+  DESTINATION share/${PROJECT_NAME}/urdf
+)
+
+install(DIRECTORY mesh/
+  DESTINATION share/${PROJECT_NAME}/mesh
+)
+
+
+
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -24,5 +44,6 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
 
 ament_package()
