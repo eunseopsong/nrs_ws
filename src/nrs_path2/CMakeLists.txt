@@ -30,6 +30,10 @@ install(DIRECTORY mesh/
   DESTINATION share/${PROJECT_NAME}/mesh
 )
 
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+
 
 
 
