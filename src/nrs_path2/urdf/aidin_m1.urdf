@@ -1,0 +1,1028 @@
+<?xml version="1.0"?>
+<robot name="aidin_m1">
+
+  <material name="black">
+    <color rgba="0.0 0.0 0.0 1.0"/>
+  </material>
+  <material name="blue">
+    <color rgba="0.0 0.0 0.8 1.0"/>
+  </material>
+  <material name="green">
+    <color rgba="0.0 0.8 0.0 1.0"/>
+  </material>
+  <material name="grey">
+    <color rgba="0.2 0.2 0.2 1.0"/>
+  </material>
+  <material name="silver">
+    <color rgba="0.913725490196 0.913725490196 0.847058823529 1.0"/>
+  </material>
+  <material name="orange">
+    <color rgba="1.0 0.423529411765 0.0392156862745 1.0"/>
+  </material>
+  <material name="brown">
+    <color rgba="0.870588235294 0.811764705882 0.764705882353 1.0"/>
+  </material>
+  <material name="red">
+    <color rgba="0.8 0.0 0.0 1.0"/>
+  </material>
+  <material name="yellow">
+    <color rgba="0.8 0.8 0.0 1.0"/>
+  </material>
+  <material name="white">
+    <color rgba="1.0 1.0 1.0 1.0"/>
+  </material>
+
+<!--////////////////////////////////   Odom    ////////////////////////////////-->
+
+  <!-- <link name="odom" /> -->
+
+  <!-- "world" link -->
+  <!-- <link name="world"/>
+  <gazebo reference="world">
+    <static>true</static>
+  </gazebo>
+
+  <joint name="odom_joint" type="fixed">
+    <child link="body"/>
+    <parent link="world"/>
+    <origin xyz="0 0 0.550" rpy="0 0 0"/>
+  </joint> -->
+
+  <!-- <joint name="fixed_base" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="world"/>
+    <child link="base"/>
+  </joint> -->
+
+  <!-- <link name="world"/> -->
+  <link name="base">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <box size="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <joint name="floating_base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="base"/>
+    <child link="body"/>
+  </joint>
+
+<!--////////////////////////////////   Body    ////////////////////////////////-->
+
+  <link name="body">
+    <inertial>
+      <mass value="10"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.15296333" ixy="0" ixz="0" iyy="0.07221333" iyz="0" izz="0.1474166667"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.200 0.370 0.160"/>
+      </geometry>
+    </collision>
+
+    <visual name="body_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- <box size="0.200 0.370 0.160"/> -->
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/Body_vis.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="darkgrey"/>
+    </visual>
+  </link>
+  <gazebo reference="body">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
+
+<!--//////////////////// for IMU Measurement (Force sensing) ///////////////////////-->
+
+  <link name="upper_body">
+    <inertial>
+      <mass value="0.5"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.200 0.370 0.010"/>
+      </geometry>
+    </collision>
+
+    <visual name="uppper_body_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.200 0.370 0.010"/>
+      </geometry>
+      <material name="darkgrey"/>
+    </visual>
+  </link>
+  <gazebo reference="upper_body">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
+
+  <joint name="upper_body_J" type="revolute">
+    <parent link="base"/>
+    <child link="upper_body"/>
+    <origin xyz="0 0 0.085" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.0001" effort="1" velocity="0.0001"/>
+  </joint>
+
+  <!--//// RF ////-->
+  <link name="RF_rod_cell">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+    </collision>
+
+    <visual name="RF_rod_cell_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <gazebo reference="RF_rod_cell">
+    <material>Gazebo/Red</material>
+  </gazebo>
+
+  <joint name="RFJ_rod_cell" type="revolute">
+    <parent link="upper_body"/>
+    <child link="RF_rod_cell"/>
+    <origin xyz="0.075 -0.050 0.0075" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.0001" effort="1" velocity="0.0001"/>
+  </joint>
+
+  <!--//// LF ////-->
+  <link name="LF_rod_cell">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+    </collision>
+
+    <visual name="LF_rod_cell_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <gazebo reference="LF_rod_cell">
+    <material>Gazebo/Red</material>
+  </gazebo>
+
+  <joint name="LFJ_rod_cell" type="revolute">
+    <parent link="upper_body"/>
+    <child link="LF_rod_cell"/>
+    <origin xyz="0.075 0.050 0.0075" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.0001" effort="1" velocity="0.0001"/>
+  </joint>
+
+  <!--//// LB ////-->
+  <link name="LB_rod_cell">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+    </collision>
+
+    <visual name="LB_rod_cell_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <gazebo reference="LB_rod_cell">
+    <material>Gazebo/Red</material>
+  </gazebo>
+
+  <joint name="LBJ_rod_cell" type="revolute">
+    <parent link="upper_body"/>
+    <child link="LB_rod_cell"/>
+    <origin xyz="-0.075 0.050 0.0075" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.0001" effort="1" velocity="0.0001"/>
+  </joint>
+
+  <!--//// RB ////-->
+  <link name="RB_rod_cell">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+    </collision>
+
+    <visual name="RB_rod_cell_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0050" radius="0.005"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <gazebo reference="RB_rod_cell">
+    <material>Gazebo/Red</material>
+  </gazebo>
+
+  <joint name="RBJ_rod_cell" type="revolute">
+    <parent link="upper_body"/>
+    <child link="RB_rod_cell"/>
+    <origin xyz="-0.075 -0.050 0.0075" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.0001" effort="1" velocity="0.0001"/>
+  </joint>
+
+  <!--//// upper_box ////-->
+  <link name="upper_box">
+    <inertial>
+      <mass value="0.2"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.190 0.120 0.010"/>
+      </geometry>
+    </collision>
+
+    <visual name="uppper_box_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.190 0.120 0.010"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
+  <gazebo reference="upper_box">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+  <joint name="upper_box_J" type="revolute">
+    <parent link="upper_body"/>
+    <child link="upper_box"/>
+    <origin xyz="0 0 0.015" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.0001" effort="1" velocity="0.0001"/>
+  </joint>
+
+  <!--//// object ////-->
+
+  <link name="object">
+    <inertial>
+      <mass value="1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.004" ixy="0" ixz="0" iyy="0.004" iyz="0" izz="0.004"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0.130" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.050 0.050 0.050"/>
+      </geometry>
+    </collision>
+
+    <visual name="object_visual">
+      <origin xyz="0 0 0.130" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.050 0.050 0.050"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
+  <gazebo reference="object">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+  <joint name="object_J" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="base"/>
+    <child link="object"/>
+  </joint>
+
+<!--//////////////////////////////// RF LINKS /////////////////////////////////-->
+
+  <link name="RF_scap">
+    <inertial>
+      <mass value="2.739"/>
+      <origin xyz="-0.002 0 -0.031" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+      <inertia ixx="0.018386717" ixy="-0.000009042" ixz="-0.000004977" iyy="0.020489644" iyz="-0.000009312" izz="0.008551259"/>
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.140 0.140 0.230"/>
+      </geometry>
+    </collision>
+
+    <visual name="RF_scap_vis_cover1">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- <cylinder length="0.0760" radius="0.0730"/> -->
+        <!-- <mesh filename="file://$(find aidin_m1)/meshes/actuator.stl"/>  ////fail,,//// -->
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/RF_scap_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.140 0.140 0.230"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="RF_scap">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="RF_hip">
+    <inertial>
+      <mass value="0.615"/>
+      <origin xyz="0.063 0.014 0.002" rpy="0 0 0"/>
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000769544" ixy="-0.000269033" ixz="-0.000074609" iyy="0.007987559" iyz="-0.000017663" izz="0.008526217"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.125 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.250 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="RF_hip_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/RF_hip_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="RF_hip">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="RF_knee">
+    <inertial>
+      <mass value="0.343"/>
+      <origin xyz="0.077 0.002 0" rpy="0 0 0"/>
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000092851" ixy="0.000016513" ixz="-0.000000007" iyy="0.004330285" iyz="0.000000016" izz="0.004412529"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.145 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.230 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="RF_knee_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/RF_knee_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="RF_knee">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+<link name="RF_foot">
+  <inertial>
+    <mass value="0"/>
+    <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+  </inertial>
+
+  <collision name="RF_foot_col1">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <sphere radius="0.025"/>
+    </geometry>
+  </collision>
+
+  <visual name="RF_foot_vis_cover">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/feet.stl" scale="0.001 0.001 0.001"/>
+      <!-- <sphere radius="0.0250"/> -->
+    </geometry>
+    <material name="black"/>
+  </visual>
+</link>
+<gazebo reference="RF_foot">
+  <mu1>0.6</mu1>
+  <mu2>0.6</mu2>
+  <self_collide>1</self_collide>
+  <material>Gazebo/Black</material>
+  <kp value="1000000.0"/>
+  <kd value="1.0"/>
+</gazebo>
+
+<!--//////////////////////////////// RF JOINTS ////////////////////////////////-->
+
+  <joint name="RFJ_scap" type="revolute">
+    <parent link="body"/>
+    <child link="RF_scap"/>
+    <origin xyz="0.255 -0.120 0" rpy="-1.57079 0 -1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57089" upper="1.57089" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="RFJ_hip" type="revolute">
+    <parent link="RF_scap"/>
+    <child link="RF_hip"/>
+    <origin xyz="0.095 0 0" rpy="-1.57079  1.57079 -1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="RFJ_knee" type="revolute">
+    <parent link="RF_hip"/>
+    <child link="RF_knee"/>
+    <origin xyz="0.250 0 0" rpy="0 0 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <!-- <joint name="RFJ_foot" type="fixed" dont_collapse="true"> -->
+  <joint name="RFJ_foot" type="fixed">
+    <parent link="RF_knee"/>
+    <child link="RF_foot"/>
+    <origin xyz="0.250 -0.010 0.002" rpy="-1.57089 0 -1.57089"/>
+  </joint>
+
+<!--//////////////////////////////// LF LINKS /////////////////////////////////-->
+
+  <link name="LF_scap">
+    <inertial>
+      <mass value="2.739"/>
+      <origin xyz="-0.002 0 -0.031" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+      <inertia ixx="0.018386717" ixy="-0.000009042" ixz="-0.000004977" iyy="0.020489644" iyz="-0.000009312" izz="0.008551259"/>
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.140 0.140 0.230"/>
+      </geometry>
+    </collision>
+
+    <visual name="LF_scap_vis_cover1">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LF_scap_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.140 0.140 0.230"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="LF_scap">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="LF_hip">
+    <inertial>
+      <mass value="0.615"/>
+      <origin xyz="0.063 0.014 0.002" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000769544" ixy="-0.000269033" ixz="-0.000074609" iyy="0.007987559" iyz="-0.000017663" izz="0.008526217"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.125 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.250 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="LF_hip_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LF_hip_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="LF_hip">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="LF_knee">
+    <inertial>
+      <mass value="0.343"/>
+      <origin xyz="0.077 0.002 0" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000092851" ixy="0.000016513" ixz="-0.000000007" iyy="0.004330285" iyz="0.000000016" izz="0.004412529"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.145 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.230 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="LF_knee_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LF_knee_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="LF_knee">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="LF_foot">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+
+    <collision name="LF_foot_col1">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <sphere radius="0.025"/>
+    </geometry>
+  </collision>
+
+    <visual name="LF_foot_vis_cover">
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/feet.stl" scale="0.001 0.001 0.001"/>
+        <!-- <sphere radius="0.0250"/> -->
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <gazebo reference="LF_foot">
+    <mu1>0.6</mu1>
+    <mu2>0.6</mu2>
+    <self_collide>1</self_collide>
+    <material>Gazebo/Black</material>
+    <kp value="1000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+
+<!--//////////////////////////////// LF JOINTS ////////////////////////////////-->
+
+  <joint name="LFJ_scap" type="revolute">
+    <parent link="body"/>
+    <child link="LF_scap"/>
+    <origin xyz="0.255 0.120 0" rpy="1.57079 0 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57089" upper="1.57089" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="LFJ_hip" type="revolute">
+    <parent link="LF_scap"/>
+    <child link="LF_hip"/>
+    <origin xyz="0.095 0 0" rpy="-1.57079 1.57079 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="LFJ_knee" type="revolute">
+    <parent link="LF_hip"/>
+    <child link="LF_knee"/>
+    <origin xyz="0.250 0 0" rpy="0 0 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <!-- <joint name="LFJ_foot" type="fixed" dont_collapse="true"> -->
+  <joint name="LFJ_foot" type="fixed" dont_collapse="true">
+    <parent link="LF_knee"/>
+    <child link="LF_foot"/>
+    <origin xyz="0.250 -0.010 0.002" rpy="-1.57089 0 -1.57089"/>
+  </joint>
+
+<!--//////////////////////////////// LB LINKS /////////////////////////////////-->
+
+  <link name="LB_scap">
+    <inertial>
+      <mass value="2.739"/>
+      <origin xyz="-0.002 0 -0.031" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+      <inertia ixx="0.018386717" ixy="-0.000009042" ixz="-0.000004977" iyy="0.020489644" iyz="-0.000009312" izz="0.008551259"/>
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.140 0.140 0.230"/>
+      </geometry>
+    </collision>
+
+    <visual name="LB_scap_vis_cover1">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LB_scap_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.140 0.140 0.230"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="LB_scap">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="LB_hip">
+    <inertial>
+      <mass value="0.615"/>
+      <origin xyz="0.063 0.014 0.002" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000769544" ixy="-0.000269033" ixz="-0.000074609" iyy="0.007987559" iyz="-0.000017663" izz="0.008526217"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.125 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.250 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="LB_hip_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LF_hip_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="LB_hip">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="LB_knee">
+    <inertial>
+      <mass value="0.343"/>
+      <origin xyz="0.077 0.002 0" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000092851" ixy="0.000016513" ixz="-0.000000007" iyy="0.004330285" iyz="0.000000016" izz="0.004412529"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.145 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.230 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="LB_knee_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LF_knee_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="LB_knee">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="LB_foot">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+
+    <collision name="LB_foot_col1">
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.025"/>
+      </geometry>
+    </collision>
+
+    <visual name="LB_foot_vis_cover">
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/feet.stl" scale="0.001 0.001 0.001"/>
+        <!-- <sphere radius="0.0250"/> -->
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <gazebo reference="LB_foot">
+    <mu1>0.6</mu1>
+    <mu2>0.6</mu2>
+    <self_collide>1</self_collide>
+    <material>Gazebo/Black</material>
+    <kp value="1000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+
+<!--//////////////////////////////// LB JOINTS ////////////////////////////////-->
+
+  <joint name="LBJ_scap" type="revolute">
+    <parent link="body"/>
+    <child link="LB_scap"/>
+    <origin xyz="-0.255 0.120 0" rpy="1.57079 0 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57089" upper="1.57089" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="LBJ_hip" type="revolute">
+    <parent link="LB_scap"/>
+    <child link="LB_hip"/>
+    <origin xyz="0.095 0 0" rpy="-1.559 1.57079 1.58259"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="LBJ_knee" type="revolute">
+    <parent link="LB_hip"/>
+    <child link="LB_knee"/>
+    <origin xyz="0.250 0 0" rpy="0 0 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <!-- <joint name="LBJ_foot" type="fixed" dont_collapse="true"> -->
+  <joint name="LBJ_foot" type="fixed">
+    <parent link="LB_knee"/>
+    <child link="LB_foot"/>
+    <origin xyz="0.250 -0.010 0.002" rpy="-1.57089 0 -1.57089"/>
+  </joint>
+
+<!--//////////////////////////////// RB LINKS /////////////////////////////////-->
+
+  <link name="RB_scap">
+    <inertial>
+      <mass value="2.739"/>
+      <origin xyz="-0.002 0 -0.031" rpy="0 0 0"/>
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+      <inertia ixx="0.018386717" ixy="-0.000009042" ixz="-0.000004977" iyy="0.020489644" iyz="-0.000009312" izz="0.008551259"/>
+      <!-- <inertia ixx="0.73716790" ixy="0.130721360" ixz="0" iyy="0.431162858" iyz="0" izz="0.477083568"/> -->
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.140 0.140 0.230"/>
+      </geometry>
+    </collision>
+
+    <visual name="RB_scap_vis_cover1">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/RB_scap_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.140 0.140 0.230"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="RB_scap">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="RB_hip">
+    <inertial>
+      <mass value="0.615"/>
+      <origin xyz="0.063 0.014 0.002" rpy="0 0 0"/>
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/> -->
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000769544" ixy="-0.000269033" ixz="-0.000074609" iyy="0.007987559" iyz="-0.000017663" izz="0.008526217"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.125 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.250 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="RB_hip_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/RF_hip_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="RB_hip">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="RB_knee">
+    <inertial>
+      <mass value="0.343"/>
+      <origin xyz="0.077 0.002 0" rpy="0 0 0"/>
+      <!-- <inertia ixx="0.001541527" ixy="0.000007051" ixz="-0.000001356" iyy="0.001938779" iyz="0.000000659" izz="0.001547151"/> -->
+      <inertia ixx="0.000092851" ixy="0.000016513" ixz="-0.000000007" iyy="0.004330285" iyz="0.000000016" izz="0.004412529"/>
+    </inertial>
+
+    <collision>
+      <origin xyz="0.145 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.230 0.030 0.030"/>
+      </geometry>
+    </collision>
+
+    <visual name="RB_knee_vis_cover">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/LF_knee_vis.stl" scale="0.001 0.001 0.001"/>
+        <!-- <box size="0.250 0.050 0.050"/> -->
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <gazebo reference="RB_knee">
+    <material>Gazebo/White</material>
+  </gazebo>
+
+  <link name="RB_foot">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+
+    <collision name="RB_foot_col1">
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.025"/>
+      </geometry>
+    </collision>
+
+    <visual name="RB_foot_vis_cover">
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="/home/eunseop/dev_ws/src/aidin_m1/meshes/feet.stl" scale="0.001 0.001 0.001"/>
+        <!-- <sphere radius="0.0250"/> -->
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <gazebo reference="RB_foot">
+    <mu1>0.6</mu1>
+    <mu2>0.6</mu2>
+    <self_collide>1</self_collide>
+    <material>Gazebo/Black</material>
+    <kp value="1000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+
+<!--//////////////////////////////// RB JOINTS ////////////////////////////////-->
+
+  <joint name="RBJ_scap" type="revolute">
+    <parent link="body"/>
+    <child link="RB_scap"/>
+    <origin xyz="-0.255 -0.120   0" rpy="-1.57079 0 -1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57089" upper="1.57089" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="RBJ_hip" type="revolute">
+    <parent link="RB_scap"/>
+    <child link="RB_hip"/>
+    <origin xyz="0.095 0 0" rpy="-1.58259 1.57079 -1.58259"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <joint name="RBJ_knee" type="revolute">
+    <parent link="RB_hip"/>
+    <child link="RB_knee"/>
+    <origin xyz="0.250 0 0" rpy="0 0 1.57079"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="200.0" velocity="9"/>
+    <dynamics damping="3" friction="0.2"/>
+  </joint>
+
+  <!-- <joint name="RBJ_foot" type="fixed" dont_collapse="true"> -->
+  <joint name="RBJ_foot" type="fixed">
+    <parent link="RB_knee"/>
+    <child link="RB_foot"/>
+    <origin xyz="0.250 -0.010 0.002" rpy="-1.57089 0 -1.57089"/>
+  </joint>
+
+<!--//////////////////////////////// Sensor - Lidar //////////////////////////////////-->
+
+<!--//////////////////////////////// Sensor - Camera ////////////////////////////////-->
+<!-- camera names -->
+<!--
+
+                              __1/2__
+1. camera_upper               |     |
+2. camera_lower               |     |
+3. camera_left              3 |     | 5
+4. camera_back                |     |
+5. camera_right               |_____|
+                                 4
+-->
+
+<!--/////////////////////////////// Camera Upper //////////////////////////////////-->
+
+<!--/////////////////////////////// Camera Lower //////////////////////////////////-->
+
+<!--/////////////////////////////// Camera Left //////////////////////////////////-->
+
+<!--/////////////////////////////// Camera Back //////////////////////////////////-->
+
+<!--/////////////////////////////// Camera Right //////////////////////////////////-->
+
+
+
+<!--//////////////////////////////// Aidin_m1 Plugin ////////////////////////////////-->
+
+  <gazebo>
+    <plugin name="aidin_m1_plugin" filename="libaidin_m1_plugin.so">
+      <update_rate>1000</update_rate> <!--Number of times per second a plugin information is taken within Gazebo. (1000times/sec)-->
+
+      <!-- necessary? -->
+      <!-- <joint_name>odom_joint</joint_name> -->
+
+      <joint_name>RFJ_scap</joint_name>
+      <joint_name>RFJ_hip</joint_name>
+      <joint_name>RFJ_knee</joint_name>
+
+      <joint_name>LFJ_scap</joint_name>
+      <joint_name>LFJ_hip</joint_name>
+      <joint_name>LFJ_knee</joint_name>
+
+      <joint_name>LBJ_scap</joint_name>
+      <joint_name>LBJ_hip</joint_name>
+      <joint_name>LBJ_knee</joint_name>
+
+      <joint_name>RBJ_scap</joint_name>
+      <joint_name>RBJ_hip</joint_name>
+      <joint_name>RBJ_knee</joint_name>
+
+    </plugin>
+  </gazebo>
+
+</robot>

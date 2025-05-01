@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ur_description</name>
+  <version>1.0.0</version>
+  <description>UR10e URDF model</description>
+  <maintainer email="eunseop@example.com">Eunseop</maintainer>
+  <license>MIT</license>
+  <build_type>ament_cmake</build_type>
+</package>
+
