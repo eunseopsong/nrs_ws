@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot name="ur10e_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <!-- Include the UR10 robot description -->
-  <xacro:include filename="$(find nrs_path)/urdf/ur10e.xacro" />
+  <xacro:include filename="$(find nrs_path2)/urdf/ur10e.xacro" />
   <!-- Define the testbed link -->
   <link name="testbed">
     <visual>
@@ -33,7 +33,7 @@
   <link name="UR10e_roboworld_tooltip_m">
     <visual>
       <geometry>
-        <mesh filename="package://nrs_path/mesh/UR10e_roboworld_tooltip_m.stl" />
+        <mesh filename="package://nrs_path2/mesh/UR10e_roboworld_tooltip_m.stl" />
       </geometry>
       <material name="tooltip_gray">
         <color rgba="0.5 0.5 0.5 1.0" />
@@ -41,7 +41,7 @@
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://nrs_path/mesh/UR10e_roboworld_tooltip_m.stl" />
+        <mesh filename="package://nrs_path2/mesh/UR10e_roboworld_tooltip_m.stl" />
       </geometry>
       <material name="tooltip_gray">
         <color rgba="0.5 0.5 0.5 1.0" />
@@ -53,7 +53,7 @@
   <link name="workpiece">
     <visual>
       <geometry>
-        <mesh filename="package://nrs_path/mesh/workpiece.stl" />
+        <mesh filename="package://nrs_path2/mesh/workpiece.stl" />
       </geometry>
       <material name="light_blue">
         <color rgba="0.57 0.81 0.92 0.5" />
@@ -61,7 +61,7 @@
     </visual>
     <!-- <collision>
       <geometry>
-        <mesh filename="package://nrs_path/mesh/fenda_wrap.stl" />
+        <mesh filename="package://nrs_path2/mesh/fenda_wrap.stl" />
       </geometry>
       <material name="light_blue">
         <color rgba="0.57 0.81 0.92 0.5" />
