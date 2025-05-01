@@ -23,6 +23,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 # find_package(eigen_conversions REQUIRED)
+find_package(Eigen3 REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 
@@ -68,6 +69,96 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 
 
+####################################
+##### catkin 패키지 설정 -> ROS2 #####
+####################################
+ament_export_dependencies(
+  rclcpp
+  std_msgs
+  sensor_msgs
+  image_transport
+  cv_bridge
+  image_geometry
+  VTK
+  PCL
+  OpenCV
+  CGAL
+  geometry_msgs
+)
+
+ament_export_include_directories(
+  include
+)
+ament_export_dependencies(rosidl_default_runtime)
+
+
+###################################
+## include 디렉토리 설정 ## (nrs_path 그대로 사용; 나중에 문제 생기면 수정)
+###################################
+include_directories(
+  include
+  /usr/local/include
+  ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+  ${VTK_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+  ${CGAL_INCLUDE_DIRS}
+  ${MPFR_INCLUDE_DIR}
+  ${realsense2_INCLUDE_DIR}
+  ${YAML_CPP_INCLUDE_DIRS}
+)
+
+link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
+
+###################################
+## 빌드 설정 (ROS 2 스타일) ##
+###################################
+
+add_executable(path_projection src/path_projection.cpp)
+
+# ROS 2 및 외부 의존성 설정
+ament_target_dependencies(path_projection
+  rclcpp
+  # rclcpp_action
+  # std_msgs
+  # sensor_msgs
+  geometry_msgs
+  # visualization_msgs
+  # tf2
+  # tf2_ros
+  # tf2_geometry_msgs
+  # image_transport
+  # image_geometry
+  # cv_bridge
+  # pcl_msgs
+  # pcl_conversions
+  # pluginlib
+  # moveit_ros_planning_interface
+  # realsense2
+)
+
+# 외부 라이브러리 직접 링크
+# target_link_libraries(path_projection
+#   ${PCL_LIBRARIES}
+#   ${OpenCV_LIBS}
+#   ${CGAL_LIBRARIES}
+#   ${YAML_CPP_LIBRARIES}
+# )
+
+# (선택) include 디렉토리 직접 추가 시
+# target_include_directories(path_projection PUBLIC
+#   include
+#   /usr/local/include
+#   ${EIGEN3_INCLUDE_DIRS}
+#   ${VTK_INCLUDE_DIRS}
+#   ${PCL_INCLUDE_DIRS}
+#   ${OpenCV_INCLUDE_DIRS}
+#   ${CGAL_INCLUDE_DIRS}
+#   ${MPFR_INCLUDE_DIR}
+#   ${realsense2_INCLUDE_DIR}
+#   ${YAML_CPP_INCLUDE_DIRS}
+# )
 
 
 
@@ -86,24 +177,7 @@ install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
-###################################
-## include 디렉토리 설정 ##
-###################################
-include_directories(
-  include
-  /usr/local/include
-  ${catkin_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIRS}
-  ${VTK_INCLUDE_DIRS}
-  ${PCL_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
-  ${CGAL_INCLUDE_DIRS}
-  ${MPFR_INCLUDE_DIR}
-  ${realsense2_INCLUDE_DIR}
-  ${YAML_CPP_INCLUDE_DIRS}
-)
 
-link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
 
 
 
