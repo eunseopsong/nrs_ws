@@ -1,7 +1,13 @@
-#include <ros/ros.h>
-#include <geometry_msgs/Point.h>
-#include <geometry_msgs/PointStamped.h>
-#include <geometry_msgs/Vector3.h>
+#include <rclcpp/rclcpp.hpp> // #include <ros/ros.h>
+
+#include "geometry_msgs/msg/point.hpp"
+#include "geometry_msgs/msg/point_stamped.hpp"
+#include "geometry_msgs/msg/vector3.hpp"
+
+// #include <geometry_msgs/Point.h>
+// #include <geometry_msgs/PointStamped.h>
+// #include <geometry_msgs/Vector3.h>
+
 #include <nrs_path/Waypoint.h>
 #include <nrs_path/Waypoints.h>
 #include <std_srvs/Empty.h>
@@ -850,12 +856,60 @@ nrs_path::Waypoints convertToWaypoints(const std::vector<geometry_msgs::Point> &
 }
 
 void clearFile(const std::string &file_path)
-{
-    // 파일을 "truncate" 모드로 열어서 내용 제거
-    std::ofstream file(file_path, std::ofstream::trunc);
-    if (file.is_open())
-    {
-
+{Finished <<< ur [0.05s]                
+    --- stderr: nrs_path2                           
+    ** WARNING ** io features related to pcap will be disabled
+    ** WARNING ** io features related to png will be disabled
+    CMake Warning (dev) at CMakeLists.txt:55 (find_package):
+      Policy CMP0074 is not set: find_package uses <PackageName>_ROOT variables.
+      Run "cmake --help-policy CMP0074" for policy details.  Use the cmake_policy
+      command to set the policy and suppress this warning.
+    
+      CMake variable PCL_ROOT is set to:
+    
+        /usr
+    
+      For compatibility, CMake is ignoring the variable.
+    This warning is for project developers.  Use -Wno-dev to suppress it.
+    
+    CMake Warning at /usr/lib/x86_64-linux-gnu/cmake/CGAL/CGALConfig.cmake:92 (message):
+      CGAL_DATA_DIR cannot be deduced, set the variable CGAL_DATA_DIR to set the
+      default value of CGAL::data_file_path()
+    Call Stack (most recent call first):
+      CMakeLists.txt:57 (find_package)
+    
+    
+    CMake Warning at /usr/lib/x86_64-linux-gnu/cmake/CGAL/CGAL_enable_end_of_configuration_hook.cmake:99 (message):
+      =======================================================================
+    
+      CGAL performance notice:
+    
+      The variable CMAKE_BUILD_TYPE is set to "".  For performance reasons, you
+      should set CMAKE_BUILD_TYPE to "Release".
+    
+      Set CGAL_DO_NOT_WARN_ABOUT_CMAKE_BUILD_TYPE to TRUE if you want to disable
+      this warning.
+    
+      =======================================================================
+    Call Stack (most recent call first):
+      CMakeLists.txt:9223372036854775807 (CGAL_run_at_the_end_of_configuration)
+    
+    
+    /home/eunseop/nrs_ws/src/nrs_path2/src/path_projection.cpp:1:10: fatal error: ros/ros.h: No such file or directory
+        1 | #include <ros/ros.h>
+          |          ^~~~~~~~~~~
+    compilation terminated.
+    gmake[2]: *** [CMakeFiles/path_projection.dir/build.make:76: CMakeFiles/path_projection.dir/src/path_projection.cpp.o] Error 1
+    gmake[1]: *** [CMakeFiles/Makefile2:592: CMakeFiles/path_projection.dir/all] Error 2
+    gmake[1]: *** Waiting for unfinished jobs....
+    gmake: *** [Makefile:146: all] Error 2
+    ---
+    Failed   <<< nrs_path2 [2.49s, exited with code 2]
+                                      
+    Summary: 11 packages finished [2.93s]
+      1 package failed: nrs_path2
+      1 package had stderr output: nrs_path2
+    
         file.close();
     }
     else
