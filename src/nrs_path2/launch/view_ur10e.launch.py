@@ -135,6 +135,9 @@ def generate_launch_description():
     rviz_config_file = PathJoinSubstitution(
         [FindPackageShare(description_package), "rviz", "view_robot.rviz"]
     )
+    # rviz_config_file = PathJoinSubstitution(
+    #     [FindPackageShare("nrs_path2"), "rviz", "view_ur10e.rviz"]
+    # )
 
     joint_state_publisher_node = Node(
         package="joint_state_publisher_gui",
