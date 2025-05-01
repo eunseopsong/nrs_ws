@@ -57,16 +57,22 @@ find_package(OpenCV REQUIRED)
 find_package(CGAL REQUIRED)
 
 
-
-
-
-
-
+## 서비스 파일 추가
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Waypoint.msg"
   "msg/Waypoints.msg"
   "srv/Command.srv"
+  DEPENDENCIES
+  geometry_msgs
+  std_msgs
 )
+
+
+
+
+
+
+
 
 install(DIRECTORY urdf/
   DESTINATION share/${PROJECT_NAME}/urdf
