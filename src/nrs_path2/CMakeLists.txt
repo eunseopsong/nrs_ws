@@ -17,18 +17,16 @@ find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
-
 find_package(std_srvs REQUIRED)
-
 
 # about TF and Eigen
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-# find_package(eigen_conversions REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
+# find_package(eigen_conversions REQUIRED)
 
 # about Image
 find_package(image_transport REQUIRED)
@@ -119,13 +117,13 @@ include_directories(
 link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
 
 ###################################
-## 빌드 설정 (ROS 2 스타일) ##
+###### 빌드 설정 (ROS 2 스타일) ######
 ###################################
 
+## dependencies about path_projection.cpp (start)
 add_executable(path_projection src/path_projection.cpp)
 
 target_include_directories(path_projection PUBLIC
-  # $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   ${CGAL_INCLUDE_DIRS}
 )
 
@@ -161,20 +159,12 @@ target_link_libraries(path_projection
   ${OpenCV_LIBS}
   ${YAML_CPP_LIBRARIES}
 )
+## dependencies about path_projection.cpp (end)
 
-# (선택) include 디렉토리 직접 추가 시
-# target_include_directories(path_projection PUBLIC
-#   include
-#   /usr/local/include
-#   ${EIGEN3_INCLUDE_DIRS}
-#   ${VTK_INCLUDE_DIRS}
-#   ${PCL_INCLUDE_DIRS}
-#   ${OpenCV_INCLUDE_DIRS}
-#   ${CGAL_INCLUDE_DIRS}
-#   ${MPFR_INCLUDE_DIR}
-#   ${realsense2_INCLUDE_DIR}
-#   ${YAML_CPP_INCLUDE_DIRS}
-# )
+
+
+
+
 
 
 
