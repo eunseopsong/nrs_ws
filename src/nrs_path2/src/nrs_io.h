@@ -1,7 +1,7 @@
 #ifndef NRS_IO_H
 #define NRS_IO_H
 
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>  // #include <ros/ros.h>
 #include <std_srvs/Empty.h>
 #include <std_msgs/String.h>
 #include <sensor_msgs/PointCloud2.h>
