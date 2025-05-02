@@ -110,57 +110,6 @@ include_directories(
 
 link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
 
-###################################
-###### 빌드 설정 (ROS 2 스타일) ######
-###################################
-
-####### dependencies about path_projection.cpp (start) #######
-
-
-# add_executable(path_projection src/path_projection.cpp)
-
-# target_include_directories(path_projection PUBLIC
-#   ${CGAL_INCLUDE_DIRS}
-# )
-
-# # ROS 2 및 외부 의존성 설정
-# ament_target_dependencies(path_projection
-#   rclcpp
-#   rclcpp_action
-#   geometry_msgs
-#   std_srvs
-#   std_msgs
-#   sensor_msgs
-#   cv_bridge
-
-
-#   visualization_msgs
-#   tf2
-#   tf2_ros
-#   tf2_geometry_msgs
-#   image_transport
-#   image_geometry
-#   pcl_msgs
-#   pcl_conversions
-#   pluginlib
-#   moveit_ros_planning_interface
-#   realsense2
-# )
-
-# # 외부 라이브러리 직접 링크
-# target_link_libraries(path_projection
-#   ${CGAL_LIBRARIES}
-
-#   ${PCL_LIBRARIES}
-#   ${OpenCV_LIBS}
-#   ${YAML_CPP_LIBRARIES}
-# )
-
-
-###### dependencies about path_projection.cpp (end) #######
-
-
-
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
