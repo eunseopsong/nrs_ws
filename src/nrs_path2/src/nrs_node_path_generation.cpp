@@ -1,8 +1,12 @@
 #include "nrs_callback.h"
 #include "nrs_visualization.h"
-#include <ros/ros.h>
-#include <geometry_msgs/PointStamped.h>
-#include <sensor_msgs/PointCloud2.h>
+
+#include <rclcpp/rclcpp.hpp>                    // #include <ros/ros.h>
+
+#include "geometry_msgs/msg/point_stamped.hpp"  // #include <geometry_msgs/PointStamped.h>
+
+#include <sensor_msgs/msg/point_cloud2.hpp>     // #include <sensor_msgs/PointCloud2.h>
+
 #include <fstream>
 #include <iostream>
 
@@ -109,7 +113,7 @@ int main(int argc, char **argv)
     ros::Subscriber geodesic_path_sub = nh.subscribe("/geodesic_path", 1000, geodesicPathCallback);
     // ===== 경로 시각화 (Visualization) 설정 =====
     ros::Subscriber vis_waypoints_sub = nh.subscribe("interpolated_waypoints", 10, &nrs_visualization::waypointsCallback, &visualizer);
-    
+
     ros::Subscriber vis_clicked_point_sub = nh.subscribe("/clicked_point", 10, &nrs_visualization::visualizeClickedPoint, &visualizer);
 
 

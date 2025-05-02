@@ -5,8 +5,9 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <ros/ros.h>
-#include <std_msgs/String.h>
+
+#include <rclcpp/rclcpp.hpp>            // #include <ros/ros.h>
+#include "geometry_msgs/msg/point.hpp"  // #include <geometry_msgs/Point.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include "nrs_geodesic.h"

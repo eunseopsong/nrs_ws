@@ -38,36 +38,34 @@ file(GLOB_RECURSE sources
 "./*.cpp"
 )
 
-# By doing this, we can add all the source files in the current directory and its subdirectories to the executable
-# add_executable(nrs_node_path_generation ${sources})
+# nrs_node_path_generation dependencies setting
+add_executable(nrs_node_path_generation ${sources}) # By doing this, we can add all the source files in the current directory and its subdirectories to the executable
 
-#######################################################
-#### nrs_node_path_generation dependencies setting ####
-#######################################################
+# add_executable(nrs_node_path_generation
+# nrs_node_path_generation.cpp
 
-add_executable(nrs_node_path_generation
-# src/nrs_node_path_generation.cpp
+# nrs_geodesic.cpp
+# nrs_vec3d.cpp
+# nrs_interpolation.cpp
+# nrs_visualization.cpp
 
-# src/nrs_geodesic.cpp
-# src/nrs_vec3d.cpp
-# src/nrs_interpolation.cpp
-# src/nrs_visualization.cpp
-
-
-nrs_callback.cpp    # header file Immigration is done
-# nrs_io.cpp          # header file Immigration is done
+# nrs_callback.cpp
+# nrs_io.cpp
 # nrs_math.cpp
-)
+# )
 
 # It is not needed if you don't use the include directory
-target_include_directories(nrs_node_path_generation PUBLIC include)
+# target_include_directories(nrs_node_path_generation PUBLIC include)
 
 ament_target_dependencies(nrs_node_path_generation ${COMMON_DEPENDENCIES}) # add_dependencies(nrs_node_path_generation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
+# nrs_node_visualization dependencies setting
+add_executable(nrs_node_visualization ${sources})
+ament_target_dependencies(nrs_node_visualization ${COMMON_DEPENDENCIES})
 
-
-
-
+# nrs_node_simulation dependencies setting
+# add_executable(nrs_node_simulation ${sources})
+# ament_target_dependencies(nrs_node_simulation ${COMMON_DEPENDENCIES})
 
 
 
