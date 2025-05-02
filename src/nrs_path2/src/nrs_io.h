@@ -1,20 +1,21 @@
+// header file Immigration (from ROS1 to ROS2; the right one is the older one): Done
 #ifndef NRS_IO_H
 #define NRS_IO_H
 
-#include <rclcpp/rclcpp.hpp>  // #include <ros/ros.h>
-#include <std_srvs/Empty.h>
-#include <std_msgs/String.h>
-#include <sensor_msgs/PointCloud2.h>
+#include <rclcpp/rclcpp.hpp>                // #include <ros/ros.h>
+#include "std_srvs/srv/empty.hpp"           // #include <std_srvs/Empty.h>
+#include "std_msgs/msg/string.hpp"          // #include <std_msgs/String.h>
+#include <sensor_msgs/msg/point_cloud2.hpp> // #include <sensor_msgs/PointCloud2.h>
 
 #include <boost/filesystem.hpp>
 #include <string>
 #include <yaml-cpp/yaml.h>
 
+// Fail: How to include Waypoint and Waypoints
+// #include <nrs_path/Waypoint.h>
+// #include <nrs_path/Waypoints.h>
 
-#include <nrs_path/Waypoint.h>
-#include <nrs_path/Waypoints.h>
-
-
+// Success (CGAL)
 #include <CGAL/Point_set_3.h>
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/remove_outliers.h>
@@ -27,7 +28,6 @@
 #include <CGAL/Bbox_3.h>
 #include <CGAL/IO/read_points.h>
 #include <CGAL/IO/write_points.h>
-
 
 #include "nrs_math.h"
 

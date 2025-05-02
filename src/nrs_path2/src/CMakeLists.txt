@@ -12,13 +12,6 @@ include_directories(
   ${YAML_CPP_INCLUDE_DIRS}
 )
 
-file(GLOB_RECURSE sources
-"./*.cpp"
-)
-
-# By doing this, we can add all the source files in the current directory and its subdirectories to the executable
-# add_executable(nrs_node_path_generation ${sources})
-
 set(COMMON_DEPENDENCIES
   rclcpp
   rclcpp_action
@@ -26,8 +19,8 @@ set(COMMON_DEPENDENCIES
   std_srvs
   std_msgs
   sensor_msgs
-  cv_bridge
 
+  cv_bridge
   visualization_msgs
   tf2
   tf2_ros
@@ -41,10 +34,16 @@ set(COMMON_DEPENDENCIES
   realsense2
 )
 
+file(GLOB_RECURSE sources
+"./*.cpp"
+)
 
+# By doing this, we can add all the source files in the current directory and its subdirectories to the executable
+# add_executable(nrs_node_path_generation ${sources})
 
-
-
+#######################################################
+#### nrs_node_path_generation dependencies setting ####
+#######################################################
 
 add_executable(nrs_node_path_generation
 # src/nrs_node_path_generation.cpp
@@ -55,37 +54,21 @@ add_executable(nrs_node_path_generation
 # src/nrs_visualization.cpp
 
 
-nrs_callback.cpp
-# src/nrs_io.cpp
-# src/nrs_math.cpp
+nrs_callback.cpp    # header file Immigration is done
+# nrs_io.cpp          # header file Immigration is done
+# nrs_math.cpp
 )
 
-target_include_directories(nrs_node_path_generation PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
+# It is not needed if you don't use the include directory
+target_include_directories(nrs_node_path_generation PUBLIC include)
 
-ament_target_dependencies(nrs_node_path_generation
-  rclcpp
-#   rclcpp_action
-#   geometry_msgs
-#   std_srvs
-#   std_msgs
-#   sensor_msgs
-#   cv_bridge
+ament_target_dependencies(nrs_node_path_generation ${COMMON_DEPENDENCIES}) # add_dependencies(nrs_node_path_generation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 
-#   visualization_msgs
-#   tf2
-#   tf2_ros
-#   tf2_geometry_msgs
-#   image_transport
-#   image_geometry
-#   pcl_msgs
-#   pcl_conversions
-#   pluginlib
-#   moveit_ros_planning_interface
-#   realsense2
-)
 
-# add_dependencies(nrs_node_path_generation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+
+
+
+
+
