@@ -14,6 +14,24 @@ include_directories(
 
 file(GLOB_RECURSE sources
 "./*.cpp"
-# "FSM_States/*.cpp"
-# "Controllers/convexMPC/*.cpp"
 )
+
+# By doing this, we can add all the source files in the current directory and its subdirectories to the executable
+# add_executable(nrs_node_path_generation ${sources})
+
+
+add_executable(nrs_node_path_generation
+# src/nrs_node_path_generation.cpp
+
+# src/nrs_geodesic.cpp
+# src/nrs_vec3d.cpp
+# src/nrs_interpolation.cpp
+# src/nrs_visualization.cpp
+
+
+nrs_callback.cpp
+# src/nrs_io.cpp
+# src/nrs_math.cpp
+)
+
+# add_dependencies(nrs_node_path_generation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
