@@ -114,7 +114,9 @@ link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
 ###### 빌드 설정 (ROS 2 스타일) ######
 ###################################
 
-####### dependencies about path_projection.cpp (start)
+####### dependencies about path_projection.cpp (start) #######
+
+
 # add_executable(path_projection src/path_projection.cpp)
 
 # target_include_directories(path_projection PUBLIC
@@ -153,7 +155,9 @@ link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
 #   ${OpenCV_LIBS}
 #   ${YAML_CPP_LIBRARIES}
 # )
-###### dependencies about path_projection.cpp (end)
+
+
+###### dependencies about path_projection.cpp (end) #######
 
 
 

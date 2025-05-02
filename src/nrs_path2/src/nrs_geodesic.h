@@ -5,16 +5,20 @@
 #include <Eigen/Dense>
 #include <vector>
 #include <tuple>
-#include <ros/ros.h>
-#include <geometry_msgs/Point.h>
-#include <std_msgs/Float64MultiArray.h>
-#include <nrs_path/Waypoints.h>
+#include <rclcpp/rclcpp.hpp>                    // #include <ros/ros.h>
+#include "geometry_msgs/msg/point.hpp"          // #include <geometry_msgs/Point.h>
+
+#include <std_msgs/msg/float64_multi_array.hpp> // #include <std_msgs/Float64MultiArray.h>
+
+// Fail: How to include Waypoint and Waypoints
+// #include <nrs_path/Waypoints.h>
+
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Surface_mesh.h>
 #include <CGAL/Surface_mesh_shortest_path.h>
 #include <CGAL/Polygon_mesh_processing/locate.h>
 #include <CGAL/Polygon_mesh_processing/compute_normal.h>
-#include <CGAL/IO/STL_reader.h>
+#include <CGAL/IO/STL.h> // #include <CGAL/IO/STL_reader.h> (STL_reader.h is included in STL.h)
 
 // Vec3d 등 필요한 헤더
 #include "nrs_vec3d.h"

@@ -1,15 +1,22 @@
 #ifndef NRS_VISUALIZATION_H
 #define NRS_VISUALIZATION_H
 
-#include <ros/ros.h>
-#include <nrs_path/Waypoints.h>
-#include <visualization_msgs/Marker.h>
-#include <geometry_msgs/Point.h>
-#include <geometry_msgs/PointStamped.h>
-#include <std_msgs/String.h>
-#include <std_msgs/Float64MultiArray.h>
+#include <rclcpp/rclcpp.hpp>                    // #include <ros/ros.h>
+
+// Fail: How to include Waypoint and Waypoints
+// #include <nrs_path/Waypoints.h>
+
+#include <visualization_msgs/msg/marker.hpp>    // #include <visualization_msgs/Marker.h>
+
+#include "geometry_msgs/msg/point.hpp"          // #include <geometry_msgs/Point.h>
+#include "geometry_msgs/msg/point_stamped.hpp"  // #include <geometry_msgs/PointStamped.h>
+
+#include "std_msgs/msg/string.hpp"              // #include <std_msgs/String.h>
+#include <std_msgs/msg/float64_multi_array.hpp> // #include <std_msgs/Float64MultiArray.h>
+
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
+
 #include <vector>
 #include <array>
 #include <string>
