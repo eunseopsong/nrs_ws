@@ -699,15 +699,15 @@ bool nrs_geodesic::locate_face_and_point(const Kernel::Point_3 &point, face_desc
     return true;
 }
 
-nrs_path::Waypoints
+nrs_path2::Waypoints
 nrs_geodesic::ConvertToWaypoints(const std::vector<geometry_msgs::Point> &points)
 {
     // 기존 convertToWaypoints 내용을 이곳으로 이동
-    nrs_path::Waypoints waypoints;
+    nrs_path2::Waypoints waypoints;
 
     for (const auto &point : points)
     {
-        nrs_path::Waypoint waypoint_msg;
+        nrs_path2::Waypoint waypoint_msg;
         waypoint_msg.x = point.x;
         waypoint_msg.y = point.y;
         waypoint_msg.z = point.z;
@@ -723,7 +723,7 @@ nrs_geodesic::ConvertToWaypoints(const std::vector<geometry_msgs::Point> &points
     return waypoints;
 }
 
-nrs_path::Waypoints
+nrs_path2::Waypoints
 nrs_geodesic::GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -753,10 +753,10 @@ nrs_geodesic::GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &p
         shortest_paths->remove_all_source_points();
     }
 
-    nrs_path::Waypoints path_points;
+    nrs_path2::Waypoints path_points;
     for (size_t i = 0; i < complete_path.size(); i++)
     {
-        nrs_path::Waypoint wp;
+        nrs_path2::Waypoint wp;
         wp.x = complete_path[i].x();
         wp.y = complete_path[i].y();
         wp.z = complete_path[i].z();
@@ -775,7 +775,7 @@ nrs_geodesic::GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &p
     return path_points;
 }
 
-nrs_path::Waypoints
+nrs_path2::Waypoints
 nrs_geodesic::GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -802,10 +802,10 @@ nrs_geodesic::GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, co
             i += 1;
         }
     }
-    nrs_path::Waypoints path_points;
+    nrs_path2::Waypoints path_points;
     for (size_t i = 0; i < hermite_spline.size(); i++)
     {
-        nrs_path::Waypoint wp;
+        nrs_path2::Waypoint wp;
         wp.x = hermite_spline[i].x();
         wp.y = hermite_spline[i].y();
         wp.z = hermite_spline[i].z();
