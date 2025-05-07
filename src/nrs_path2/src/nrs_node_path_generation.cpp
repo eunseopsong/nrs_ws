@@ -14,7 +14,8 @@
 
 // 전역 변수들
 nrs_callback callback_handler;
-std::string mesh_file_path = "/home/nrs/catkin_ws/src/nrs_path/mesh/workpiece.stl";
+std::string mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
+// std::string mesh_file_path = "/home/nrs/catkin_ws/src/nrs_path2/mesh/workpiece.stl";
 Triangle_mesh tmesh;
 
 // [생성] : "/clicked_point" 토픽 콜백 함수 (경로 생성)
@@ -54,7 +55,7 @@ void clickedPointCallback(const geometry_msgs::PointStamped::ConstPtr &msg)
 }
 
 // [보간] : "/geodesic_path" 토픽 콜백 함수 (경로 보간)
-void geodesicPathCallback(const nrs_path::Waypoints::ConstPtr &msg)
+void geodesicPathCallback(const nrs_path2::Waypoints::ConstPtr &msg)
 {
     for (const auto &wp : msg->waypoints)
     {
@@ -73,16 +74,18 @@ int main(int argc, char **argv)
 
     // ===== 경로 생성 (Path Generation) 설정 =====
     callback_handler.mesh_file_path = mesh_file_path;
-    callback_handler.geodesic_waypoints_file_path = "/home/nrs/catkin_ws/src/nrs_path/data/geodesic_waypoints.txt";
-    callback_handler.geodesic_waypoints_pub = nh.advertise<nrs_path::Waypoints>("geodesic_path", 10);
+    callback_handler.geodesic_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt";
+    // callback_handler.geodesic_waypoints_file_path = "/home/nrs/catkin_ws/src/nrs_path2/data/geodesic_waypoints.txt";
+    callback_handler.geodesic_waypoints_pub = nh.advertise<nrs_path2::Waypoints>("geodesic_path", 10);
 
     // ===== 경로 보간 (Path Interpolation) 설정 =====
-    callback_handler.interpolated_waypoints_file_path = "/home/nrs/catkin_ws/src/nrs_path/data/final_waypoints.txt";
+    callback_handler.interpolated_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints.txt";
+    // callback_handler.interpolated_waypoints_file_path = "/home/nrs/catkin_ws/src/nrs_path2/data/final_waypoints.txt";
     callback_handler.desired_interval = 0.00004;
     callback_handler.Fx = 0.0;
     callback_handler.Fy = 0.0;
     callback_handler.Fz = 10.0;
-    callback_handler.interpolated_waypoints_pub = nh.advertise<nrs_path::Waypoints>("interpolated_waypoints", 10);
+    callback_handler.interpolated_waypoints_pub = nh.advertise<nrs_path2::Waypoints>("interpolated_waypoints", 10);
 
     // mesh 파일 로드
     std::ifstream input(mesh_file_path, std::ios::binary);
