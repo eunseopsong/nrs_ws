@@ -36,7 +36,7 @@ public:
 
     // 옵션 1: Approach Segment
     // 시작점의 노멀(start_normal)을 기준으로 동일 orientation 적용
-    nrs_path::Waypoints setToolVectorApproach(
+    nrs_path2::Waypoints setToolVectorApproach(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
         const Kernel::Vector_3 &start_normal);
@@ -44,7 +44,7 @@ public:
     //--------------------------------------------------------
     // 옵션 2: Original Segment
     // 각 점마다 해당 점이 속한 face를 찾아, 바리센트릭 좌표를 이용해 보간된 노멀로 orientation 계산
-    nrs_path::Waypoints setToolVectorOriginal(
+    nrs_path2::Waypoints setToolVectorOriginal(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
         double Fx, double Fy, double Fz);
@@ -52,7 +52,7 @@ public:
     //--------------------------------------------------------
     // 옵션 3: Retreat Segment
     // 마지막 reference point의 노멀(end_normal)을 기준으로 동일 orientation 적용
-    nrs_path::Waypoints setToolVectorRetreat(
+    nrs_path2::Waypoints setToolVectorRetreat(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
         const Kernel::Vector_3 &end_normal);
@@ -60,21 +60,21 @@ public:
     //--------------------------------------------------------
     // 옵션 4: Home Segment
     // 마지막 reference point의 노멀(end_normal)을 기준으로 계산한 orientation으로 전체 구간에 동일 적용
-    nrs_path::Waypoints setToolVectorHome(
+    nrs_path2::Waypoints setToolVectorHome(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
         const Kernel::Vector_3 &end_normal);
 
     //--------------------------------------------------------
     // 옵션 5: 각 점마다 개별 orientation 계산
-    nrs_path::Waypoints setToolVectorOriginalIncludeVectorSmoothing(
+    nrs_path2::Waypoints setToolVectorOriginalIncludeVectorSmoothing(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
         double Fx, double Fy, double Fz);
 
     //--------------------------------------------------------
     // 최종 wrapper 함수: reference_points로부터 시작/끝 노멀 계산 후 옵션에 따라 헬퍼 호출
-    nrs_path::Waypoints setToolVector(const std::vector<geometry_msgs::Point> &approach_interpolated,
+    nrs_path2::Waypoints setToolVector(const std::vector<geometry_msgs::Point> &approach_interpolated,
                                         const std::vector<geometry_msgs::Point> &original_interpolated,
                                         const std::vector<geometry_msgs::Point> &retreat_interpolated,
                                         const std::vector<geometry_msgs::Point> &home_interpolated,
@@ -97,9 +97,9 @@ public:
     tf2::Quaternion quaternionSlerp(const tf2::Quaternion &q1, const tf2::Quaternion &q2, double t);
 
     // 쿼터니언 기반 보간 함수: 위치는 선형 보간, orientation은 SLERP를 사용하여 보간 후 Waypoints 메시지 생성
-    nrs_path::Waypoints interpolateXYZQF(const nrs_path::Waypoints &input, double desired_interval);
+    nrs_path2::Waypoints interpolateXYZQF(const nrs_path2::Waypoints &input, double desired_interval);
 
-    nrs_path::Waypoints interpolateEnd2End(const nrs_path::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double Fx, double Fy, double Fz);
+    nrs_path2::Waypoints interpolateEnd2End(const nrs_path2::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double Fx, double Fy, double Fz);
 
     Eigen::Vector3d getFaceNormal(const geometry_msgs::Point &ros_point, const Triangle_mesh &mesh);
 };
