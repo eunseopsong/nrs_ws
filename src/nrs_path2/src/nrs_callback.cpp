@@ -48,7 +48,7 @@ bool nrs_callback::straightPathServiceCallback(
     std::ifstream input(mesh_file_path, std::ios::binary);
     Triangle_mesh tmesh;
     n_geodesic.load_stl_file(input, tmesh);
-    
+
     Tree *tree = new Tree(tmesh.faces().begin(), tmesh.faces().end(), tmesh);
     tree->accelerate_distance_queries();
     Surface_mesh_shortest_path *shortest_paths = new Surface_mesh_shortest_path(tmesh);
