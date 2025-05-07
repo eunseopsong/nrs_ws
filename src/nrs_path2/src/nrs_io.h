@@ -1,21 +1,20 @@
-// header file Immigration (from ROS1 to ROS2; the right one is the older one): Done
 #ifndef NRS_IO_H
 #define NRS_IO_H
 
-#include <rclcpp/rclcpp.hpp>                // #include <ros/ros.h>
-#include "std_srvs/srv/empty.hpp"           // #include <std_srvs/Empty.h>
-#include "std_msgs/msg/string.hpp"          // #include <std_msgs/String.h>
-#include <sensor_msgs/msg/point_cloud2.hpp> // #include <sensor_msgs/PointCloud2.h>
+#include <rclcpp/rclcpp.hpp>                // ROS 2 기본 노드 기능
+#include "std_srvs/srv/empty.hpp"           // Empty 서비스
+#include "std_msgs/msg/string.hpp"          // 문자열 메시지
+#include <sensor_msgs/msg/point_cloud2.hpp> // 포인트 클라우드 메시지
 
 #include <boost/filesystem.hpp>
 #include <string>
 #include <yaml-cpp/yaml.h>
 
-// Fail: How to include Waypoint and Waypoints
-// #include <nrs_path/Waypoint.h>
-// #include <nrs_path/Waypoints.h>
+// Waypoint 메시지 타입 (ROS 2)
+// #include "nrs_path/msg/waypoint.hpp"
+// #include "nrs_path/msg/waypoints.hpp"
 
-// Success (CGAL)
+// CGAL 관련
 #include <CGAL/Point_set_3.h>
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/remove_outliers.h>
@@ -33,7 +32,6 @@
 
 namespace fs = boost::filesystem;
 
-
 typedef CGAL::Exact_predicates_inexact_constructions_kernel Kernel;
 typedef Kernel::Point_3 Point_3;
 typedef CGAL::Point_set_3<Point_3> Point_set;
@@ -45,15 +43,17 @@ public:
     std::string file_path_;
     int file_counter = 0;
 
-    // 파일 내용 지우기 함수
+    // 파일 내용 지우기
     void clearFile(const std::string &file_path);
 
-    // Waypoints 파일 저장 함수 구현
-    void saveWaypointsToFile(const nrs_path::Waypoints &final_waypoints,
+    // Waypoints 저장
+    void saveWaypointsToFile(const nrs_path::msg::Waypoints &final_waypoints,
                              const std::string &file_path);
-    
-    void sendFile(const std::string &file_path, rclcpp::Publisher &file_pub);
-    // void sendFile(const std::string &file_path, ros::Publisher &file_pub);
+
+    // 파일 전송 (노드 참조 필요)
+    void sendFile(const std::string &file_path,
+                  const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr &file_pub,
+                  const rclcpp::Node::SharedPtr &node);
 };
 
 #endif // NRS_IO_H
