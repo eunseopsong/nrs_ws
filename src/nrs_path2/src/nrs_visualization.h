@@ -35,7 +35,7 @@ public:
     void init(ros::NodeHandle &nh);
 
     // Callback 함수들
-    void waypointsCallback(const nrs_path::Waypoints::ConstPtr &msg);
+    void waypointsCallback(const nrs_path2::Waypoints::ConstPtr &msg);
     void visualizeClickedPoint(const geometry_msgs::PointStamped::ConstPtr &msg);
     void deleteMarkers();
 
