@@ -24,13 +24,13 @@ public:
     std::string mesh_file_path; // path_planning할 때 사용되는 mesh 파일
 
     ros::Publisher geodesic_waypoints_pub;        // geodesic_Waypoints publish할 때 사용되는 publisher
-    nrs_path::Waypoints waypoints_msg;          // geodesic_waypoints를 publish할 때 사용되는 msg
+    nrs_path2::Waypoints waypoints_msg;          // geodesic_waypoints를 publish할 때 사용되는 msg
     std::vector<Eigen::Vector3d> selected_points; // clicked_point를 전처리해서 path_generation할 때 사용
     std::string geodesic_waypoints_file_path;     // geodesic path를 저장하기 위한 file path
     /*-------------------------------path interpolation-------------------------------*/
 
     ros::Publisher interpolated_waypoints_pub; // interpolated_waypoints publish할 때 사용되는 publisher
-    nrs_path::Waypoints geodesic_path;       // geodesic waypoints를 interpolation하기 위해 사용
+    nrs_path2::Waypoints geodesic_path;       // geodesic waypoints를 interpolation하기 위해 사용
 
     double desired_interval, Fx, Fy, Fz;
     std::string interpolated_waypoints_file_path;

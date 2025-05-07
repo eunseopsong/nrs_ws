@@ -23,7 +23,7 @@ bool nrs_callback::splinePathServiceCallback(
 
     if (selected_points.size() > 2)
     {
-        nrs_path::Waypoints path_points = n_geodesic.GenerateHermiteSplinePath(selected_points, tmesh);
+        nrs_path2::Waypoints path_points = n_geodesic.GenerateHermiteSplinePath(selected_points, tmesh);
         geodesic_waypoints_pub->publish(path_points);
 
         RCLCPP_INFO(node_->get_logger(), "Published Hermite Spline Path with %zu waypoints", path_points.waypoints.size());
@@ -57,7 +57,7 @@ bool nrs_callback::straightPathServiceCallback(
 
     if (selected_points.size() > 1)
     {
-        nrs_path::Waypoints path_points = n_geodesic.GenerateStraightGeodesicPath(selected_points, tmesh);
+        nrs_path2::Waypoints path_points = n_geodesic.GenerateStraightGeodesicPath(selected_points, tmesh);
         geodesic_waypoints_pub->publish(path_points);
 
         RCLCPP_INFO(node_->get_logger(), "Published Geodesic Path with %zu waypoints", path_points.waypoints.size());
@@ -98,7 +98,7 @@ bool nrs_callback::PathInterpolationCallback(
 
     auto start_time_point = std::chrono::high_resolution_clock::now();
 
-    nrs_path::Waypoints final_waypoints = n_interpolation.interpolateEnd2End(geodesic_path, desired_interval, tmesh, Fx, Fy, Fz);
+    nrs_path2::Waypoints final_waypoints = n_interpolation.interpolateEnd2End(geodesic_path, desired_interval, tmesh, Fx, Fy, Fz);
 
     if (final_waypoints.waypoints.empty())
     {
@@ -128,7 +128,7 @@ bool nrs_callback::pathDeleteCallback(
     n_visualization.deleteMarkers();
     selected_points.clear();
     geodesic_path.waypoints.clear();
-    nrs_path::Waypoints empty_waypoints;
+    nrs_path2::Waypoints empty_waypoints;
     interpolated_waypoints_pub->publish(empty_waypoints);
 
     RCLCPP_INFO(node_->get_logger(), "Path deleted via pathDeleteCallback");
