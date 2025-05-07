@@ -51,8 +51,9 @@ public:
     // Waypoints 파일 저장 함수 구현
     void saveWaypointsToFile(const nrs_path::Waypoints &final_waypoints,
                              const std::string &file_path);
-
-    void sendFile(const std::string &file_path, ros::Publisher &file_pub);
+    
+    void sendFile(const std::string &file_path, rclcpp::Publisher &file_pub);
+    // void sendFile(const std::string &file_path, ros::Publisher &file_pub);
 };
 
 #endif // NRS_IO_H
