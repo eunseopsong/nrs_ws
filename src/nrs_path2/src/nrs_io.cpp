@@ -12,7 +12,7 @@ void nrs_io::clearFile(const std::string &file_path)
         file.close();
 }
 
-void nrs_io::saveWaypointsToFile(const nrs_path::msg::Waypoints &final_waypoints,
+void nrs_io::saveWaypointsToFile(const nrs_path2::msg::Waypoints &final_waypoints,
                                  const std::string &file_path)
 {
     std::ofstream file(file_path);
