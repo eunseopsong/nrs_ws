@@ -831,8 +831,7 @@ bool nrs_geodesic::load_stl_file(std::ifstream &input, Triangle_mesh &mesh)
     std::vector<std::array<std::size_t, 3>> triangles;
     if (!CGAL::read_STL(input, points, triangles))
     {
-        RCLCPP_ERROR("Failed to read STL file.");
-        // ROS_ERROR("Failed to read STL file.");
+        ROS_ERROR("Failed to read STL file.");
         return false;
     }
 
@@ -846,12 +845,10 @@ bool nrs_geodesic::load_stl_file(std::ifstream &input, Triangle_mesh &mesh)
     {
         if (mesh.add_face(index_to_vertex[t[0]], index_to_vertex[t[1]], index_to_vertex[t[2]]) == Triangle_mesh::null_face())
         {
-            RCLCPP_ERROR("Failed to add face.");
-            // ROS_ERROR("Failed to add face.");
+            ROS_ERROR("Failed to add face.");
             return false;
         }
     }
-    RCLCPP_INFO("Successfully read STL file.");
-    // ROS_INFO("Successfully read STL file.");
+    ROS_INFO("Successfully read STL file.");
     return true;
 }
