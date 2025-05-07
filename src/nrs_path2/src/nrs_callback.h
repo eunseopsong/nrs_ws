@@ -80,12 +80,12 @@ public:
 //     double desired_interval, Fx, Fy, Fz;
 //     std::string interpolated_waypoints_file_path;
 //   /*-------------------------------path simulation-------------------------------*/
-  
+
 //     bool splinePathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
 //     bool straightPathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
 //     bool PathInterpolationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
 //     bool pathDeleteCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-   
+
 // };
 
 // #endif // NRS_CALLBACK_H
