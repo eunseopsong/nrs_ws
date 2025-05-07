@@ -208,7 +208,7 @@ return waypoints;
 nrs_path2::Waypoints nrs_interpolation::setToolVectorOriginal(
 const std::vector<geometry_msgs::Point> &points,
 const Triangle_mesh &mesh,
-double Fx, double Fy, double Fz)
+double fx, double fy, double fz)
 {
 nrs_path2::Waypoints waypoints;
 for (const auto &point : points)
@@ -253,9 +253,9 @@ wp.qw = q.getW();
 wp.qx = q.getX();
 wp.qy = q.getY();
 wp.qz = q.getZ();
-wp.Fx = Fx;
-wp.Fy = Fy;
-wp.Fz = Fz;
+wp.fx = fx;
+wp.fy = fy;
+wp.fz = fz;
 waypoints.waypoints.push_back(wp);
 }
 return waypoints;
@@ -338,7 +338,7 @@ return waypoints;
 nrs_path2::Waypoints nrs_interpolation::setToolVectorOriginalIncludeVectorSmoothing(
 const std::vector<geometry_msgs::Point> &points,
 const Triangle_mesh &mesh,
-double Fx, double Fy, double Fz)
+double fx, double fy, double fz)
 {
 nrs_path2::Waypoints waypoints;
 for (const auto &point : points)
@@ -385,9 +385,9 @@ wp.qw = q.getW();
 wp.qx = q.getX();
 wp.qy = q.getY();
 wp.qz = q.getZ();
-wp.Fx = Fx;
-wp.Fy = Fy;
-wp.Fz = Fz;
+wp.fx = fx;
+wp.fy = fy;
+wp.fz = fz;
 waypoints.waypoints.push_back(wp);
 }
 return waypoints;
@@ -400,7 +400,7 @@ const std::vector<geometry_msgs::Point> &original_interpolated,
 const std::vector<geometry_msgs::Point> &retreat_interpolated,
 const std::vector<geometry_msgs::Point> &home_interpolated,
 const Triangle_mesh &mesh,
-double Fx, double Fy, double Fz)
+double fx, double fy, double fz)
 {
 // reference_points에서 시작점과 끝점을 결정
 Point_3 start_point(original_interpolated.front().x, original_interpolated.front().y, original_interpolated.front().z);
@@ -413,7 +413,7 @@ Kernel::Vector_3 start_normal = CGAL::Polygon_mesh_processing::compute_face_norm
 Kernel::Vector_3 end_normal = CGAL::Polygon_mesh_processing::compute_face_normal(end_face, mesh);
 
 nrs_path2::Waypoints approach_waypoints = setToolVectorApproach(approach_interpolated, mesh, start_normal);
-nrs_path2::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, Fx, Fy, Fz);
+nrs_path2::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, fx, fy, fz);
 nrs_path2::Waypoints retreat_waypoints = setToolVectorRetreat(retreat_interpolated, mesh, end_normal);
 nrs_path2::Waypoints home_waypoints = setToolVectorHome(home_interpolated, mesh, end_normal);
 
@@ -495,16 +495,16 @@ interp_wp.qw = q_interp.getW();
 interp_wp.qx = q_interp.getX();
 interp_wp.qy = q_interp.getY();
 interp_wp.qz = q_interp.getZ();
-interp_wp.Fx = p0.Fx + t * (p1.Fx - p0.Fx);
-interp_wp.Fy = p0.Fy + t * (p1.Fy - p0.Fy);
-interp_wp.Fz = p0.Fz + t * (p1.Fz - p0.Fz);
+interp_wp.fx = p0.fx + t * (p1.fx - p0.fx);
+interp_wp.fy = p0.fy + t * (p1.fy - p0.fy);
+interp_wp.fz = p0.fz + t * (p1.fz - p0.fz);
 output.waypoints.push_back(interp_wp);
 }
 return output;
 }
 
 nrs_path2::Waypoints nrs_interpolation::interpolateEnd2End(const nrs_path2::Waypoints &original_waypoints, double desired_interval,
-const Triangle_mesh &mesh, double Fx, double Fy, double Fz)
+const Triangle_mesh &mesh, double fx, double fy, double fz)
 {
 std::vector<geometry_msgs::Point> original_points;
 for (const auto &wp : original_waypoints.waypoints)
@@ -525,7 +525,7 @@ std::vector<geometry_msgs::Point> original_interpolated = interpolatePoints(orig
 std::vector<geometry_msgs::Point> retreat_interpolated = interpolatePoints(retreat_segment, 0.001, 2);
 std::vector<geometry_msgs::Point> home_interpolated = interpolatePoints(home_segment, 0.001, 2);
 
-nrs_path2::Waypoints waypointsXYZQ = setToolVector(approach_interpolated, original_interpolated, retreat_interpolated, home_interpolated, mesh, Fx, Fy, Fz);
+nrs_path2::Waypoints waypointsXYZQ = setToolVector(approach_interpolated, original_interpolated, retreat_interpolated, home_interpolated, mesh, fx, fy, fz);
 nrs_path2::Waypoints waypointsXYZQF = interpolateXYZQF(waypointsXYZQ, desired_interval);
 
 return waypointsXYZQF;
