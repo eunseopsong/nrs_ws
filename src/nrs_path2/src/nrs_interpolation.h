@@ -47,7 +47,7 @@ public:
     nrs_path2::Waypoints setToolVectorOriginal(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
-        double Fx, double Fy, double Fz);
+        double fx, double fy, double fz);
 
     //--------------------------------------------------------
     // 옵션 3: Retreat Segment
@@ -70,7 +70,7 @@ public:
     nrs_path2::Waypoints setToolVectorOriginalIncludeVectorSmoothing(
         const std::vector<geometry_msgs::Point> &points,
         const Triangle_mesh &mesh,
-        double Fx, double Fy, double Fz);
+        double fx, double fy, double fz);
 
     //--------------------------------------------------------
     // 최종 wrapper 함수: reference_points로부터 시작/끝 노멀 계산 후 옵션에 따라 헬퍼 호출
@@ -79,7 +79,7 @@ public:
                                         const std::vector<geometry_msgs::Point> &retreat_interpolated,
                                         const std::vector<geometry_msgs::Point> &home_interpolated,
                                         const Triangle_mesh &mesh,
-                                        double Fx, double Fy, double Fz);
+                                        double fx, double fy, double fz);
 
     // 세그먼트(approach, retreat, home 등)를 생성하는 함수
     std::vector<geometry_msgs::Point> generate_segment(std::vector<geometry_msgs::Point> &original_points,
@@ -99,7 +99,7 @@ public:
     // 쿼터니언 기반 보간 함수: 위치는 선형 보간, orientation은 SLERP를 사용하여 보간 후 Waypoints 메시지 생성
     nrs_path2::Waypoints interpolateXYZQF(const nrs_path2::Waypoints &input, double desired_interval);
 
-    nrs_path2::Waypoints interpolateEnd2End(const nrs_path2::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double Fx, double Fy, double Fz);
+    nrs_path2::Waypoints interpolateEnd2End(const nrs_path2::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double fx, double fy, double fz);
 
     Eigen::Vector3d getFaceNormal(const geometry_msgs::Point &ros_point, const Triangle_mesh &mesh);
 };
