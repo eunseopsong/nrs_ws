@@ -64,8 +64,10 @@ void geodesicPathCallback(const nrs_path::Waypoints::ConstPtr &msg)
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "nrs_combined_node");
-    ros::NodeHandle nh;
+    rclcpp::init(argc, argv, "nrs_combined_node");
+    rclcpp::NodeHandle nh;
+    // ros::init(argc, argv, "nrs_combined_node");
+    // ros::NodeHandle nh;
     nrs_visualization visualizer;
     visualizer.init(nh);
 
@@ -92,33 +94,34 @@ int main(int argc, char **argv)
     callback_handler.n_geodesic.load_stl_file(input, tmesh);
 
     // 두 서비스 서버 등록 (spline, straight 경로 생성 서비스)
-    ros::ServiceServer spline_service = nh.advertiseService("spline",
+    // (ros -> rclcpp)
+    rclcpp::ServiceServer spline_service = nh.advertiseService("spline",
                                                             &nrs_callback::splinePathServiceCallback,
                                                             &callback_handler);
-    ros::ServiceServer straight_service = nh.advertiseService("straight",
+    rclcpp::ServiceServer straight_service = nh.advertiseService("straight",
                                                               &nrs_callback::straightPathServiceCallback,
                                                               &callback_handler);
     // 보간 서비스 서버 등록
-    ros::ServiceServer interpolation_service = nh.advertiseService("interpolate",
+    rclcpp::ServiceServer interpolation_service = nh.advertiseService("interpolate",
                                                                    &nrs_callback::PathInterpolationCallback,
                                                                    &callback_handler);
     // 경로 삭제를 위한 서비스 서버 등록 (pathDeleteCallback)
-    ros::ServiceServer path_delete_service = nh.advertiseService("delete",
+    rclcpp::ServiceServer path_delete_service = nh.advertiseService("delete",
                                                                  &nrs_callback::pathDeleteCallback,
                                                                  &callback_handler);
 
     // 클릭된 포인트 수신 구독자 (경로 생성용)
-    ros::Subscriber clicked_point_sub = nh.subscribe("/clicked_point", 1000, clickedPointCallback);
+    rclcpp::Subscriber clicked_point_sub = nh.subscribe("/clicked_point", 1000, clickedPointCallback);
     // "geodesic_path" 토픽 구독 (보간용)
-    ros::Subscriber geodesic_path_sub = nh.subscribe("/geodesic_path", 1000, geodesicPathCallback);
+    rclcpp::Subscriber geodesic_path_sub = nh.subscribe("/geodesic_path", 1000, geodesicPathCallback);
     // ===== 경로 시각화 (Visualization) 설정 =====
-    ros::Subscriber vis_waypoints_sub = nh.subscribe("interpolated_waypoints", 10, &nrs_visualization::waypointsCallback, &visualizer);
+    rclcpp::Subscriber vis_waypoints_sub = nh.subscribe("interpolated_waypoints", 10, &nrs_visualization::waypointsCallback, &visualizer);
 
-    ros::Subscriber vis_clicked_point_sub = nh.subscribe("/clicked_point", 10, &nrs_visualization::visualizeClickedPoint, &visualizer);
+    rclcpp::Subscriber vis_clicked_point_sub = nh.subscribe("/clicked_point", 10, &nrs_visualization::visualizeClickedPoint, &visualizer);
 
+    // ROS_INFO -> RCLCPP_INFO
+    RCLCPP_INFO("Combined nrs node started. Generation, interpolation and visualization functionalities are active.");
 
-    ROS_INFO("Combined nrs node started. Generation, interpolation and visualization functionalities are active.");
-
-    ros::spin();
+    rclcpp::spin();
     return 0;
 }

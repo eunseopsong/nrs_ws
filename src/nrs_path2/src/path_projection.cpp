@@ -79,6 +79,10 @@ double g_time_counter = 0;
 rclcpp::Publisher g_interpolated_waypoints_pub;
 rclcpp::Publisher g_file_pub; // 전역 변수로 subscriber 선언
 rclcpp::Subscriber g_sub;
+// ros::Publisher g_interpolated_waypoints_pub;
+// ros::Publisher g_file_pub; // 전역 변수로 subscriber 선언
+// ros::Subscriber g_sub;
+
 double g_projection_z = 0.5;
 
 
@@ -495,6 +499,10 @@ double g_time_counter = 0;
 rclcpp::Publisher g_interpolated_waypoints_pub;
 rclcpp::Publisher g_file_pub; // 전역 변수로 subscriber 선언
 rclcpp::Subscriber g_sub;
+// ros::Publisher g_interpolated_waypoints_pub;
+// ros::Publisher g_file_pub; // 전역 변수로 subscriber 선언
+// ros::Subscriber g_sub;
+
 double g_projection_z = 0.5;
 
 std::string g_mesh_file_path = "/home/nrs/catkin_ws/src/nrs_path/mesh/workpiece.stl";
@@ -1579,7 +1587,8 @@ nrs_path::Waypoints control_ACCProfiling_RPY(const nrs_path::Waypoints &input_wa
                 << "0.0 0.0 " << force_result[i][1] << "\n";
     }
     outfile.close();
-    ROS_INFO("Control data saved to: %s", output_file_path.c_str());
+    RCLCPP_INFO("Control data saved to: %s", output_file_path.c_str());
+    // ROS_INFO("Control data saved to: %s", output_file_path.c_str());
     return blendedPaths;
 }
 
@@ -1831,6 +1840,7 @@ nrs_path::Waypoints interpolatexyzrpy(const nrs_path::Waypoints &input, double d
     return output;
 }
 void sendFile(const std::string &file_path, rclcpp::Publisher &file_pub)
+// void sendFile(const std::string &file_path, ros::Publisher &file_pub)
 {
     // 파일 열기
     std::ifstream file(file_path);
@@ -2004,6 +2014,8 @@ int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv, "path_projection_node");
     rclcpp::NodeHandle nh;
+    // ros::init(argc, argv, "path_projection_node");
+    // ros::NodeHandle nh;
     // ros::Subscriber clicked_point_sub = nh.subscribe("/clicked_point", 1000, clickedPointCallback);
 
     // 퍼블리셔 전역 변수 초기화
@@ -2012,8 +2024,11 @@ int main(int argc, char **argv)
 
     // 서비스 서버 광고
     rclcpp::ServiceServer service = nh.advertiseService("projection", executePathProjectionCallback);
-    ROS_INFO("Path projection service node ready. Waiting for service calls...");
+    RCLCPP_INFO("Path projection service node ready. Waiting for service calls...");
     rclcpp::spin();
+    // ros::ServiceServer service = nh.advertiseService("projection", executePathProjectionCallback);
+    // ROS_INFO("Path projection service node ready. Waiting for service calls...");
+    // ros::spin();
     return 0;
 }
 
@@ -3151,7 +3166,7 @@ int main(int argc, char **argv)
 
     // 서비스 서버 광고
     rclcpp::ServiceServer service = nh.advertiseService("projection", executePathProjectionCallback);
-    ROS_INFO("Path projection service node ready. Waiting for service calls...");
+    RCLCPP_INFO("Path projection service node ready. Waiting for service calls...");
     rclcpp::spin();
     return 0;
 }
