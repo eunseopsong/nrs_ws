@@ -11,8 +11,8 @@
 #include <yaml-cpp/yaml.h>
 
 // Waypoint 메시지 타입 (ROS 2)
-// #include "nrs_path/msg/waypoint.hpp"
-// #include "nrs_path/msg/waypoints.hpp"
+#include "nrs_path2/msg/waypoint.hpp"
+#include "nrs_path2/msg/waypoints.hpp"
 
 // CGAL 관련
 #include <CGAL/Point_set_3.h>

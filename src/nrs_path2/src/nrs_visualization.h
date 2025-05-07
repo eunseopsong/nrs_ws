@@ -5,6 +5,9 @@
 
 // Fail: How to include Waypoint and Waypoints
 // #include <nrs_path/Waypoints.h>
+// Waypoint 메시지 타입 (ROS 2)
+#include "nrs_path2/msg/waypoint.hpp"
+#include "nrs_path2/msg/waypoints.hpp"
 
 #include <visualization_msgs/msg/marker.hpp>    // #include <visualization_msgs/Marker.h>
 
