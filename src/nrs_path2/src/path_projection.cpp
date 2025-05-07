@@ -3154,19 +3154,43 @@ bool executePathProjectionCallback(std_srvs::Empty::Request &req, std_srvs::Empt
 
 //     callback_handler.selected_points.push_back(projected_point_eigen);
 // }
+
 int main(int argc, char **argv)
 {
-    rclcpp::init(argc, argv, "path_projection_node");
-    rclcpp::NodeHandle nh;
-    // ros::Subscriber clicked_point_sub = nh.subscribe("/clicked_point", 1000, clickedPointCallback);
+    rclcpp::init(argc, argv);
 
-    // 퍼블리셔 전역 변수 초기화
-    g_interpolated_waypoints_pub = nh.advertise<nrs_path::Waypoints>("interpolated_waypoints", 10);
-    g_file_pub = nh.advertise<std_msgs::String>("path_publisher", 10);
+    auto node = std::make_shared<rclcpp::Node>("path_projection_node");
 
-    // 서비스 서버 광고
-    rclcpp::ServiceServer service = nh.advertiseService("projection", executePathProjectionCallback);
-    RCLCPP_INFO("Path projection service node ready. Waiting for service calls...");
-    rclcpp::spin();
+    // 퍼블리셔 초기화
+    g_interpolated_waypoints_pub = node->create_publisher<nrs_path::msg::Waypoints>("interpolated_waypoints", 10);
+    g_file_pub = node->create_publisher<std_msgs::msg::String>("path_publisher", 10);
+
+    // 서비스 서버 등록
+    auto service = node->create_service<std_srvs::srv::Empty>(
+        "projection",
+        &executePathProjectionCallback);
+
+    RCLCPP_INFO(node->get_logger(), "Path projection service node ready. Waiting for service calls...");
+
+    rclcpp::spin(node);
+    rclcpp::shutdown();
     return 0;
 }
+
+
+// int main(int argc, char **argv)
+// {
+//     rclcpp::init(argc, argv, "path_projection_node");
+//     rclcpp::NodeHandle nh;
+//     // ros::Subscriber clicked_point_sub = nh.subscribe("/clicked_point", 1000, clickedPointCallback);
+
+//     // 퍼블리셔 전역 변수 초기화
+//     g_interpolated_waypoints_pub = nh.advertise<nrs_path::Waypoints>("interpolated_waypoints", 10);
+//     g_file_pub = nh.advertise<std_msgs::String>("path_publisher", 10);
+
+//     // 서비스 서버 광고
+//     rclcpp::ServiceServer service = nh.advertiseService("projection", executePathProjectionCallback);
+//     RCLCPP_INFO("Path projection service node ready. Waiting for service calls...");
+//     rclcpp::spin();
+//     return 0;
+// }
