@@ -125,12 +125,33 @@ bool nrs_callback::pathDeleteCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
+    // 시각화 마커 제거
     n_visualization.deleteMarkers();
+
+    // 내부 데이터 초기화
     selected_points.clear();
     geodesic_path.waypoints.clear();
-    nrs_path2::Waypoints empty_waypoints;
+
+    // 빈 메시지 생성 및 발행
+    nrs_path2::msg::Waypoints empty_waypoints;
     interpolated_waypoints_pub->publish(empty_waypoints);
 
-    RCLCPP_INFO(node_->get_logger(), "Path deleted via pathDeleteCallback");
+    // 로그 출력 ( )
+    RCLCPP_INFO_STREAM(rclcpp::get_logger("nrs_callback"), "Path deleted via pathDeleteCallback");
+    // RCLCPP_INFO(node_->get_logger(), "Path deleted via pathDeleteCallback");
+
     return true;
 }
+// bool nrs_callback::pathDeleteCallback(
+//     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+//     std::shared_ptr<std_srvs::srv::Empty::Response> res)
+// {
+//     n_visualization.deleteMarkers();
+//     selected_points.clear();
+//     geodesic_path.waypoints.clear();
+//     nrs_path2::Waypoints empty_waypoints;
+//     interpolated_waypoints_pub->publish(empty_waypoints);
+
+//     RCLCPP_INFO(node_->get_logger(), "Path deleted via pathDeleteCallback");
+//     return true;
+// }
