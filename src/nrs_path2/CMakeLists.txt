@@ -16,8 +16,8 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(rosidl_default_generators REQUIRED) # for Service and Message generation
 
 # about TF and Eigen
 find_package(tf2 REQUIRED)
@@ -58,18 +58,6 @@ find_package(OpenCV REQUIRED)
 find_package(CGAL REQUIRED)
 # find_package(CGAL REQUIRED COMPONENTS Core)
 
-
-## 서비스 파일 추가
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/Waypoint.msg"
-  "msg/Waypoints.msg"
-  "srv/Command.srv"
-  DEPENDENCIES
-  geometry_msgs
-  std_msgs
-)
-
-
 ####################################
 ##### catkin 패키지 설정 -> ROS2 #####
 ####################################
@@ -97,7 +85,7 @@ ament_export_dependencies(rosidl_default_runtime)
 ## include 디렉토리 설정 ## (nrs_path 그대로 사용; 나중에 문제 생기면 수정)
 ###################################
 include_directories(
-  ${catkin_INCLUDE_DIRS}
+  # ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
   ${VTK_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
@@ -109,6 +97,90 @@ include_directories(
 )
 
 link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
+
+set(COMMON_DEPENDENCIES
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  std_srvs
+  std_msgs
+  sensor_msgs
+
+  # message_generation
+
+  cv_bridge
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  image_transport
+  image_geometry
+  pcl_msgs
+  pcl_conversions
+  pluginlib
+  moveit_ros_planning_interface
+  realsense2
+)
+
+file(GLOB_RECURSE sources
+"src/*.cpp"
+)
+
+
+
+## 서비스 파일 추가
+# rosidl_generate_interfaces(${PROJECT_NAME}
+#   "msg/Waypoint.msg"
+#   "msg/Waypoints.msg"
+#   "srv/Command.srv"
+#   DEPENDENCIES
+#   geometry_msgs
+#   std_msgs
+# )
+
+
+####### dependencies of path_projection.cpp (start) #######
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Waypoints.msg"
+  DEPENDENCIES geometry_msgs std_msgs
+)
+
+add_executable(path_projection src/path_projection.cpp)
+
+# ROS 2 및 외부 의존성 설정
+ament_target_dependencies(path_projection ${COMMON_DEPENDENCIES})
+
+target_include_directories(path_projection PUBLIC
+  ${CGAL_INCLUDE_DIRS}
+)
+
+# 외부 라이브러리 직접 링크
+target_link_libraries(path_projection
+  ${CGAL_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  ${YAML_CPP_LIBRARIES}
+)
+
+###### dependencies of path_projection.cpp (end) #######
+
+
+# nrs_node_path_generation dependencies setting
+add_executable(nrs_node_path_generation ${sources}) # By doing this, we can add all the source files in the current directory and its subdirectories to the executable
+ament_target_dependencies(nrs_node_path_generation ${COMMON_DEPENDENCIES}) # add_dependencies(nrs_node_path_generation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+# nrs_node_visualization dependencies setting
+add_executable(nrs_node_visualization ${sources})
+ament_target_dependencies(nrs_node_visualization ${COMMON_DEPENDENCIES})
+
+# nrs_node_simulation dependencies setting
+# add_executable(nrs_node_simulation ${sources})
+# ament_target_dependencies(nrs_node_simulation ${COMMON_DEPENDENCIES})
+
+
+
+
 
 
 if(BUILD_TESTING)
@@ -143,6 +215,6 @@ install(DIRECTORY mesh/
 )
 
 # include the sub directory
-add_subdirectory(src)
+# add_subdirectory(src)
 
 ament_package()
