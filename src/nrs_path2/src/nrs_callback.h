@@ -11,6 +11,9 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>                 // #include <sensor_msgs/PointCloud2.h>
 #include "ament_index_cpp/get_package_share_directory.hpp"  // #include <ros/package.h>
 
+#include "nrs_path2/msg/waypoint.hpp"
+#include "nrs_path2/msg/waypoints.hpp"
+
 class nrs_callback
 {
 public:
