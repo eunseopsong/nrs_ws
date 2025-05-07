@@ -5,17 +5,17 @@
 #include <CGAL/Polygon_mesh_processing/locate.h>
 
 // 세그먼트 생성 함수 구현
-std::vector<geometry_msgs::Point> nrs_interpolation::generate_segment(std::vector<geometry_msgs::Point> &original_points,
+std::vector<geometry_msgs::msg::Point> nrs_interpolation::generate_segment(std::vector<geometry_msgs::msg::Point> &original_points,
     int option,
     const Triangle_mesh &mesh)
 {
-geometry_msgs::Point start_point = original_points.front();
-geometry_msgs::Point end_point = original_points.back();
+geometry_msgs::msg::Point start_point = original_points.front();
+geometry_msgs::msg::Point end_point = original_points.back();
 // 첫 번째와 마지막 점에서 face의 normal vector 구하기
 Eigen::Vector3d start_normal = getFaceNormal(start_point, mesh);
 Eigen::Vector3d end_normal = getFaceNormal(end_point, mesh);
-geometry_msgs::Point start_approach;
-geometry_msgs::Point end_retreat;
+geometry_msgs::msg::Point start_approach;
+geometry_msgs::msg::Point end_retreat;
 if (option == 1) // approach
 {
 
@@ -39,7 +39,7 @@ else if (option == 3) // home
 end_retreat.x = end_point.x + 0.1 * end_normal.x();
 end_retreat.y = end_point.y + 0.1 * end_normal.y();
 end_retreat.z = end_point.z + 0.1 * end_normal.z();
-geometry_msgs::Point home;
+geometry_msgs::msg::Point home;
 home.x = 0.573;
 home.y = -0.127;
 home.z = 0.25;
@@ -47,7 +47,7 @@ return {end_retreat, home};
 }
 return {};
 }
-std::vector<double> nrs_interpolation::computeCumulativeDistances(const std::vector<geometry_msgs::Point> &points)
+std::vector<double> nrs_interpolation::computeCumulativeDistances(const std::vector<geometry_msgs::msg::Point> &points)
 {
 std::vector<double> cumulative_distances(points.size(), 0.0);
 for (size_t i = 1; i < points.size(); ++i)
@@ -60,11 +60,11 @@ return cumulative_distances;
 }
 
 // Option 1: 일정 간격 보간
-std::vector<geometry_msgs::Point> nrs_interpolation::interpolatePoints_Constant(const std::vector<geometry_msgs::Point> &points,
+std::vector<geometry_msgs::msg::Point> nrs_interpolation::interpolatePoints_Constant(const std::vector<geometry_msgs::msg::Point> &points,
               const std::vector<double> &cumulative_distances,
               double desired_interval)
 {
-std::vector<geometry_msgs::Point> interpolated_points;
+std::vector<geometry_msgs::msg::Point> interpolated_points;
 double current_distance = 0.0;
 size_t j = 1;
 while (j < points.size())
@@ -74,7 +74,7 @@ if (cumulative_distances[j] >= current_distance + desired_interval)
 double t = (current_distance + desired_interval - cumulative_distances[j - 1]) /
 (cumulative_distances[j] - cumulative_distances[j - 1]);
 
-geometry_msgs::Point ip;
+geometry_msgs::msg::Point ip;
 ip.x = points[j - 1].x + t * (points[j].x - points[j - 1].x);
 ip.y = points[j - 1].y + t * (points[j].y - points[j - 1].y);
 ip.z = points[j - 1].z + t * (points[j].z - points[j - 1].z);
@@ -91,11 +91,11 @@ return interpolated_points;
 }
 
 // Option 2: 가변 간격 보간
-std::vector<geometry_msgs::Point> nrs_interpolation::interpolatePoints_Variable(const std::vector<geometry_msgs::Point> &points,
+std::vector<geometry_msgs::msg::Point> nrs_interpolation::interpolatePoints_Variable(const std::vector<geometry_msgs::msg::Point> &points,
               const std::vector<double> &cumulative_distances,
               double desired_interval)
 {
-std::vector<geometry_msgs::Point> interpolated_points;
+std::vector<geometry_msgs::msg::Point> interpolated_points;
 double total_distance = cumulative_distances.back();
 double transition_length = 0.03; // 3cm
 
@@ -129,7 +129,7 @@ if (cumulative_distances[j] >= current_distance + current_interval)
 double t = (current_distance + current_interval - cumulative_distances[j - 1]) /
 (cumulative_distances[j] - cumulative_distances[j - 1]);
 
-geometry_msgs::Point ip;
+geometry_msgs::msg::Point ip;
 ip.x = points[j - 1].x + t * (points[j].x - points[j - 1].x);
 ip.y = points[j - 1].y + t * (points[j].y - points[j - 1].y);
 ip.z = points[j - 1].z + t * (points[j].z - points[j - 1].z);
@@ -145,8 +145,8 @@ else
 return interpolated_points;
 }
 
-std::vector<geometry_msgs::Point> nrs_interpolation::interpolatePoints(
-const std::vector<geometry_msgs::Point> &points,
+std::vector<geometry_msgs::msg::Point> nrs_interpolation::interpolatePoints(
+const std::vector<geometry_msgs::msg::Point> &points,
 double desired_interval,
 int option)
 {
@@ -163,18 +163,18 @@ return interpolatePoints_Variable(points, cumulative_distances, desired_interval
 }
 else
 {
-return std::vector<geometry_msgs::Point>(); // 잘못된 옵션의 경우 빈 벡터 반환
+return std::vector<geometry_msgs::msg::Point>(); // 잘못된 옵션의 경우 빈 벡터 반환
 }
 }
 
 // 옵션 1: Approach Segment
 // 시작점의 노멀(start_normal)을 기준으로 동일 orientation 적용
-nrs_path2::Waypoints nrs_interpolation::setToolVectorApproach(
-const std::vector<geometry_msgs::Point> &points,
+nrs_path2:msg::Waypoints nrs_interpolation::setToolVectorApproach(
+const std::vector<geometry_msgs::msg::Point> &points,
 const Triangle_mesh &mesh,
 const Kernel::Vector_3 &start_normal)
 {
-nrs_path2::Waypoints waypoints;
+nrs_path2::msg::Waypoints waypoints;
 tf2::Vector3 z_axis(-start_normal.x(), -start_normal.y(), -start_normal.z());
 z_axis.normalize();
 tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
@@ -189,7 +189,7 @@ orientation_matrix.getRotation(q);
 
 for (const auto &point : points)
 {
-nrs_path2::Waypoint wp;
+nrs_path2::msg::Waypoint wp;
 wp.x = point.x;
 wp.y = point.y;
 wp.z = point.z;
@@ -205,12 +205,12 @@ return waypoints;
 //--------------------------------------------------------
 // 옵션 2: Original Segment
 // 각 점마다 해당 점이 속한 face를 찾아, 바리센트릭 좌표를 이용해 보간된 노멀로 orientation 계산
-nrs_path2::Waypoints nrs_interpolation::setToolVectorOriginal(
-const std::vector<geometry_msgs::Point> &points,
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorOriginal(
+const std::vector<geometry_msgs::msg::Point> &points,
 const Triangle_mesh &mesh,
 double fx, double fy, double fz)
 {
-nrs_path2::Waypoints waypoints;
+nrs_path2::msg::Waypoints waypoints;
 for (const auto &point : points)
 {
 Point_3 cgal_point(point.x, point.y, point.z);
@@ -245,7 +245,7 @@ x_axis.z(), y_axis.z(), z_axis.z());
 tf2::Quaternion q;
 orientation_matrix.getRotation(q);
 
-nrs_path2::Waypoint wp;
+nrs_path2::msg::Waypoint wp;
 wp.x = point.x;
 wp.y = point.y;
 wp.z = point.z;
@@ -264,12 +264,12 @@ return waypoints;
 //--------------------------------------------------------
 // 옵션 3: Retreat Segment
 // 마지막 reference point의 노멀(end_normal)을 기준으로 동일 orientation 적용
-nrs_path2::Waypoints nrs_interpolation::setToolVectorRetreat(
-const std::vector<geometry_msgs::Point> &points,
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorRetreat(
+const std::vector<geometry_msgs::msg::Point> &points,
 const Triangle_mesh &mesh,
 const Kernel::Vector_3 &end_normal)
 {
-nrs_path2::Waypoints waypoints;
+nrs_path2::msg::Waypoints waypoints;
 tf2::Vector3 z_axis(-end_normal.x(), -end_normal.y(), -end_normal.z());
 z_axis.normalize();
 tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
@@ -284,7 +284,7 @@ orientation_matrix.getRotation(q);
 
 for (const auto &point : points)
 {
-nrs_path2::Waypoint wp;
+nrs_path2::msg::Waypoint wp;
 wp.x = point.x;
 wp.y = point.y;
 wp.z = point.z;
@@ -300,12 +300,12 @@ return waypoints;
 //--------------------------------------------------------
 // 옵션 4: Home Segment
 // 마지막 reference point의 노멀(end_normal)을 기준으로 계산한 orientation으로 전체 구간에 동일 적용
-nrs_path2::Waypoints nrs_interpolation::setToolVectorHome(
-const std::vector<geometry_msgs::Point> &points,
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorHome(
+const std::vector<geometry_msgs::msg::Point> &points,
 const Triangle_mesh &mesh,
 const Kernel::Vector_3 &end_normal)
 {
-nrs_path2::Waypoints waypoints;
+nrs_path2::msg::Waypoints waypoints;
 tf2::Vector3 z_axis(-end_normal.x(), -end_normal.y(), -end_normal.z());
 z_axis.normalize();
 tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
@@ -320,7 +320,7 @@ orientation_matrix.getRotation(q);
 
 for (const auto &point : points)
 {
-nrs_path2::Waypoint wp;
+nrs_path2::msg::Waypoint wp;
 wp.x = point.x;
 wp.y = point.y;
 wp.z = point.z;
@@ -335,12 +335,12 @@ return waypoints;
 
 //--------------------------------------------------------
 // 옵션 5: 각 점마다 개별 orientation 계산
-nrs_path2::Waypoints nrs_interpolation::setToolVectorOriginalIncludeVectorSmoothing(
-const std::vector<geometry_msgs::Point> &points,
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorOriginalIncludeVectorSmoothing(
+const std::vector<geometry_msgs::msg::Point> &points,
 const Triangle_mesh &mesh,
 double fx, double fy, double fz)
 {
-nrs_path2::Waypoints waypoints;
+nrs_path2::msg::Waypoints waypoints;
 for (const auto &point : points)
 {
 Point_3 cgal_point(point.x, point.y, point.z);
@@ -377,7 +377,7 @@ x_axis.z(), y_axis.z(), z_axis.z());
 tf2::Quaternion q;
 orientation_matrix.getRotation(q);
 
-nrs_path2::Waypoint wp;
+nrs_path2::msg::Waypoint wp;
 wp.x = point.x;
 wp.y = point.y;
 wp.z = point.z;
@@ -395,10 +395,10 @@ return waypoints;
 
 //--------------------------------------------------------
 // 최종 wrapper 함수: reference_points로부터 시작/끝 노멀 계산 후 옵션에 따라 헬퍼 호출
-nrs_path2::Waypoints nrs_interpolation::setToolVector(const std::vector<geometry_msgs::Point> &approach_interpolated,
-const std::vector<geometry_msgs::Point> &original_interpolated,
-const std::vector<geometry_msgs::Point> &retreat_interpolated,
-const std::vector<geometry_msgs::Point> &home_interpolated,
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVector(const std::vector<geometry_msgs::msg::Point> &approach_interpolated,
+const std::vector<geometry_msgs::msg::Point> &original_interpolated,
+const std::vector<geometry_msgs::msg::Point> &retreat_interpolated,
+const std::vector<geometry_msgs::msg::Point> &home_interpolated,
 const Triangle_mesh &mesh,
 double fx, double fy, double fz)
 {
@@ -412,12 +412,12 @@ n_geodesic.locate_face_and_point(end_point, end_face, end_location, mesh);
 Kernel::Vector_3 start_normal = CGAL::Polygon_mesh_processing::compute_face_normal(start_face, mesh);
 Kernel::Vector_3 end_normal = CGAL::Polygon_mesh_processing::compute_face_normal(end_face, mesh);
 
-nrs_path2::Waypoints approach_waypoints = setToolVectorApproach(approach_interpolated, mesh, start_normal);
-nrs_path2::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, fx, fy, fz);
-nrs_path2::Waypoints retreat_waypoints = setToolVectorRetreat(retreat_interpolated, mesh, end_normal);
-nrs_path2::Waypoints home_waypoints = setToolVectorHome(home_interpolated, mesh, end_normal);
+nrs_path2::msg::Waypoints approach_waypoints = setToolVectorApproach(approach_interpolated, mesh, start_normal);
+nrs_path2::msg::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, fx, fy, fz);
+nrs_path2::msg::Waypoints retreat_waypoints = setToolVectorRetreat(retreat_interpolated, mesh, end_normal);
+nrs_path2::msg::Waypoints home_waypoints = setToolVectorHome(home_interpolated, mesh, end_normal);
 
-nrs_path2::Waypoints final_waypoints;
+nrs_path2::msg::Waypoints final_waypoints;
 final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
 approach_waypoints.waypoints.begin(), approach_waypoints.waypoints.end());
 final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
@@ -457,7 +457,7 @@ return result;
 }
 
 // 쿼터니언 기반 보간 함수 구현
-nrs_path2::Waypoints nrs_interpolation::interpolateXYZQF(const nrs_path2::Waypoints &input, double desired_interval)
+nrs_path2::msg::Waypoints nrs_interpolation::interpolateXYZQF(const nrs_path2::msg::Waypoints &input, double desired_interval)
 {
 nrs_path::Waypoints output;
 if (input.waypoints.empty())
@@ -484,7 +484,7 @@ i++;
 double t = (d - cumulative_distances[i - 1]) / (cumulative_distances[i] - cumulative_distances[i - 1]);
 const auto &p0 = input.waypoints[i - 1];
 const auto &p1 = input.waypoints[i];
-nrs_path2::Waypoint interp_wp;
+nrs_path2::msg::Waypoint interp_wp;
 interp_wp.x = p0.x + t * (p1.x - p0.x);
 interp_wp.y = p0.y + t * (p1.y - p0.y);
 interp_wp.z = p0.z + t * (p1.z - p0.z);
@@ -503,37 +503,37 @@ output.waypoints.push_back(interp_wp);
 return output;
 }
 
-nrs_path2::Waypoints nrs_interpolation::interpolateEnd2End(const nrs_path2::Waypoints &original_waypoints, double desired_interval,
+nrs_path2::msg::Waypoints nrs_interpolation::interpolateEnd2End(const nrs_path2::msg::Waypoints &original_waypoints, double desired_interval,
 const Triangle_mesh &mesh, double fx, double fy, double fz)
 {
-std::vector<geometry_msgs::Point> original_points;
+std::vector<geometry_msgs::msg::Point> original_points;
 for (const auto &wp : original_waypoints.waypoints)
 {
-geometry_msgs::Point pt;
+geometry_msgs::msg::Point pt;
 pt.x = wp.x;
 pt.y = wp.y;
 pt.z = wp.z;
 original_points.push_back(pt);
 }
 
-std::vector<geometry_msgs::Point> approach_segment = generate_segment(original_points, 1, mesh);
-std::vector<geometry_msgs::Point> retreat_segment = generate_segment(original_points, 2, mesh);
-std::vector<geometry_msgs::Point> home_segment = generate_segment(original_points, 3, mesh);
+std::vector<geometry_msgs::msg::Point> approach_segment = generate_segment(original_points, 1, mesh);
+std::vector<geometry_msgs::msg::Point> retreat_segment = generate_segment(original_points, 2, mesh);
+std::vector<geometry_msgs::msg::Point> home_segment = generate_segment(original_points, 3, mesh);
 
-std::vector<geometry_msgs::Point> approach_interpolated = interpolatePoints(approach_segment, 0.001, 2);
-std::vector<geometry_msgs::Point> original_interpolated = interpolatePoints(original_points, 0.001, 2);
-std::vector<geometry_msgs::Point> retreat_interpolated = interpolatePoints(retreat_segment, 0.001, 2);
-std::vector<geometry_msgs::Point> home_interpolated = interpolatePoints(home_segment, 0.001, 2);
+std::vector<geometry_msgs::msg::Point> approach_interpolated = interpolatePoints(approach_segment, 0.001, 2);
+std::vector<geometry_msgs::msg::Point> original_interpolated = interpolatePoints(original_points, 0.001, 2);
+std::vector<geometry_msgs::msg::Point> retreat_interpolated = interpolatePoints(retreat_segment, 0.001, 2);
+std::vector<geometry_msgs::msg::Point> home_interpolated = interpolatePoints(home_segment, 0.001, 2);
 
-nrs_path2::Waypoints waypointsXYZQ = setToolVector(approach_interpolated, original_interpolated, retreat_interpolated, home_interpolated, mesh, fx, fy, fz);
-nrs_path2::Waypoints waypointsXYZQF = interpolateXYZQF(waypointsXYZQ, desired_interval);
+nrs_path2::msg::Waypoints waypointsXYZQ = setToolVector(approach_interpolated, original_interpolated, retreat_interpolated, home_interpolated, mesh, fx, fy, fz);
+nrs_path2::msg::Waypoints waypointsXYZQF = interpolateXYZQF(waypointsXYZQ, desired_interval);
 
 return waypointsXYZQF;
 }
 
-Eigen::Vector3d nrs_interpolation::getFaceNormal(const geometry_msgs::Point &ros_point, const Triangle_mesh &mesh)
+Eigen::Vector3d nrs_interpolation::getFaceNormal(const geometry_msgs::msg::Point &ros_point, const Triangle_mesh &mesh)
 {
-// ROS geometry_msgs::Point -> CGAL Point_3 변환
+// ROS geometry_msgs::msg::Point -> CGAL Point_3 변환
 Point_3 cgal_point(ros_point.x, ros_point.y, ros_point.z);
 
 // locate_face_and_point()를 사용하여 서피스에서 점과 면을 찾음
