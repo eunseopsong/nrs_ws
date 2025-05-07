@@ -80,31 +80,30 @@ bool nrs_callback::PathInterpolationCallback(
     std::ifstream input(mesh_file_path, std::ios::binary);
     if (!input.is_open())
     {
-        RCLCPP_ERROR(node_->get_logger(), "Failed to open mesh file: %s", mesh_file_path.c_str());
+        RCLCPP_ERROR_STREAM(rclcpp::get_logger("nrs_callback"), "Failed to open mesh file: " << mesh_file_path);
         return false;
     }
 
     Triangle_mesh tmesh;
     if (!n_geodesic.load_stl_file(input, tmesh))
     {
-        RCLCPP_ERROR(node_->get_logger(), "Failed to load mesh from file: %s", mesh_file_path.c_str());
+        RCLCPP_ERROR_STREAM(rclcpp::get_logger("nrs_callback"), "Failed to load mesh from file: " << mesh_file_path);
         return false;
     }
     input.close();
 
-    Tree *tree = new Tree(tmesh.faces().begin(), tmesh.faces().end(), tmesh);
+    auto tree = std::make_unique<Tree>(tmesh.faces().begin(), tmesh.faces().end(), tmesh);
     tree->accelerate_distance_queries();
-    Surface_mesh_shortest_path *shortest_paths = new Surface_mesh_shortest_path(tmesh);
+    auto shortest_paths = std::make_unique<Surface_mesh_shortest_path>(tmesh);
 
     auto start_time_point = std::chrono::high_resolution_clock::now();
 
-    nrs_path2::Waypoints final_waypoints = n_interpolation.interpolateEnd2End(geodesic_path, desired_interval, tmesh, Fx, Fy, Fz);
+    nrs_path2::msg::Waypoints final_waypoints = n_interpolation.interpolateEnd2End(
+        geodesic_path, desired_interval, tmesh, Fx, Fy, Fz);
 
     if (final_waypoints.waypoints.empty())
     {
-        RCLCPP_ERROR(node_->get_logger(), "Interpolation produced no waypoints.");
-        delete tree;
-        delete shortest_paths;
+        RCLCPP_ERROR(rclcpp::get_logger("nrs_callback"), "Interpolation produced no waypoints.");
         return false;
     }
 
@@ -114,12 +113,58 @@ bool nrs_callback::PathInterpolationCallback(
 
     auto end_time_point = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time_point - start_time_point).count();
-    std::cout << "Interpolation & Normal smoothing time: " << duration << " s" << std::endl;
+    RCLCPP_INFO_STREAM(rclcpp::get_logger("nrs_callback"),
+                       "Interpolation & Normal smoothing time: " << duration << " s");
 
-    delete tree;
-    delete shortest_paths;
     return true;
 }
+// bool nrs_callback::PathInterpolationCallback(
+//     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+//     std::shared_ptr<std_srvs::srv::Empty::Response> res)
+// {
+//     std::ifstream input(mesh_file_path, std::ios::binary);
+//     if (!input.is_open())
+//     {
+//         RCLCPP_ERROR(node_->get_logger(), "Failed to open mesh file: %s", mesh_file_path.c_str());
+//         return false;
+//     }
+
+//     Triangle_mesh tmesh;
+//     if (!n_geodesic.load_stl_file(input, tmesh))
+//     {
+//         RCLCPP_ERROR(node_->get_logger(), "Failed to load mesh from file: %s", mesh_file_path.c_str());
+//         return false;
+//     }
+//     input.close();
+
+//     Tree *tree = new Tree(tmesh.faces().begin(), tmesh.faces().end(), tmesh);
+//     tree->accelerate_distance_queries();
+//     Surface_mesh_shortest_path *shortest_paths = new Surface_mesh_shortest_path(tmesh);
+
+//     auto start_time_point = std::chrono::high_resolution_clock::now();
+
+//     nrs_path2::Waypoints final_waypoints = n_interpolation.interpolateEnd2End(geodesic_path, desired_interval, tmesh, Fx, Fy, Fz);
+
+//     if (final_waypoints.waypoints.empty())
+//     {
+//         RCLCPP_ERROR(node_->get_logger(), "Interpolation produced no waypoints.");
+//         delete tree;
+//         delete shortest_paths;
+//         return false;
+//     }
+
+//     interpolated_waypoints_pub->publish(final_waypoints);
+//     n_io.clearFile(interpolated_waypoints_file_path);
+//     n_io.saveWaypointsToFile(final_waypoints, interpolated_waypoints_file_path);
+
+//     auto end_time_point = std::chrono::high_resolution_clock::now();
+//     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time_point - start_time_point).count();
+//     std::cout << "Interpolation & Normal smoothing time: " << duration << " s" << std::endl;
+
+//     delete tree;
+//     delete shortest_paths;
+//     return true;
+// }
 
 bool nrs_callback::pathDeleteCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
