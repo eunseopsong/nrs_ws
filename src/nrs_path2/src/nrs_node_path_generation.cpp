@@ -1,23 +1,19 @@
 #include "nrs_callback.h"
 #include "nrs_visualization.h"
 
-#include <rclcpp/rclcpp.hpp>                    // #include <ros/ros.h>
-
-#include "geometry_msgs/msg/point_stamped.hpp"  // #include <geometry_msgs/PointStamped.h>
-
-#include <sensor_msgs/msg/point_cloud2.hpp>     // #include <sensor_msgs/PointCloud2.h>
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include <fstream>
 #include <iostream>
 
-// CGAL 및 nrs_mesh 관련 헤더는 nrs_callback.h 에서 이미 include 되었다고 가정
-
-// 전역 변수
+// === 전역 변수 ===
 nrs_callback callback_handler;
 Triangle_mesh tmesh;
 std::string mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
 
-// 클릭된 포인트 콜백
+// === 클릭 포인트 콜백 ===
 void clickedPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
 {
     RCLCPP_INFO(rclcpp::get_logger("nrs_combined_node"), "Clicked point received");
@@ -48,7 +44,7 @@ void clickedPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
     callback_handler.selected_points.push_back(projected_point_eigen);
 }
 
-// 지오데식 경로 콜백
+// === 지오데식 경로 콜백 ===
 void geodesicPathCallback(const nrs_path2::msg::Waypoints::SharedPtr msg)
 {
     for (const auto &wp : msg->waypoints)
@@ -62,14 +58,14 @@ int main(int argc, char **argv)
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared("nrs_combined_node");
 
-    // === 경로 생성 (Path Generation)
+    // === Path Generation ===
     callback_handler.node_ = node;
     callback_handler.mesh_file_path = mesh_file_path;
     callback_handler.geodesic_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt";
     callback_handler.geodesic_waypoints_pub =
         node->create_publisher<nrs_path2::msg::Waypoints>("geodesic_path", 10);
 
-    // === 경로 보간 (Path Interpolation)
+    // === Path Interpolation ===
     callback_handler.interpolated_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints.txt";
     callback_handler.desired_interval = 0.00004;
     callback_handler.Fx = 0.0;
@@ -78,7 +74,7 @@ int main(int argc, char **argv)
     callback_handler.interpolated_waypoints_pub =
         node->create_publisher<nrs_path2::msg::Waypoints>("interpolated_waypoints", 10);
 
-    // === 메쉬 파일 로드
+    // === Load Mesh ===
     std::ifstream input(mesh_file_path, std::ios::binary);
     if (!input)
     {
@@ -87,7 +83,7 @@ int main(int argc, char **argv)
     }
     callback_handler.n_geodesic.load_stl_file(input, tmesh);
 
-    // === 서비스 서버 생성
+    // === Register Services ===
     node->create_service<std_srvs::srv::Empty>(
         "spline",
         std::bind(&nrs_callback::splinePathServiceCallback, &callback_handler,
@@ -108,26 +104,28 @@ int main(int argc, char **argv)
         std::bind(&nrs_callback::pathDeleteCallback, &callback_handler,
                   std::placeholders::_1, std::placeholders::_2));
 
-    // === 서브스크립션
+    // === Subscriptions ===
     auto sub_clicked = node->create_subscription<geometry_msgs::msg::PointStamped>(
         "/clicked_point", 10, clickedPointCallback);
 
     auto sub_geodesic_path = node->create_subscription<nrs_path2::msg::Waypoints>(
         "/geodesic_path", 10, geodesicPathCallback);
 
-    // === 시각화 클래스 초기화 및 구독자 등록
+    // === Visualization Subscriptions ===
     nrs_visualization visualizer;
     visualizer.node_ = node;
 
     auto vis_waypoints_sub = node->create_subscription<nrs_path2::msg::Waypoints>(
         "interpolated_waypoints", 10,
-        std::bind(&nrs_visualization::waypointsCallback, &visualizer, std::placeholders::_1));
+        std::bind(static_cast<void (nrs_visualization::*)(nrs_path2::msg::Waypoints::SharedPtr)>
+            (&nrs_visualization::waypointsCallback), &visualizer, std::placeholders::_1));
 
     auto vis_clicked_point_sub = node->create_subscription<geometry_msgs::msg::PointStamped>(
         "/clicked_point", 10,
-        std::bind(&nrs_visualization::visualizeClickedPoint, &visualizer, std::placeholders::_1));
+        std::bind(static_cast<void (nrs_visualization::*)(geometry_msgs::msg::PointStamped::SharedPtr)>
+            (&nrs_visualization::visualizeClickedPoint), &visualizer, std::placeholders::_1));
 
-    // === 시작 로그 출력
+    // === Info Log ===
     RCLCPP_INFO(node->get_logger(), "Combined nrs node started. Generation, interpolation and visualization functionalities are active.");
 
     rclcpp::spin(node);
