@@ -64,7 +64,7 @@ void nrs_visualization::deleteMarkers()
 }
 
 // Waypoints 메시지 콜백: 수신한 웨이포인트에서 위치만 추출해 path 멤버에 저장하고 시각화 호출
-void nrs_visualization::waypointsCallback(const nrs_path::Waypoints::ConstPtr &msg)
+void nrs_visualization::waypointsCallback(const nrs_path2::Waypoints::ConstPtr &msg)
 {
     path.clear();
     for (const auto &wp : msg->waypoints)
