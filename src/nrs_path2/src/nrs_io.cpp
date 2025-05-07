@@ -39,6 +39,7 @@ void nrs_io::saveWaypointsToFile(const nrs_path::Waypoints &final_waypoints,
 
 // 파일 전송 함수 구현
 void nrs_io::sendFile(const std::string &file_path, rclcpp::Publisher &file_pub)
+// void nrs_io::sendFile(const std::string &file_path, ros::Publisher &file_pub)
 {
     std::ifstream file(file_path);
     if (!file.is_open())
@@ -52,7 +53,11 @@ void nrs_io::sendFile(const std::string &file_path, rclcpp::Publisher &file_pub)
     file.close();
     std_msgs::String msg;
     msg.data = file_data;
-    ROS_INFO("Sending file data...");
-    file_pub.publish(msg);
-    ROS_INFO("File data sent.");
+
+    RCLCPP_INFO(node->get_logger(), "Sending file data...");
+    file_pub->publish(msg);
+    RCLCPP_INFO(node->get_logger(), "File data sent.");
+    // ROS_INFO("Sending file data...");
+    // file_pub.publish(msg);
+    // ROS_INFO("File data sent.");
 }
