@@ -165,15 +165,15 @@ public:
                                                                   int steps);
     bool locate_face_and_point(const Kernel::Point_3 &point, face_descriptor &face, Surface_mesh_shortest_path::Barycentric_coordinates &location, const Triangle_mesh &tmesh);
 
-    nrs_path2::Waypoints
-    ConvertToWaypoints(const std::vector<geometry_msgs::Point> &points);
+    nrs_path2::msg::Waypoints
+    ConvertToWaypoints(const std::vector<geometry_msgs::msg::Point> &points);
 
     /**
      * @brief 주어진 점들로부터 지오데식(최단거리) 경로를 생성
      * @param points 경로를 구성하는 Eigen::Vector3d 배열
      * @param tmesh  사용 중인 Triangle_mesh
      */
-    nrs_path2::Waypoints
+    nrs_path2::msg::Waypoints
     GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh);
 
     /**
@@ -181,7 +181,7 @@ public:
      * @param points 경로를 구성하는 Eigen::Vector3d 배열
      * @param tmesh           사용 중인 Triangle_mesh
      */
-    nrs_path2::Waypoints
+    nrs_path2::msg::Waypoints
     GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh);
 
     bool load_stl_file(std::ifstream &input, Triangle_mesh &mesh);
