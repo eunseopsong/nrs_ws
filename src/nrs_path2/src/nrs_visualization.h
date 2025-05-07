@@ -1,21 +1,17 @@
 #ifndef NRS_VISUALIZATION_H
 #define NRS_VISUALIZATION_H
 
-#include <rclcpp/rclcpp.hpp>                    // #include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
-// Fail: How to include Waypoint and Waypoints
-// #include <nrs_path/Waypoints.h>
-// Waypoint 메시지 타입 (ROS 2)
 #include "nrs_path2/msg/waypoint.hpp"
 #include "nrs_path2/msg/waypoints.hpp"
 
-#include <visualization_msgs/msg/marker.hpp>    // #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/msg/marker.hpp>
+#include "geometry_msgs/msg/point.hpp"
+#include "geometry_msgs/msg/point_stamped.hpp"
 
-#include "geometry_msgs/msg/point.hpp"          // #include <geometry_msgs/Point.h>
-#include "geometry_msgs/msg/point_stamped.hpp"  // #include <geometry_msgs/PointStamped.h>
-
-#include "std_msgs/msg/string.hpp"              // #include <std_msgs/String.h>
-#include <std_msgs/msg/float64_multi_array.hpp> // #include <std_msgs/Float64MultiArray.h>
+#include "std_msgs/msg/string.hpp"
+#include <std_msgs/msg/float64_multi_array.hpp>
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -27,28 +23,29 @@
 class nrs_visualization
 {
 public:
-    // 기본 생성자: NodeHandle 없이 생성 (퍼블리셔들은 초기화되지 않음)
     nrs_visualization();
-    ~nrs_visualization();
+    ~nrs_visualization() = default;
 
-    // init() 함수를 호출해서 ros::NodeHandle를 전달하면 퍼블리셔들이 초기화됩니다.
-    void init(ros::NodeHandle &nh);
+    // Node를 외부에서 설정
+    rclcpp::Node::SharedPtr node_;
 
     // Callback 함수들
-    void waypointsCallback(const nrs_path2::Waypoints::ConstPtr &msg);
-    void visualizeClickedPoint(const geometry_msgs::PointStamped::ConstPtr &msg);
+    void waypointsCallback(const nrs_path2::msg::Waypoints::SharedPtr msg);
+    void visualizeClickedPoint(const geometry_msgs::msg::PointStamped::SharedPtr msg);
     void deleteMarkers();
 
-    // 시각화 함수: 경로(Line Strip) 시각화
-    void visualizePath(const std::vector<geometry_msgs::Point> &path, const std::string &ns, int id,
+    // 시각화 함수
+    void visualizePath(const std::vector<geometry_msgs::msg::Point> &path,
+                       const std::string &ns, int id,
                        float r, float g, float b, float a);
 
 private:
-    ros::Publisher marker_pub1;
-    ros::Publisher marker_pub2;
-    ros::Publisher clicked_marker_pub;
-    std::vector<geometry_msgs::Point> path;
-    int clicked_marker_id;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub1;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub2;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr clicked_marker_pub;
+
+    std::vector<geometry_msgs::msg::Point> path;
+    int clicked_marker_id = 0;
 };
 
 #endif // NRS_VISUALIZATION_H
