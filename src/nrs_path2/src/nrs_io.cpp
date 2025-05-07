@@ -38,7 +38,7 @@ void nrs_io::saveWaypointsToFile(const nrs_path::Waypoints &final_waypoints,
 }
 
 // 파일 전송 함수 구현
-void nrs_io::sendFile(const std::string &file_path, ros::Publisher &file_pub)
+void nrs_io::sendFile(const std::string &file_path, rclcpp::Publisher &file_pub)
 {
     std::ifstream file(file_path);
     if (!file.is_open())
