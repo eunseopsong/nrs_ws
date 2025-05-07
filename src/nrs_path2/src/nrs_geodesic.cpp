@@ -783,18 +783,14 @@ nrs_geodesic::GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, co
 
     if (points.size() > 2)
     {
-
         std::vector<double> u_values = calculateInterpolationParameters(points, false, tmesh);
-
-
         std::vector<Eigen::Vector3d> tangent_vectors = calculateGeodesicTangentVectors(points, u_values, tmesh);
-
         std::vector<std::vector<Eigen::Vector3d>> bezier_control_points = computeBezierControlPoints(points, u_values, tangent_vectors, tmesh);
 
         int i = 0;
         for (const auto &control_points : bezier_control_points)
         {
-            std::cout << "generating Spline bewteen point[" << i << "] and point[" << i + 1 << "]" << std::endl;
+            std::cout << "generating Spline between point[" << i << "] and point[" << i + 1 << "]" << std::endl;
             double waypoints_distance = computeGeodesicDistance(points[i], points[i + 1], tmesh);
             int steps = waypoints_distance * 50;
             std::vector<Eigen::Vector3d> curve_points = computeGeodesicBezierCurvePoints(control_points, tmesh, steps);
@@ -802,6 +798,7 @@ nrs_geodesic::GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, co
             i += 1;
         }
     }
+
     nrs_path2::msg::Waypoints path_points;
     for (size_t i = 0; i < hermite_spline.size(); i++)
     {
@@ -812,15 +809,10 @@ nrs_geodesic::GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, co
         path_points.waypoints.push_back(wp);
     }
 
-    RCLCPP_INFO("Generated Hermite_Spline path with %zu points", path_points.waypoints.size());
+    RCLCPP_INFO(logger_, "Generated Hermite_Spline path with %zu points", path_points.waypoints.size());
 
-    // 프로그램 종료 시간 기록
     auto end_time = std::chrono::high_resolution_clock::now();
-
-    // 시작과 종료 시간의 차이 계산 (밀리초 단위)
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
-
-    // 소요 시간 출력
     std::cout << "spline path generation time: " << duration << " s" << std::endl;
     return path_points;
 }
@@ -831,7 +823,7 @@ bool nrs_geodesic::load_stl_file(std::ifstream &input, Triangle_mesh &mesh)
     std::vector<std::array<std::size_t, 3>> triangles;
     if (!CGAL::read_STL(input, points, triangles))
     {
-        RCLCPP_ERROR("Failed to read STL file.");
+        RCLCPP_ERROR(logger_, "Failed to read STL file.");
         return false;
     }
 
@@ -845,10 +837,10 @@ bool nrs_geodesic::load_stl_file(std::ifstream &input, Triangle_mesh &mesh)
     {
         if (mesh.add_face(index_to_vertex[t[0]], index_to_vertex[t[1]], index_to_vertex[t[2]]) == Triangle_mesh::null_face())
         {
-            RCLCPP_ERROR("Failed to add face.");
+            RCLCPP_ERROR(logger_, "Failed to add face.");
             return false;
         }
     }
-    RCLCPP_INFO("Successfully read STL file.");
+    RCLCPP_INFO(logger_, "Successfully read STL file.");
     return true;
 }
