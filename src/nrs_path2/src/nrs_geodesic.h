@@ -11,8 +11,9 @@
 #include <std_msgs/msg/float64_multi_array.hpp> // #include <std_msgs/Float64MultiArray.h>
 
 // Fail: How to include Waypoint and Waypoints
-// #include <nrs_path/Waypoints.h>
-#include "nrs_path/msg/waypoints.hpp"           // ROS2 compatible Waypoints msg
+// Waypoint 메시지 타입 (ROS 2)
+#include "nrs_path2/msg/waypoint.hpp"
+#include "nrs_path2/msg/waypoints.hpp"
 
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Surface_mesh.h>

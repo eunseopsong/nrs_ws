@@ -14,47 +14,33 @@
 class nrs_callback
 {
 public:
-    explicit nrs_callback(rclcpp::Node::SharedPtr node);  // ROS 2 노드 주입
-
-    // ROS 2 Node 로거 사용을 위한 포인터
-    rclcpp::Node::SharedPtr node_;
-
-    // 주요 객체
+    nrs_callback();
     nrs_io n_io;
     nrs_geodesic n_geodesic;
     nrs_interpolation n_interpolation;
     nrs_visualization n_visualization;
 
     /*-------------------------------path generation-------------------------------*/
-    std::string mesh_file_path;
+    std::string mesh_file_path; // path_planning할 때 사용되는 mesh 파일
 
-    rclcpp::Publisher<nrs_path::msg::Waypoints>::SharedPtr geodesic_waypoints_pub;
-    nrs_path::Waypoints waypoints_msg;
-    std::vector<Eigen::Vector3d> selected_points;
-    std::string geodesic_waypoints_file_path;
-
+    ros::Publisher geodesic_waypoints_pub;        // geodesic_Waypoints publish할 때 사용되는 publisher
+    nrs_path::Waypoints waypoints_msg;          // geodesic_waypoints를 publish할 때 사용되는 msg
+    std::vector<Eigen::Vector3d> selected_points; // clicked_point를 전처리해서 path_generation할 때 사용
+    std::string geodesic_waypoints_file_path;     // geodesic path를 저장하기 위한 file path
     /*-------------------------------path interpolation-------------------------------*/
-    rclcpp::Publisher<nrs_path::msg::Waypoints>::SharedPtr interpolated_waypoints_pub;
-    nrs_path::Waypoints geodesic_path;
+
+    ros::Publisher interpolated_waypoints_pub; // interpolated_waypoints publish할 때 사용되는 publisher
+    nrs_path::Waypoints geodesic_path;       // geodesic waypoints를 interpolation하기 위해 사용
+
     double desired_interval, Fx, Fy, Fz;
     std::string interpolated_waypoints_file_path;
-
-    /*-------------------------------path simulation-------------------------------*/
-    bool splinePathServiceCallback(
-        const std::shared_ptr<std_srvs::srv::Empty::Request>,
-        std::shared_ptr<std_srvs::srv::Empty::Response>);
-
-    bool straightPathServiceCallback(
-        const std::shared_ptr<std_srvs::srv::Empty::Request>,
-        std::shared_ptr<std_srvs::srv::Empty::Response>);
-
-    bool PathInterpolationCallback(
-        const std::shared_ptr<std_srvs::srv::Empty::Request>,
-        std::shared_ptr<std_srvs::srv::Empty::Response>);
-
-    bool pathDeleteCallback(
-        const std::shared_ptr<std_srvs::srv::Empty::Request>,
-        std::shared_ptr<std_srvs::srv::Empty::Response>);
+  /*-------------------------------path simulation-------------------------------*/
+  
+    bool splinePathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    bool straightPathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    bool PathInterpolationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    bool pathDeleteCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+   
 };
 
 #endif // NRS_CALLBACK_H
