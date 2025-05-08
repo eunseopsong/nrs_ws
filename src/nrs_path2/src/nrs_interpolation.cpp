@@ -467,104 +467,108 @@ tf2::Quaternion nrs_interpolation::quaternionSlerp(const tf2::Quaternion &q1, co
     return result;
 }
 
-// // 쿼터니언 기반 보간 함수 구현
-// nrs_path::Waypoints nrs_interpolation::interpolateXYZQF(const nrs_path::Waypoints &input, double desired_interval)
-// {
-//     nrs_path::Waypoints output;
-//     if (input.waypoints.empty())
-//         return output;
+// 쿼터니언 기반 보간 함수 구현
+nrs_path2::msg::Waypoints nrs_interpolation::interpolateXYZQF(const nrs_path2::msg::Waypoints &input, double desired_interval)
+{
+    nrs_path2::msg::Waypoints output;
+    if (input.waypoints.empty())
+        return output;
 
-//     std::vector<double> cumulative_distances;
-//     cumulative_distances.push_back(0.0);
-//     for (size_t i = 1; i < input.waypoints.size(); i++)
-//     {
-//         const auto &p0 = input.waypoints[i - 1];
-//         const auto &p1 = input.waypoints[i];
-//         double dx = p1.x - p0.x;
-//         double dy = p1.y - p0.y;
-//         double dz = p1.z - p0.z;
-//         double segment_distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-//         cumulative_distances.push_back(cumulative_distances.back() + segment_distance);
-//     }
-//     double total_distance = cumulative_distances.back();
-//     for (double d = 0.0; d <= total_distance; d += desired_interval)
-//     {
-//         size_t i = 1;
-//         while (i < cumulative_distances.size() && cumulative_distances[i] < d)
-//             i++;
-//         double t = (d - cumulative_distances[i - 1]) / (cumulative_distances[i] - cumulative_distances[i - 1]);
-//         const auto &p0 = input.waypoints[i - 1];
-//         const auto &p1 = input.waypoints[i];
-//         nrs_path::Waypoint interp_wp;
-//         interp_wp.x = p0.x + t * (p1.x - p0.x);
-//         interp_wp.y = p0.y + t * (p1.y - p0.y);
-//         interp_wp.z = p0.z + t * (p1.z - p0.z);
-//         tf2::Quaternion q0(p0.qx, p0.qy, p0.qz, p0.qw);
-//         tf2::Quaternion q1(p1.qx, p1.qy, p1.qz, p1.qw);
-//         tf2::Quaternion q_interp = quaternionSlerp(q0, q1, t);
-//         interp_wp.qw = q_interp.getW();
-//         interp_wp.qx = q_interp.getX();
-//         interp_wp.qy = q_interp.getY();
-//         interp_wp.qz = q_interp.getZ();
-//         interp_wp.Fx = p0.Fx + t * (p1.Fx - p0.Fx);
-//         interp_wp.Fy = p0.Fy + t * (p1.Fy - p0.Fy);
-//         interp_wp.Fz = p0.Fz + t * (p1.Fz - p0.Fz);
-//         output.waypoints.push_back(interp_wp);
-//     }
-//     return output;
-// }
+    std::vector<double> cumulative_distances;
+    cumulative_distances.push_back(0.0);
+    for (size_t i = 1; i < input.waypoints.size(); i++)
+    {
+        const auto &p0 = input.waypoints[i - 1];
+        const auto &p1 = input.waypoints[i];
+        double dx = p1.x - p0.x;
+        double dy = p1.y - p0.y;
+        double dz = p1.z - p0.z;
+        double segment_distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        cumulative_distances.push_back(cumulative_distances.back() + segment_distance);
+    }
+    double total_distance = cumulative_distances.back();
+    for (double d = 0.0; d <= total_distance; d += desired_interval)
+    {
+        size_t i = 1;
+        while (i < cumulative_distances.size() && cumulative_distances[i] < d)
+            i++;
+        double t = (d - cumulative_distances[i - 1]) / (cumulative_distances[i] - cumulative_distances[i - 1]);
+        const auto &p0 = input.waypoints[i - 1];
+        const auto &p1 = input.waypoints[i];
+        nrs_path2::msg::Waypoint interp_wp;
+        interp_wp.x = p0.x + t * (p1.x - p0.x);
+        interp_wp.y = p0.y + t * (p1.y - p0.y);
+        interp_wp.z = p0.z + t * (p1.z - p0.z);
+        tf2::Quaternion q0(p0.qx, p0.qy, p0.qz, p0.qw);
+        tf2::Quaternion q1(p1.qx, p1.qy, p1.qz, p1.qw);
+        tf2::Quaternion q_interp = quaternionSlerp(q0, q1, t);
+        interp_wp.qw = q_interp.getW();
+        interp_wp.qx = q_interp.getX();
+        interp_wp.qy = q_interp.getY();
+        interp_wp.qz = q_interp.getZ();
+        interp_wp.fx = p0.fx + t * (p1.fx - p0.fx); //// interp_wp.Fx = p0.Fx + t * (p1.Fx - p0.Fx);
+        interp_wp.fy = p0.fy + t * (p1.fy - p0.fy); //// interp_wp.Fy = p0.Fy + t * (p1.Fy - p0.Fy);
+        interp_wp.fz = p0.fz + t * (p1.fz - p0.fz); //// interp_wp.Fz = p0.Fz + t * (p1.Fz - p0.Fz);
 
-// nrs_path::Waypoints nrs_interpolation::interpolateEnd2End(const nrs_path::Waypoints &original_waypoints, double desired_interval,
-//                                                             const Triangle_mesh &mesh, double Fx, double Fy, double Fz)
-// {
-//     std::vector<geometry_msgs::Point> original_points;
-//     for (const auto &wp : original_waypoints.waypoints)
-//     {
-//         geometry_msgs::Point pt;
-//         pt.x = wp.x;
-//         pt.y = wp.y;
-//         pt.z = wp.z;
-//         original_points.push_back(pt);
-//     }
+        output.waypoints.push_back(interp_wp);
+    }
+    return output;
+}
 
-//     std::vector<geometry_msgs::Point> approach_segment = generate_segment(original_points, 1, mesh);
-//     std::vector<geometry_msgs::Point> retreat_segment = generate_segment(original_points, 2, mesh);
-//     std::vector<geometry_msgs::Point> home_segment = generate_segment(original_points, 3, mesh);
+nrs_path2::msg::Waypoints nrs_interpolation::interpolateEnd2End(const nrs_path2::msg::Waypoints &original_waypoints, double desired_interval,
+                                                                const Triangle_mesh &mesh, double fx, double fy, double fz
+                                                                                           //// double Fx, double Fy, double Fz
+                                                                )
+{
+    std::vector<geometry_msgs::msg::Point> original_points;
+    for (const auto &wp : original_waypoints.waypoints)
+    {
+        geometry_msgs::msg::Point pt;
+        pt.x = wp.x;
+        pt.y = wp.y;
+        pt.z = wp.z;
+        original_points.push_back(pt);
+    }
 
-//     std::vector<geometry_msgs::Point> approach_interpolated = interpolatePoints(approach_segment, 0.001, 2);
-//     std::vector<geometry_msgs::Point> original_interpolated = interpolatePoints(original_points, 0.001, 2);
-//     std::vector<geometry_msgs::Point> retreat_interpolated = interpolatePoints(retreat_segment, 0.001, 2);
-//     std::vector<geometry_msgs::Point> home_interpolated = interpolatePoints(home_segment, 0.001, 2);
+    std::vector<geometry_msgs::msg::Point> approach_segment = generate_segment(original_points, 1, mesh);
+    std::vector<geometry_msgs::msg::Point> retreat_segment = generate_segment(original_points, 2, mesh);
+    std::vector<geometry_msgs::msg::Point> home_segment = generate_segment(original_points, 3, mesh);
 
-//     nrs_path::Waypoints waypointsXYZQ = setToolVector(approach_interpolated, original_interpolated, retreat_interpolated, home_interpolated, mesh, Fx, Fy, Fz);
-//     nrs_path::Waypoints waypointsXYZQF = interpolateXYZQF(waypointsXYZQ, desired_interval);
+    std::vector<geometry_msgs::msg::Point> approach_interpolated = interpolatePoints(approach_segment, 0.001, 2);
+    std::vector<geometry_msgs::msg::Point> original_interpolated = interpolatePoints(original_points, 0.001, 2);
+    std::vector<geometry_msgs::msg::Point> retreat_interpolated = interpolatePoints(retreat_segment, 0.001, 2);
+    std::vector<geometry_msgs::msg::Point> home_interpolated = interpolatePoints(home_segment, 0.001, 2);
 
-//     return waypointsXYZQF;
-// }
+    nrs_path2::msg::Waypoints waypointsXYZQ = setToolVector(approach_interpolated, original_interpolated, retreat_interpolated, home_interpolated, mesh, fx, fy, fz); //// Fx, Fy, Fz
+    nrs_path2::msg::Waypoints waypointsXYZQF = interpolateXYZQF(waypointsXYZQ, desired_interval);
 
-// Eigen::Vector3d nrs_interpolation::getFaceNormal(const geometry_msgs::Point &ros_point, const Triangle_mesh &mesh)
-// {
-//     // ROS geometry_msgs::Point -> CGAL Point_3 변환
-//     Point_3 cgal_point(ros_point.x, ros_point.y, ros_point.z);
+    return waypointsXYZQF;
+}
 
-//     // locate_face_and_point()를 사용하여 서피스에서 점과 면을 찾음
-//     face_descriptor face;
-//     CGAL::cpp11::array<double, 3> location; // Barycentric coordinates
+Eigen::Vector3d nrs_interpolation::getFaceNormal(const geometry_msgs::msg::Point &ros_point, const Triangle_mesh &mesh)
+{
+    // ROS geometry_msgs::Point -> CGAL Point_3 변환
+    Point_3 cgal_point(ros_point.x, ros_point.y, ros_point.z);
 
-//     if (!n_geodesic.locate_face_and_point(cgal_point, face, location, mesh))
-//     {
-//         ROS_ERROR("Failed to locate face and point for point: [%f, %f, %f]", ros_point.x, ros_point.y, ros_point.z);
-//         return Eigen::Vector3d::Zero(); // 실패 시 0 벡터 반환
-//     }
+    // locate_face_and_point()를 사용하여 서피스에서 점과 면을 찾음
+    face_descriptor face;
+    CGAL::cpp11::array<double, 3> location; // Barycentric coordinates
 
-//     // 면의 노멀 벡터 계산
-//     Kernel::Vector_3 normal = CGAL::Polygon_mesh_processing::compute_face_normal(face, mesh);
+    if (!n_geodesic.locate_face_and_point(cgal_point, face, location, mesh))
+    {
+        RCLCPP_ERROR(rclcpp::get_logger("nrs_interpolation"), "Failed to locate face and point for point: [%f, %f, %f]", ros_point.x, ros_point.y, ros_point.z);
+        //// ROS_ERROR("Failed to locate face and point for point: [%f, %f, %f]", ros_point.x, ros_point.y, ros_point.z);
+        return Eigen::Vector3d::Zero(); // 실패 시 0 벡터 반환
+    }
 
-//     // CGAL 노멀 벡터를 Eigen::Vector3d로 변환
-//     Eigen::Vector3d eigen_normal(normal.x(), normal.y(), normal.z());
+    // 면의 노멀 벡터 계산
+    Kernel::Vector_3 normal = CGAL::Polygon_mesh_processing::compute_face_normal(face, mesh);
 
-//     // 노멀 벡터 정규화
-//     eigen_normal.normalize();
+    // CGAL 노멀 벡터를 Eigen::Vector3d로 변환
+    Eigen::Vector3d eigen_normal(normal.x(), normal.y(), normal.z());
 
-//     return eigen_normal; // 노멀 벡터 반환
-// }
+    // 노멀 벡터 정규화
+    eigen_normal.normalize();
+
+    return eigen_normal; // 노멀 벡터 반환
+}
