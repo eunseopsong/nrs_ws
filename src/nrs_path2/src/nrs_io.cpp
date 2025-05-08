@@ -39,11 +39,13 @@ void nrs_io::saveWaypointsToFile(const nrs_path2::msg::Waypoints &final_waypoint
 void nrs_io::sendFile(const std::string &file_path,
                       const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr &file_pub,
                       const rclcpp::Node::SharedPtr &node)
+//// void nrs_io::sendFile(const std::string &file_path, ros::Publisher &file_pub)
 {
     std::ifstream file(file_path);
     if (!file.is_open())
     {
         RCLCPP_ERROR(node->get_logger(), "Failed to open file: %s", file_path.c_str());
+        //// ROS_ERROR("Failed to open file: %s", file_path.c_str());
         return;
     }
 
@@ -55,7 +57,7 @@ void nrs_io::sendFile(const std::string &file_path,
     std_msgs::msg::String msg;
     msg.data = file_data;
 
-    RCLCPP_INFO(node->get_logger(), "Sending file data...");
+    RCLCPP_INFO(node->get_logger(), "Sending file data..."); //// ROS_INFO("Sending file data...");
     file_pub->publish(msg);
-    RCLCPP_INFO(node->get_logger(), "File data sent.");
+    RCLCPP_INFO(node->get_logger(), "File data sent.");      //// ROS_INFO("File data sent.");
 }

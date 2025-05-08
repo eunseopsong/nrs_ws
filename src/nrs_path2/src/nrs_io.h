@@ -1,18 +1,18 @@
 #ifndef NRS_IO_H
 #define NRS_IO_H
 
-#include <rclcpp/rclcpp.hpp>                // ROS 2 기본 노드 기능
-#include "std_srvs/srv/empty.hpp"           // Empty 서비스
-#include "std_msgs/msg/string.hpp"          // 문자열 메시지
-#include <sensor_msgs/msg/point_cloud2.hpp> // 포인트 클라우드 메시지
+#include <rclcpp/rclcpp.hpp>                //// #include <ros/ros.h>
+#include "std_srvs/srv/empty.hpp"           //// #include <std_srvs/Empty.h>
+#include "std_msgs/msg/string.hpp"          //// #include <std_msgs/String.h>
+#include <sensor_msgs/msg/point_cloud2.hpp> //// #include <sensor_msgs/PointCloud2.h>
 
 #include <boost/filesystem.hpp>
 #include <string>
 #include <yaml-cpp/yaml.h>
 
 // Waypoint 메시지 타입 (ROS 2)
-#include "nrs_path2/msg/waypoint.hpp"
-#include "nrs_path2/msg/waypoints.hpp"
+#include "nrs_path2/msg/waypoint.hpp"       //// #include <nrs_path/Waypoint.h>
+#include "nrs_path2/msg/waypoints.hpp"      //// #include <nrs_path/Waypoints.h>
 
 // CGAL 관련
 #include <CGAL/Point_set_3.h>
@@ -49,13 +49,14 @@ public:
     // Waypoints 저장
     void saveWaypointsToFile(const nrs_path2::msg::Waypoints &final_waypoints,
         const std::string &file_path);
-    // void saveWaypointsToFile(const nrs_path::msg::Waypoints &final_waypoints,
-    //                          const std::string &file_path);
+    //// void saveWaypointsToFile(const nrs_path::Waypoints &final_waypoints,
+    ////                          const std::string &file_path);
 
     // 파일 전송 (노드 참조 필요)
     void sendFile(const std::string &file_path,
                   const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr &file_pub,
                   const rclcpp::Node::SharedPtr &node);
+    //// void sendFile(const std::string &file_path, ros::Publisher &file_pub);
 };
 
 #endif // NRS_IO_H
