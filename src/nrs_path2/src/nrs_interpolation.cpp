@@ -5,17 +5,17 @@
 #include <CGAL/Polygon_mesh_processing/locate.h>
 
 // 세그먼트 생성 함수 구현
-std::vector<geometry_msgs::Point> nrs_interpolation::generate_segment(std::vector<geometry_msgs::Point> &original_points,
+std::vector<geometry_msgs::msg::Point> nrs_interpolation::generate_segment(std::vector<geometry_msgs::msg::Point> &original_points,
                                                                       int option,
                                                                       const Triangle_mesh &mesh)
 {
-    geometry_msgs::Point start_point = original_points.front();
-    geometry_msgs::Point end_point = original_points.back();
+    geometry_msgs::msg::Point start_point = original_points.front();
+    geometry_msgs::msg::Point end_point = original_points.back();
     // 첫 번째와 마지막 점에서 face의 normal vector 구하기
     Eigen::Vector3d start_normal = getFaceNormal(start_point, mesh);
     Eigen::Vector3d end_normal = getFaceNormal(end_point, mesh);
-    geometry_msgs::Point start_approach;
-    geometry_msgs::Point end_retreat;
+    geometry_msgs::msg::Point start_approach;
+    geometry_msgs::msg::Point end_retreat;
     if (option == 1) // approach
     {
 
@@ -39,7 +39,7 @@ std::vector<geometry_msgs::Point> nrs_interpolation::generate_segment(std::vecto
         end_retreat.x = end_point.x + 0.1 * end_normal.x();
         end_retreat.y = end_point.y + 0.1 * end_normal.y();
         end_retreat.z = end_point.z + 0.1 * end_normal.z();
-        geometry_msgs::Point home;
+        geometry_msgs::msg::Point home;
         home.x = 0.573;
         home.y = -0.127;
         home.z = 0.25;
