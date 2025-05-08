@@ -6,10 +6,10 @@
 #include "nrs_interpolation.h"
 #include "nrs_visualization.h"
 
-#include <rclcpp/rclcpp.hpp>
-#include "std_srvs/srv/empty.hpp"
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include "ament_index_cpp/get_package_share_directory.hpp"
+#include <rclcpp/rclcpp.hpp>                                // #include <ros/ros.h>
+#include "std_srvs/srv/empty.hpp"                           // #include "std_srvs/Empty.h"
+#include <sensor_msgs/msg/point_cloud2.hpp>                 // #include <sensor_msgs/PointCloud2.h>
+#include "ament_index_cpp/get_package_share_directory.hpp"  // #include <ros/package.h>
 
 #include "nrs_path2/msg/waypoint.hpp"
 #include "nrs_path2/msg/waypoints.hpp"
@@ -29,14 +29,24 @@ public:
     /*-------------------------------path generation-------------------------------*/
     std::string mesh_file_path;
 
-    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr geodesic_waypoints_pub;
-    nrs_path2::msg::Waypoints waypoints_msg;
+    // geodesic_Waypoints publish할 때 사용되는 publisher
+    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr geodesic_waypoints_pub;   // ros::Publisher geodesic_waypoints_pub;
+
+    // geodesic_waypoints를 publish할 때 사용되는 msg
+    nrs_path2::msg::Waypoints waypoints_msg;                                          // nrs_path::Waypoints waypoints_msg;
+
+    // clicked_point를 전처리해서 path_generation할 때 사용
     std::vector<Eigen::Vector3d> selected_points;
+
+    // geodesic path를 저장하기 위한 file path
     std::string geodesic_waypoints_file_path;
 
     /*-------------------------------path interpolation-------------------------------*/
-    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr interpolated_waypoints_pub;
-    nrs_path2::msg::Waypoints geodesic_path;
+    // interpolated_waypoints publish할 때 사용되는 publisher
+    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr interpolated_waypoints_pub; // ros::Publisher interpolated_waypoints_pub;
+
+    // geodesic waypoints를 interpolation하기 위해 사용
+    nrs_path2::msg::Waypoints geodesic_path;                                            // nrs_path::Waypoints geodesic_path;
 
     double desired_interval, Fx, Fy, Fz;
     std::string interpolated_waypoints_file_path;

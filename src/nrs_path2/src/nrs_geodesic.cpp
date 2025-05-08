@@ -763,7 +763,7 @@ nrs_geodesic::GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &p
         path_points.waypoints.push_back(wp);
     }
 
-    ROS_INFO("Generated geodesic path with %zu points", path_points.waypoints.size());
+    RCLCPP_INFO("Generated geodesic path with %zu points", path_points.waypoints.size());
     // 프로그램 종료 시간 기록
     auto end_time = std::chrono::high_resolution_clock::now();
 
