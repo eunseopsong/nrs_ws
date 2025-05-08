@@ -68,9 +68,9 @@ int main(int argc, char **argv)
     // === Path Interpolation ===
     callback_handler.interpolated_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints.txt";
     callback_handler.desired_interval = 0.00004;
-    callback_handler.Fx = 0.0;
-    callback_handler.Fy = 0.0;
-    callback_handler.Fz = 10.0;
+    callback_handler.fx = 0.0;
+    callback_handler.fy = 0.0;
+    callback_handler.fz = 10.0;
     callback_handler.interpolated_waypoints_pub =
         node->create_publisher<nrs_path2::msg::Waypoints>("interpolated_waypoints", 10);
 
