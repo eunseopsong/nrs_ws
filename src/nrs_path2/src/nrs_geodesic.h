@@ -1,26 +1,25 @@
-// header file Immigration (from ROS1 to ROS2; the right one is the older one)
+// header file Immigration (from ROS1 to ROS2; the right one is the previous one)
 #ifndef NRS_GEODESIC_H
 #define NRS_GEODESIC_H
 
 #include <Eigen/Dense>
 #include <vector>
 #include <tuple>
-#include <rclcpp/rclcpp.hpp>                    // #include <ros/ros.h>
-#include "geometry_msgs/msg/point.hpp"          // #include <geometry_msgs/Point.h>
+#include <rclcpp/rclcpp.hpp>                    //// #include <ros/ros.h>
+#include "geometry_msgs/msg/point.hpp"          //// #include <geometry_msgs/Point.h>
 
-#include <std_msgs/msg/float64_multi_array.hpp> // #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/msg/float64_multi_array.hpp> //// #include <std_msgs/Float64MultiArray.h>
 
-// Fail: How to include Waypoint and Waypoints
 // Waypoint 메시지 타입 (ROS 2)
 #include "nrs_path2/msg/waypoint.hpp"
-#include "nrs_path2/msg/waypoints.hpp"
+#include "nrs_path2/msg/waypoints.hpp"          //// #include <std_msgs/Float64MultiArray.h>
 
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Surface_mesh.h>
 #include <CGAL/Surface_mesh_shortest_path.h>
 #include <CGAL/Polygon_mesh_processing/locate.h>
 #include <CGAL/Polygon_mesh_processing/compute_normal.h>
-#include <CGAL/IO/STL.h> // #include <CGAL/IO/STL_reader.h> (STL_reader.h is included in STL.h)
+#include <CGAL/IO/STL.h> //// #include <CGAL/IO/STL_reader.h> (STL_reader.h is included in STL.h)
 
 // Vec3d etc.
 #include "nrs_vec3d.h"
@@ -165,15 +164,15 @@ public:
                                                                   int steps);
     bool locate_face_and_point(const Kernel::Point_3 &point, face_descriptor &face, Surface_mesh_shortest_path::Barycentric_coordinates &location, const Triangle_mesh &tmesh);
 
-    nrs_path2::msg::Waypoints
-    ConvertToWaypoints(const std::vector<geometry_msgs::msg::Point> &points);
+    nrs_path::Waypoints
+    ConvertToWaypoints(const std::vector<geometry_msgs::Point> &points);
 
     /**
      * @brief 주어진 점들로부터 지오데식(최단거리) 경로를 생성
      * @param points 경로를 구성하는 Eigen::Vector3d 배열
      * @param tmesh  사용 중인 Triangle_mesh
      */
-    nrs_path2::msg::Waypoints
+    nrs_path::Waypoints
     GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh);
 
     /**
@@ -181,7 +180,7 @@ public:
      * @param points 경로를 구성하는 Eigen::Vector3d 배열
      * @param tmesh           사용 중인 Triangle_mesh
      */
-    nrs_path2::msg::Waypoints
+    nrs_path::Waypoints
     GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh);
 
     bool load_stl_file(std::ifstream &input, Triangle_mesh &mesh);
