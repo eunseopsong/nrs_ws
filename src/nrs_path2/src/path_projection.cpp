@@ -7,11 +7,9 @@
 #include "geometry_msgs/msg/point_stamped.hpp" // #include <geometry_msgs/PointStamped.h>
 #include "geometry_msgs/msg/vector3.hpp"       // #include <geometry_msgs/Vector3.h>
 
-// Fail
-// #include "nrs_path2/msg/waypoint.hpp"
-// #include "nrs_path2/msg/waypoints.hpp"
-#include <nrs_path/Waypoint.h>
-#include <nrs_path/Waypoints.h>
+// Success
+#include "nrs_path2/msg/waypoints.hpp"         // #include <nrs_path/Waypoint.h>
+#include "nrs_path2/msg/waypoint.hpp"          // #include <nrs_path/Waypoints.h>
 
 // Success
 #include "std_srvs/srv/empty.hpp"     // #include <std_srvs/Empty.h>
