@@ -17,9 +17,14 @@
 class nrs_callback
 {
 public:
-    nrs_callback();
+    nrs_callback();    // basic 생성자
+    //////////// service node Initialization (for ROS2) ////////////
+    explicit nrs_callback(rclcpp::Node::SharedPtr node);
+    rclcpp::Node::SharedPtr node_;  // 노드 저장용
 
-    rclcpp::Node::SharedPtr node_;  // ✅ RCLCPP용 로그 출력 및 ROS 노드 접근 멤버
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr spline_service_;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr straight_service_;
+    ////////////////////////////////////////////////////////////////
 
     nrs_io n_io;
     nrs_geodesic n_geodesic;
@@ -30,10 +35,10 @@ public:
     std::string mesh_file_path;
 
     // geodesic_Waypoints publish할 때 사용되는 publisher
-    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr geodesic_waypoints_pub;   // ros::Publisher geodesic_waypoints_pub;
+    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr geodesic_waypoints_pub;   //// ros::Publisher geodesic_waypoints_pub;
 
     // geodesic_waypoints를 publish할 때 사용되는 msg
-    nrs_path2::msg::Waypoints waypoints_msg;                                          // nrs_path::Waypoints waypoints_msg;
+    nrs_path2::msg::Waypoints waypoints_msg;                                          //// nrs_path::Waypoints waypoints_msg;
 
     // clicked_point를 전처리해서 path_generation할 때 사용
     std::vector<Eigen::Vector3d> selected_points;
@@ -43,31 +48,31 @@ public:
 
     /*-------------------------------path interpolation-------------------------------*/
     // interpolated_waypoints publish할 때 사용되는 publisher
-    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr interpolated_waypoints_pub; // ros::Publisher interpolated_waypoints_pub;
+    rclcpp::Publisher<nrs_path2::msg::Waypoints>::SharedPtr interpolated_waypoints_pub; //// ros::Publisher interpolated_waypoints_pub;
 
     // geodesic waypoints를 interpolation하기 위해 사용
-    nrs_path2::msg::Waypoints geodesic_path;                                            // nrs_path::Waypoints geodesic_path;
+    nrs_path2::msg::Waypoints geodesic_path;                                            //// nrs_path::Waypoints geodesic_path;
 
     double desired_interval, fx, fy, fz;
     std::string interpolated_waypoints_file_path;
 
     /*-------------------------------path simulation-------------------------------*/
-    // bool splinePathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    //// bool splinePathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
     bool splinePathServiceCallback(
         const std::shared_ptr<std_srvs::srv::Empty::Request> req,
         std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
-    // bool straightPathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    //// bool straightPathServiceCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
     bool straightPathServiceCallback(
         const std::shared_ptr<std_srvs::srv::Empty::Request> req,
         std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
-    // bool PathInterpolationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    //// bool PathInterpolationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
     bool PathInterpolationCallback(
         const std::shared_ptr<std_srvs::srv::Empty::Request> req,
         std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
-    // bool pathDeleteCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    //// bool pathDeleteCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
     bool pathDeleteCallback(
         const std::shared_ptr<std_srvs::srv::Empty::Request> req,
         std::shared_ptr<std_srvs::srv::Empty::Response> res);
