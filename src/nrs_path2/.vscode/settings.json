@@ -79,6 +79,7 @@
         "stack": "cpp",
         "filesystem": "cpp",
         "ios": "cpp",
-        "core": "cpp"
+        "core": "cpp",
+        "__functional_03": "cpp"
     }
 }
