@@ -63,10 +63,10 @@ public:
      */
 
     ///////
-    // ROS2 logger
-    rclcpp::Logger logger_;
+    // 기본 생성자
+    nrs_geodesic() : logger_(rclcpp::get_logger("nrs_geodesic")) {}
 
-    // 생성자: ROS2 logger 주입
+    // Logger 주입 생성자
     nrs_geodesic(rclcpp::Logger logger) : logger_(logger) {}
     ///////
 
