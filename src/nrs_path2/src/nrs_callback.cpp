@@ -1,5 +1,10 @@
 #include "nrs_callback.h"
 
+nrs_callback::nrs_callback()
+{
+    // 기본 생성자에서 아무것도 하지 않아도 괜찮습니다.
+}
+
 nrs_callback::nrs_callback(rclcpp::Node::SharedPtr node)
 : node_(node) // node 멤버에 전달된 node 포인터 저장
 {

@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
 project(nrs_path2)
 
+# Release 모드 기본 설정 추가
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -17,6 +22,8 @@ find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(rosidl_default_generators REQUIRED) # for Service and Message generation
+
+find_package(rosidl_typesupport_cpp REQUIRED)
 
 # about TF and Eigen
 find_package(tf2 REQUIRED)
@@ -52,6 +59,8 @@ find_package(yaml-cpp REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(CGAL REQUIRED)
+find_package(GMP REQUIRED)
+find_package(MPFR REQUIRED)
 
 ament_export_dependencies(
   rclcpp
@@ -109,6 +118,16 @@ set(COMMON_DEPENDENCIES
   realsense2
 )
 
+set(LINK_LIBS
+  ${CGAL_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  ${YAML_CPP_LIBRARIES}
+  gmp
+  gmpxx
+  mpfr
+)
+
 file(GLOB_RECURSE sources
 "src/*.cpp"
 )
@@ -121,23 +140,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   DEPENDENCIES geometry_msgs std_msgs
 )
 
-####### Executable Definitions #######
-add_executable(path_projection src/path_projection.cpp)
-ament_target_dependencies(path_projection ${COMMON_DEPENDENCIES})
-target_include_directories(path_projection PUBLIC
-  ${CGAL_INCLUDE_DIRS}
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
-)
-add_dependencies(path_projection ${PROJECT_NAME}__rosidl_generator_cpp)
-target_link_libraries(path_projection
-  ${CGAL_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
-  ${YAML_CPP_LIBRARIES}
-)
+########### Executable Definitions ###########
+#### path_projection ####
+
+
 
 #### nrs_node_path_generation ####
-# add_executable(nrs_node_path_generation ${sources})
 add_executable(nrs_node_path_generation
 src/nrs_node_path_generation.cpp
 
@@ -146,46 +154,61 @@ src/nrs_vec3d.cpp
 src/nrs_interpolation.cpp
 src/nrs_visualization.cpp
 
-
 src/nrs_callback.cpp
 src/nrs_io.cpp
 src/nrs_math.cpp
 )
 
-ament_target_dependencies(nrs_node_path_generation ${COMMON_DEPENDENCIES})
+ament_target_dependencies(nrs_node_path_generation
+  ${COMMON_DEPENDENCIES}
+  rosidl_typesupport_cpp
+)
+
+rosidl_target_interfaces(nrs_node_path_generation
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
 target_include_directories(nrs_node_path_generation PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
 )
+
 add_dependencies(nrs_node_path_generation ${PROJECT_NAME}__rosidl_generator_cpp)
+
+target_link_libraries(nrs_node_path_generation ${LINK_LIBS})
 
 
 #### nrs_node_visualization ####
-# add_executable(nrs_node_visualization ${sources})
 add_executable(nrs_node_visualization
 src/nrs_node_visualization.cpp
-
 
 src/nrs_geodesic.cpp
 src/nrs_vec3d.cpp
 src/nrs_interpolation.cpp
 src/nrs_visualization.cpp
 
-
 src/nrs_callback.cpp
 src/nrs_io.cpp
 src/nrs_math.cpp
 )
 
-ament_target_dependencies(nrs_node_visualization ${COMMON_DEPENDENCIES})
+ament_target_dependencies(nrs_node_visualization
+  ${COMMON_DEPENDENCIES}
+  rosidl_typesupport_cpp
+)
+
+rosidl_target_interfaces(nrs_node_visualization
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+
 target_include_directories(nrs_node_visualization PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
 )
+
 add_dependencies(nrs_node_visualization ${PROJECT_NAME}__rosidl_generator_cpp)
 
+target_link_libraries(nrs_node_visualization ${LINK_LIBS})
 
-#### nrs_node_simulation ####
-# add_executable(nrs_node_simulation ${sources})
-# ament_target_dependencies(nrs_node_simulation ${COMMON_DEPENDENCIES})
+#### nrs_node_simulation(delete) ####
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
