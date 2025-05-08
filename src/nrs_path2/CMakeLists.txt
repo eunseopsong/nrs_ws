@@ -91,9 +91,6 @@ include_directories(
 
 link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
 
-##############################
-#         VARIABLES          #
-##############################
 set(COMMON_DEPENDENCIES
   rclcpp rclcpp_action std_msgs std_srvs sensor_msgs geometry_msgs
   tf2 tf2_ros tf2_geometry_msgs tf2_eigen
@@ -125,20 +122,17 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 ##############################
 #      EXECUTABLES           #
 ##############################
+
 ## path_projection ##
 add_executable(path_projection src/path_projection.cpp)
-
 ament_target_dependencies(path_projection ${COMMON_DEPENDENCIES} rosidl_typesupport_cpp)
-rosidl_target_interfaces(path_projection ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_include_directories(path_projection PUBLIC ${CGAL_INCLUDE_DIRS} $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(path_projection ${LINK_LIBS} ${cpp_typesupport_target})
 add_dependencies(path_projection ${PROJECT_NAME}__rosidl_generator_cpp)
-target_link_libraries(path_projection ${LINK_LIBS})
-
 
 ## nrs_node_path_generation ##
 add_executable(nrs_node_path_generation
   src/nrs_node_path_generation.cpp
-
   src/nrs_geodesic.cpp
   src/nrs_vec3d.cpp
   src/nrs_interpolation.cpp
@@ -148,16 +142,12 @@ add_executable(nrs_node_path_generation
   src/nrs_math.cpp
 )
 ament_target_dependencies(nrs_node_path_generation ${COMMON_DEPENDENCIES} rosidl_typesupport_cpp)
-rosidl_target_interfaces(nrs_node_path_generation ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_include_directories(nrs_node_path_generation PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+target_link_libraries(nrs_node_path_generation ${LINK_LIBS} ${cpp_typesupport_target})
 add_dependencies(nrs_node_path_generation ${PROJECT_NAME}__rosidl_generator_cpp)
-target_link_libraries(nrs_node_path_generation ${LINK_LIBS})
-
 
 ## nrs_node_visualization ##
 add_executable(nrs_node_visualization
   src/nrs_node_visualization.cpp
-
   src/nrs_geodesic.cpp
   src/nrs_vec3d.cpp
   src/nrs_interpolation.cpp
@@ -167,14 +157,19 @@ add_executable(nrs_node_visualization
   src/nrs_math.cpp
 )
 ament_target_dependencies(nrs_node_visualization ${COMMON_DEPENDENCIES} rosidl_typesupport_cpp)
-rosidl_target_interfaces(nrs_node_visualization ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_include_directories(nrs_node_visualization PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+target_link_libraries(nrs_node_visualization ${LINK_LIBS} ${cpp_typesupport_target})
 add_dependencies(nrs_node_visualization ${PROJECT_NAME}__rosidl_generator_cpp)
-target_link_libraries(nrs_node_visualization ${LINK_LIBS})
 
 ##############################
 #       INSTALL TARGETS      #
 ##############################
+install(TARGETS
+  path_projection
+  nrs_node_path_generation
+  nrs_node_visualization
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config)
 install(DIRECTORY include/ DESTINATION share/${PROJECT_NAME}/include)
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
