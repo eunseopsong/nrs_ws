@@ -52,7 +52,8 @@ public:
     //// nrs_path::Waypoints setToolVectorOriginal(
         const std::vector<geometry_msgs::msg::Point> &points,
         const Triangle_mesh &mesh,
-        double Fx, double Fy, double Fz);
+        double fx, double fy, double fz);
+        //// double Fx, double Fy, double Fz);
 
     //--------------------------------------------------------
     // 옵션 3: Retreat Segment
@@ -78,7 +79,7 @@ public:
     //// nrs_path::Waypoints setToolVectorOriginalIncludeVectorSmoothing(
         const std::vector<geometry_msgs::msg::Point> &points,
         const Triangle_mesh &mesh,
-        double Fx, double Fy, double Fz);
+        double fx, double fy, double fz);
 
     //--------------------------------------------------------
     // 최종 wrapper 함수: reference_points로부터 시작/끝 노멀 계산 후 옵션에 따라 헬퍼 호출
@@ -89,7 +90,7 @@ public:
                                         const std::vector<geometry_msgs::msg::Point> &retreat_interpolated,
                                         const std::vector<geometry_msgs::msg::Point> &home_interpolated,
                                         const Triangle_mesh &mesh,
-                                        double Fx, double Fy, double Fz);
+                                        double fx, double fy, double fz);
 
     // 세그먼트(approach, retreat, home 등)를 생성하는 함수
     std::vector<geometry_msgs::msg::Point> generate_segment(std::vector<geometry_msgs::msg::Point> &original_points,
@@ -111,7 +112,7 @@ public:
     //// nrs_path::Waypoints interpolateXYZQF(const nrs_path::Waypoints &input, double desired_interval);
 
     nrs_path2::msg::Waypoints interpolateEnd2End(const nrs_path2::msg::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double fx, double fy, double fz);
-    //// nrs_path::Waypoints interpolateEnd2End(const nrs_path::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double Fx, double Fy, double Fz);
+    //// nrs_path::Waypoints interpolateEnd2End(const nrs_path::Waypoints &original_waypoints, double desired_interval, const Triangle_mesh &mesh, double fx, double fy, double fz);
 
     Eigen::Vector3d getFaceNormal(const geometry_msgs::msg::Point &ros_point, const Triangle_mesh &mesh);
 };
