@@ -173,6 +173,12 @@ install(DIRECTORY rviz/ DESTINATION share/${PROJECT_NAME}/rviz)
 install(DIRECTORY urdf/ DESTINATION share/${PROJECT_NAME}/urdf)
 install(DIRECTORY mesh/ DESTINATION share/${PROJECT_NAME}/mesh)
 
+install(TARGETS
+  nrs_node_path_generation
+  nrs_node_visualization
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ##############################
 #           TESTS            #
 ##############################
