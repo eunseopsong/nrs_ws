@@ -22,8 +22,10 @@ public:
     explicit nrs_callback(rclcpp::Node::SharedPtr node);
     rclcpp::Node::SharedPtr node_;  // 노드 저장용
 
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr spline_service_;
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr straight_service_;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr spline_service;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr straight_service;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr interpolation_service;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr path_delete_service;
     ////////////////////////////////////////////////////////////////
 
     nrs_io n_io;
