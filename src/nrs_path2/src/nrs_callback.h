@@ -48,7 +48,7 @@ public:
     // geodesic waypoints를 interpolation하기 위해 사용
     nrs_path2::msg::Waypoints geodesic_path;                                            // nrs_path::Waypoints geodesic_path;
 
-    double desired_interval, Fx, Fy, Fz;
+    double desired_interval, fx, fy, fz;
     std::string interpolated_waypoints_file_path;
 
     /*-------------------------------path simulation-------------------------------*/
