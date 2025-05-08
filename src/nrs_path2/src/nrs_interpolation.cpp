@@ -439,32 +439,33 @@ nrs_path2::msg::Waypoints nrs_interpolation::setToolVector(const std::vector<geo
     return final_waypoints;
 }
 
-// // SLERP 헬퍼 함수 구현
-// tf2::Quaternion nrs_interpolation::quaternionSlerp(const tf2::Quaternion &q1, const tf2::Quaternion &q2, double t)
-// {
-//     double dot = q1.x() * q2.x() + q1.y() * q2.y() + q1.z() * q2.z() + q1.w() * q2.w();
-//     tf2::Quaternion q2_copy = q2;
-//     if (dot < 0.0)
-//     {
-//         q2_copy = -q2_copy;
-//         dot = -dot;
-//     }
-//     if (dot > 0.9995)
-//     {
-//         tf2::Quaternion result = q1 * (1.0 - t) + q2_copy * t;
-//         result.normalize();
-//         return result;
-//     }
-//     double theta_0 = acos(dot);
-//     double theta = theta_0 * t;
-//     double sin_theta = sin(theta);
-//     double sin_theta_0 = sin(theta_0);
-//     double s1 = cos(theta) - dot * sin_theta / sin_theta_0;
-//     double s2 = sin_theta / sin_theta_0;
-//     tf2::Quaternion result = (q1 * s1) + (q2_copy * s2);
-//     result.normalize();
-//     return result;
-// }
+// SLERP 헬퍼 함수 구현
+tf2::Quaternion nrs_interpolation::quaternionSlerp(const tf2::Quaternion &q1, const tf2::Quaternion &q2, double t)
+{
+    double dot = q1.x() * q2.x() + q1.y() * q2.y() + q1.z() * q2.z() + q1.w() * q2.w();
+    tf2::Quaternion q2_copy = q2;
+    if (dot < 0.0)
+    {
+        q2_copy = q2_copy.inverse();  // 반전된 q2_copy 생성
+        //// q2_copy = -q2_copy;
+        dot = -dot;
+    }
+    if (dot > 0.9995)
+    {
+        tf2::Quaternion result = q1 * (1.0 - t) + q2_copy * t;
+        result.normalize();
+        return result;
+    }
+    double theta_0 = acos(dot);
+    double theta = theta_0 * t;
+    double sin_theta = sin(theta);
+    double sin_theta_0 = sin(theta_0);
+    double s1 = cos(theta) - dot * sin_theta / sin_theta_0;
+    double s2 = sin_theta / sin_theta_0;
+    tf2::Quaternion result = (q1 * s1) + (q2_copy * s2);
+    result.normalize();
+    return result;
+}
 
 // // 쿼터니언 기반 보간 함수 구현
 // nrs_path::Waypoints nrs_interpolation::interpolateXYZQF(const nrs_path::Waypoints &input, double desired_interval)
