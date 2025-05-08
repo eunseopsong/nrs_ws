@@ -13,7 +13,9 @@ bool nrs_callback::splinePathServiceCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    ROS_INFO("Spline path service called. Generating Hermite Spline Path...");
+    RCLCPP_INFO(node_->get_logger(), "Spline path service called. Generating Hermite Spline Path...");
+    // ROS_INFO("Spline path service called. Generating Hermite Spline Path...");
+
     std::ifstream input(mesh_file_path, std::ios::binary);
     Triangle_mesh tmesh;
     n_geodesic.load_stl_file(input, tmesh);
@@ -33,7 +35,9 @@ bool nrs_callback::splinePathServiceCallback(
 
         // 생성된 웨이포인트 퍼블리시
         geodesic_waypoints_pub.publish(path_points);
-        ROS_INFO("Published Hermite Spline Path with %zu waypoints", path_points.waypoints.size());
+
+        RCLCPP_INFO(node_->get_logger(), "Published Hermite Spline Path with %zu waypoints", path_points.waypoints.size());
+        // ROS_INFO("Published Hermite Spline Path with %zu waypoints", path_points.waypoints.size());
 
         n_io.clearFile(geodesic_waypoints_file_path);
         n_io.saveWaypointsToFile(path_points, geodesic_waypoints_file_path);
@@ -41,7 +45,8 @@ bool nrs_callback::splinePathServiceCallback(
     }
     else
     {
-        ROS_WARN("Not enough selected points for Hermite Spline Path generation.");
+        RCLCPP_WARN(node_->get_logger(), "Not enough selected points for Hermite Spline Path generation.");
+        // ROS_WARN("Not enough selected points for Hermite Spline Path generation.");
         return false;
     }
 }
