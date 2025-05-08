@@ -122,19 +122,19 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 
 ####### Executable Definitions #######
-add_executable(path_projection src/path_projection.cpp)
-ament_target_dependencies(path_projection ${COMMON_DEPENDENCIES})
-target_include_directories(path_projection PUBLIC
-  ${CGAL_INCLUDE_DIRS}
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
-)
-add_dependencies(path_projection ${PROJECT_NAME}__rosidl_generator_cpp)
-target_link_libraries(path_projection
-  ${CGAL_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
-  ${YAML_CPP_LIBRARIES}
-)
+# add_executable(path_projection src/path_projection.cpp)
+# ament_target_dependencies(path_projection ${COMMON_DEPENDENCIES})
+# target_include_directories(path_projection PUBLIC
+#   ${CGAL_INCLUDE_DIRS}
+#   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
+# )
+# add_dependencies(path_projection ${PROJECT_NAME}__rosidl_generator_cpp)
+# target_link_libraries(path_projection
+#   ${CGAL_LIBRARIES}
+#   ${PCL_LIBRARIES}
+#   ${OpenCV_LIBS}
+#   ${YAML_CPP_LIBRARIES}
+# )
 
 add_executable(nrs_node_path_generation ${sources})
 ament_target_dependencies(nrs_node_path_generation ${COMMON_DEPENDENCIES})
