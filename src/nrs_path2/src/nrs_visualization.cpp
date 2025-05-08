@@ -2,8 +2,13 @@
 
 nrs_visualization::nrs_visualization() : clicked_marker_id(0)
 {
+    // 퍼블리셔들은 아직 초기화하지 않음.
     // 퍼블리셔는 외부에서 node_ 설정 후 직접 초기화
 }
+
+// nrs_visualization::~nrs_visualization()
+// { // 필요 시 자원 해제 (현재 특별한 작업 없음) 
+// }
 
 // 경로 시각화
 void nrs_visualization::visualizePath(const std::vector<geometry_msgs::msg::Point> &path,
