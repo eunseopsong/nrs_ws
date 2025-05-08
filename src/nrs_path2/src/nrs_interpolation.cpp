@@ -301,137 +301,143 @@ nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorRetreat(
     return waypoints;
 }
 
-// //--------------------------------------------------------
-// // 옵션 4: Home Segment
-// // 마지막 reference point의 노멀(end_normal)을 기준으로 계산한 orientation으로 전체 구간에 동일 적용
-// nrs_path::Waypoints nrs_interpolation::setToolVectorHome(
-//     const std::vector<geometry_msgs::Point> &points,
-//     const Triangle_mesh &mesh,
-//     const Kernel::Vector_3 &end_normal)
-// {
-//     nrs_path::Waypoints waypoints;
-//     tf2::Vector3 z_axis(-end_normal.x(), -end_normal.y(), -end_normal.z());
-//     z_axis.normalize();
-//     tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
-//     tf2::Vector3 y_axis = z_axis.cross(x_axis.normalized());
-//     x_axis = y_axis.cross(z_axis).normalized();
-//     tf2::Matrix3x3 orientation_matrix(
-//         x_axis.x(), y_axis.x(), z_axis.x(),
-//         x_axis.y(), y_axis.y(), z_axis.y(),
-//         x_axis.z(), y_axis.z(), z_axis.z());
-//     tf2::Quaternion q;
-//     orientation_matrix.getRotation(q);
+//--------------------------------------------------------
+// 옵션 4: Home Segment
+// 마지막 reference point의 노멀(end_normal)을 기준으로 계산한 orientation으로 전체 구간에 동일 적용
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorHome(
+    const std::vector<geometry_msgs::msg::Point> &points,
+    const Triangle_mesh &mesh,
+    const Kernel::Vector_3 &end_normal)
+{
+    nrs_path2::msg::Waypoints waypoints;
+    tf2::Vector3 z_axis(-end_normal.x(), -end_normal.y(), -end_normal.z());
+    z_axis.normalize();
+    tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
+    tf2::Vector3 y_axis = z_axis.cross(x_axis.normalized());
+    x_axis = y_axis.cross(z_axis).normalized();
+    tf2::Matrix3x3 orientation_matrix(
+        x_axis.x(), y_axis.x(), z_axis.x(),
+        x_axis.y(), y_axis.y(), z_axis.y(),
+        x_axis.z(), y_axis.z(), z_axis.z());
+    tf2::Quaternion q;
+    orientation_matrix.getRotation(q);
 
-//     for (const auto &point : points)
-//     {
-//         nrs_path::Waypoint wp;
-//         wp.x = point.x;
-//         wp.y = point.y;
-//         wp.z = point.z;
-//         wp.qw = q.getW();
-//         wp.qx = q.getX();
-//         wp.qy = q.getY();
-//         wp.qz = q.getZ();
-//         waypoints.waypoints.push_back(wp);
-//     }
-//     return waypoints;
-// }
+    for (const auto &point : points)
+    {
+        nrs_path2::msg::Waypoint wp;
+        wp.x = point.x;
+        wp.y = point.y;
+        wp.z = point.z;
+        wp.qw = q.getW();
+        wp.qx = q.getX();
+        wp.qy = q.getY();
+        wp.qz = q.getZ();
+        waypoints.waypoints.push_back(wp);
+    }
+    return waypoints;
+}
 
-// //--------------------------------------------------------
-// // 옵션 5: 각 점마다 개별 orientation 계산
-// nrs_path::Waypoints nrs_interpolation::setToolVectorOriginalIncludeVectorSmoothing(
-//     const std::vector<geometry_msgs::Point> &points,
-//     const Triangle_mesh &mesh,
-//     double Fx, double Fy, double Fz)
-// {
-//     nrs_path::Waypoints waypoints;
-//     for (const auto &point : points)
-//     {
-//         Point_3 cgal_point(point.x, point.y, point.z);
-//         face_descriptor face;
-//         CGAL::cpp11::array<double, 3> location;
-//         if (!n_geodesic.locate_face_and_point(cgal_point, face, location, mesh))
-//         {
-//             ROS_ERROR("Failed to locate face for point: [%f, %f, %f]", point.x, point.y, point.z);
-//             continue;
-//         }
-//         tf2::Vector3 z_axis;
-//         {
-//             // face의 세 정점을 사용하여 보간된 노멀 계산
-//             Triangle_mesh::Halfedge_index h = mesh.halfedge(face);
-//             vertex_descriptor v0 = mesh.source(h);
-//             vertex_descriptor v1 = mesh.target(h);
-//             vertex_descriptor v2 = mesh.target(mesh.next(h));
-//             Kernel::Vector_3 normal_v0 = CGAL::Polygon_mesh_processing::compute_vertex_normal(v0, mesh);
-//             Kernel::Vector_3 normal_v1 = CGAL::Polygon_mesh_processing::compute_vertex_normal(v1, mesh);
-//             Kernel::Vector_3 normal_v2 = CGAL::Polygon_mesh_processing::compute_vertex_normal(v2, mesh);
-//             Kernel::Vector_3 interpolated_normal = location[0] * normal_v0 +
-//                                                    location[1] * normal_v1 +
-//                                                    location[2] * normal_v2;
-//             z_axis = tf2::Vector3(-interpolated_normal.x(), -interpolated_normal.y(), -interpolated_normal.z());
-//             z_axis.normalize();
-//         }
-//         tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
-//         tf2::Vector3 y_axis = z_axis.cross(x_axis.normalized());
-//         x_axis = y_axis.cross(z_axis).normalized();
-//         tf2::Matrix3x3 orientation_matrix(
-//             x_axis.x(), y_axis.x(), z_axis.x(),
-//             x_axis.y(), y_axis.y(), z_axis.y(),
-//             x_axis.z(), y_axis.z(), z_axis.z());
-//         tf2::Quaternion q;
-//         orientation_matrix.getRotation(q);
+//--------------------------------------------------------
+// 옵션 5: 각 점마다 개별 orientation 계산
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVectorOriginalIncludeVectorSmoothing(
+    const std::vector<geometry_msgs::msg::Point> &points,
+    const Triangle_mesh &mesh,
+    double fx, double fy, double fz
+    //// double Fx, double Fy, double Fz
+    )
+{
+    nrs_path2::msg::Waypoints waypoints;
+    for (const auto &point : points)
+    {
+        Point_3 cgal_point(point.x, point.y, point.z);
+        face_descriptor face;
+        CGAL::cpp11::array<double, 3> location;
+        if (!n_geodesic.locate_face_and_point(cgal_point, face, location, mesh))
+        {
+            RCLCPP_ERROR(rclcpp::get_logger("nrs_interpolation"), "Failed to locate face for point: [%f, %f, %f]", point.x, point.y, point.z);
+            //// ROS_ERROR("Failed to locate face for point: [%f, %f, %f]", point.x, point.y, point.z);
+            continue;
+        }
+        tf2::Vector3 z_axis;
+        {
+            // face의 세 정점을 사용하여 보간된 노멀 계산
+            Triangle_mesh::Halfedge_index h = mesh.halfedge(face);
+            vertex_descriptor v0 = mesh.source(h);
+            vertex_descriptor v1 = mesh.target(h);
+            vertex_descriptor v2 = mesh.target(mesh.next(h));
+            Kernel::Vector_3 normal_v0 = CGAL::Polygon_mesh_processing::compute_vertex_normal(v0, mesh);
+            Kernel::Vector_3 normal_v1 = CGAL::Polygon_mesh_processing::compute_vertex_normal(v1, mesh);
+            Kernel::Vector_3 normal_v2 = CGAL::Polygon_mesh_processing::compute_vertex_normal(v2, mesh);
+            Kernel::Vector_3 interpolated_normal = location[0] * normal_v0 +
+                                                   location[1] * normal_v1 +
+                                                   location[2] * normal_v2;
+            z_axis = tf2::Vector3(-interpolated_normal.x(), -interpolated_normal.y(), -interpolated_normal.z());
+            z_axis.normalize();
+        }
+        tf2::Vector3 x_axis(-1.0, -1.0, 0.0);
+        tf2::Vector3 y_axis = z_axis.cross(x_axis.normalized());
+        x_axis = y_axis.cross(z_axis).normalized();
+        tf2::Matrix3x3 orientation_matrix(
+            x_axis.x(), y_axis.x(), z_axis.x(),
+            x_axis.y(), y_axis.y(), z_axis.y(),
+            x_axis.z(), y_axis.z(), z_axis.z());
+        tf2::Quaternion q;
+        orientation_matrix.getRotation(q);
 
-//         nrs_path::Waypoint wp;
-//         wp.x = point.x;
-//         wp.y = point.y;
-//         wp.z = point.z;
-//         wp.qw = q.getW();
-//         wp.qx = q.getX();
-//         wp.qy = q.getY();
-//         wp.qz = q.getZ();
-//         wp.Fx = Fx;
-//         wp.Fy = Fy;
-//         wp.Fz = Fz;
-//         waypoints.waypoints.push_back(wp);
-//     }
-//     return waypoints;
-// }
+        nrs_path2::msg::Waypoint wp;
+        wp.x = point.x;
+        wp.y = point.y;
+        wp.z = point.z;
+        wp.qw = q.getW();
+        wp.qx = q.getX();
+        wp.qy = q.getY();
+        wp.qz = q.getZ();
+        wp.fx = fx; //// wp.Fx = Fx;
+        wp.fy = fy; //// wp.Fy = Fy;
+        wp.fz = fz; //// wp.Fz = Fz;
+        waypoints.waypoints.push_back(wp);
+    }
+    return waypoints;
+}
 
-// //--------------------------------------------------------
-// // 최종 wrapper 함수: reference_points로부터 시작/끝 노멀 계산 후 옵션에 따라 헬퍼 호출
-// nrs_path::Waypoints nrs_interpolation::setToolVector(const std::vector<geometry_msgs::Point> &approach_interpolated,
-//                                                        const std::vector<geometry_msgs::Point> &original_interpolated,
-//                                                        const std::vector<geometry_msgs::Point> &retreat_interpolated,
-//                                                        const std::vector<geometry_msgs::Point> &home_interpolated,
-//                                                        const Triangle_mesh &mesh,
-//                                                        double Fx, double Fy, double Fz)
-// {
-//     // reference_points에서 시작점과 끝점을 결정
-//     Point_3 start_point(original_interpolated.front().x, original_interpolated.front().y, original_interpolated.front().z);
-//     Point_3 end_point(original_interpolated.back().x, original_interpolated.back().y, original_interpolated.back().z);
-//     face_descriptor start_face, end_face;
-//     CGAL::cpp11::array<double, 3> start_location, end_location;
-//     n_geodesic.locate_face_and_point(start_point, start_face, start_location, mesh);
-//     n_geodesic.locate_face_and_point(end_point, end_face, end_location, mesh);
-//     Kernel::Vector_3 start_normal = CGAL::Polygon_mesh_processing::compute_face_normal(start_face, mesh);
-//     Kernel::Vector_3 end_normal = CGAL::Polygon_mesh_processing::compute_face_normal(end_face, mesh);
+//--------------------------------------------------------
+// 최종 wrapper 함수: reference_points로부터 시작/끝 노멀 계산 후 옵션에 따라 헬퍼 호출
+nrs_path2::msg::Waypoints nrs_interpolation::setToolVector(const std::vector<geometry_msgs::msg::Point> &approach_interpolated,
+                                                           const std::vector<geometry_msgs::msg::Point> &original_interpolated,
+                                                           const std::vector<geometry_msgs::msg::Point> &retreat_interpolated,
+                                                           const std::vector<geometry_msgs::msg::Point> &home_interpolated,
+                                                           const Triangle_mesh &mesh,
+                                                           double fx, double fy, double fz
+                                                           //// double Fx, double Fy, double Fz
+                                                           )
+{
+    // reference_points에서 시작점과 끝점을 결정
+    Point_3 start_point(original_interpolated.front().x, original_interpolated.front().y, original_interpolated.front().z);
+    Point_3 end_point(original_interpolated.back().x, original_interpolated.back().y, original_interpolated.back().z);
+    face_descriptor start_face, end_face;
+    CGAL::cpp11::array<double, 3> start_location, end_location;
+    n_geodesic.locate_face_and_point(start_point, start_face, start_location, mesh);
+    n_geodesic.locate_face_and_point(end_point, end_face, end_location, mesh);
+    Kernel::Vector_3 start_normal = CGAL::Polygon_mesh_processing::compute_face_normal(start_face, mesh);
+    Kernel::Vector_3 end_normal = CGAL::Polygon_mesh_processing::compute_face_normal(end_face, mesh);
 
-//     nrs_path::Waypoints approach_waypoints = setToolVectorApproach(approach_interpolated, mesh, start_normal);
-//     nrs_path::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, Fx, Fy, Fz);
-//     nrs_path::Waypoints retreat_waypoints = setToolVectorRetreat(retreat_interpolated, mesh, end_normal);
-//     nrs_path::Waypoints home_waypoints = setToolVectorHome(home_interpolated, mesh, end_normal);
+    nrs_path2::msg::Waypoints approach_waypoints = setToolVectorApproach(approach_interpolated, mesh, start_normal);
+    nrs_path2::msg::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, fx, fy, fz);
+    //// nrs_path::Waypoints original_waypoints = setToolVectorOriginal(original_interpolated, mesh, Fx, Fy, Fz);
+    nrs_path2::msg::Waypoints retreat_waypoints = setToolVectorRetreat(retreat_interpolated, mesh, end_normal);
+    nrs_path2::msg::Waypoints home_waypoints = setToolVectorHome(home_interpolated, mesh, end_normal);
 
-//     nrs_path::Waypoints final_waypoints;
-//     final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
-//                                      approach_waypoints.waypoints.begin(), approach_waypoints.waypoints.end());
-//     final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
-//                                      original_waypoints.waypoints.begin(), original_waypoints.waypoints.end());
-//     final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
-//                                      retreat_waypoints.waypoints.begin(), retreat_waypoints.waypoints.end());
-//     final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
-//                                      home_waypoints.waypoints.begin(), home_waypoints.waypoints.end());
-//     return final_waypoints;
-// }
+    nrs_path2::msg::Waypoints final_waypoints;
+    final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
+                                     approach_waypoints.waypoints.begin(), approach_waypoints.waypoints.end());
+    final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
+                                     original_waypoints.waypoints.begin(), original_waypoints.waypoints.end());
+    final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
+                                     retreat_waypoints.waypoints.begin(), retreat_waypoints.waypoints.end());
+    final_waypoints.waypoints.insert(final_waypoints.waypoints.end(),
+                                     home_waypoints.waypoints.begin(), home_waypoints.waypoints.end());
+    return final_waypoints;
+}
 
 // // SLERP 헬퍼 함수 구현
 // tf2::Quaternion nrs_interpolation::quaternionSlerp(const tf2::Quaternion &q1, const tf2::Quaternion &q2, double t)
