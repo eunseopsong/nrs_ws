@@ -7,8 +7,22 @@ nrs_visualization::nrs_visualization() : clicked_marker_id(0)
 }
 
 // nrs_visualization::~nrs_visualization()
-// { // 필요 시 자원 해제 (현재 특별한 작업 없음) 
+// { // 필요 시 자원 해제 (현재 특별한 작업 없음)
 // }
+
+/////////
+void nrs_visualization::init(rclcpp::Node::SharedPtr node)
+{
+    node_ = node;
+
+    marker_pub1 = node_->create_publisher<visualization_msgs::msg::Marker>("visualization_marker1", 10);
+    marker_pub2 = node_->create_publisher<visualization_msgs::msg::Marker>("visualization_marker2", 10);
+    clicked_marker_pub = node_->create_publisher<visualization_msgs::msg::Marker>("clicked_marker", 10);
+
+    RCLCPP_INFO(node_->get_logger(), "Marker publishers initialized.");
+}
+//////////
+
 
 // 경로 시각화
 void nrs_visualization::visualizePath(const std::vector<geometry_msgs::msg::Point> &path,
