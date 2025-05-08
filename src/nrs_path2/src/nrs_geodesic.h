@@ -63,6 +63,9 @@ public:
      */
 
     ///////
+    // ROS2 Logger를 사용하기 위한 멤버 변수
+    rclcpp::Logger logger_;
+
     // 기본 생성자
     nrs_geodesic() : logger_(rclcpp::get_logger("nrs_geodesic")) {}
 
