@@ -94,7 +94,27 @@ bool nrs_callback::straightPathServiceCallback(
     RCLCPP_INFO(node_->get_logger(), "Straight path service called. Generating Geodesic Path...");
     //// ROS_INFO("Straight path service called. Generating Geodesic Path...");
 
+    // === [디버깅 로그 추가 시작] ===
+    if (!node_) {
+        std::cerr << "[FATAL] node_ is null!" << std::endl;
+        return false;
+    }
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG] straightPathServiceCallback triggered.");
+
     std::ifstream input(mesh_file_path, std::ios::binary);
+    if (!input) {
+        RCLCPP_ERROR(node_->get_logger(), "Cannot open mesh file: %s", mesh_file_path.c_str());
+        return false;
+    } else {
+        RCLCPP_INFO(node_->get_logger(), "[DEBUG] Successfully opened mesh file.");
+    }
+
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG] selected_points.size() = %zu", selected_points.size());
+
+    // === [디버깅 로그 추가 끝] ===
+
+
+    // std::ifstream input(mesh_file_path, std::ios::binary);
     Triangle_mesh tmesh;
     n_geodesic.load_stl_file(input, tmesh);
     Tree *tree;
