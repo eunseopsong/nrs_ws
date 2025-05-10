@@ -2,7 +2,7 @@
 
 nrs_callback::nrs_callback()
 {
-    // 기본 생성자에서 아무것도 하지 않아도 괜찮습니다.
+    // 기본 생성자에서 아무것도 하지 않아도 괜찮습니다. (by gpt)
 }
 
 nrs_callback::nrs_callback(rclcpp::Node::SharedPtr node)
