@@ -63,6 +63,31 @@ int main(int argc, char **argv)
     // === 서비스 등록을 위한 생성자 호출 === (2025.05.10 22:12)
     callback_handler = nrs_callback(node);
 
+    // // Spline Path Callback
+    // spline_service = node_->create_service<std_srvs::srv::Empty>(
+    //     "spline",
+    //     std::bind(&nrs_callback::splinePathServiceCallback, this,
+    //               std::placeholders::_1, std::placeholders::_2));
+
+    // // Geodesic (직선) 경로 생성 서비스 콜백 함수
+    // straight_service = node_->create_service<std_srvs::srv::Empty>(
+    //     "straight",
+    //     std::bind(&nrs_callback::straightPathServiceCallback, this,
+    //             std::placeholders::_1, std::placeholders::_2));
+
+    // // Waypoints 콜백 함수 구현
+    // interpolation_service = node_->create_service<std_srvs::srv::Empty>(
+    //     "interpolation",
+    //     std::bind(&nrs_callback::PathInterpolationCallback, this,
+    //             std::placeholders::_1, std::placeholders::_2));
+
+    // // Path Delete Callback
+    // path_delete_service = node_->create_service<std_srvs::srv::Empty>(
+    //     "delete",
+    //     std::bind(&nrs_callback::pathDeleteCallback, this,
+    //             std::placeholders::_1, std::placeholders::_2));
+
+
     // === Path Generation ===
     callback_handler.node_ = node;
     callback_handler.mesh_file_path = mesh_file_path;
