@@ -724,56 +724,57 @@ nrs_geodesic::ConvertToWaypoints(const std::vector<geometry_msgs::msg::Point> &p
     return waypoints;
 }
 
-nrs_path2::msg::Waypoints //// nrs_path::Waypoints
-nrs_geodesic::GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh)
+nrs_path2::msg::Waypoints nrs_geodesic::GenerateStraightGeodesicPath(
+    const std::vector<Eigen::Vector3d>& points, const Triangle_mesh& tmesh)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     std::vector<Point_3> complete_path;
-    std::vector<Point_3> path_segment;
-    shortest_paths = new Surface_mesh_shortest_path(tmesh);
+    Surface_mesh_shortest_path shortest_paths_local(tmesh);
+
     for (size_t i = 1; i < points.size(); ++i)
     {
-
         Point_3 start(points[i - 1].x(), points[i - 1].y(), points[i - 1].z());
-
         Point_3 end(points[i].x(), points[i].y(), points[i].z());
 
         face_descriptor start_face, end_face;
         Surface_mesh_shortest_path::Barycentric_coordinates start_location, end_location;
-        locate_face_and_point(start, start_face, start_location, tmesh);
 
-        locate_face_and_point(end, end_face, end_location, tmesh);
+        bool success_start = locate_face_and_point(start, start_face, start_location, tmesh);
+        bool success_end = locate_face_and_point(end, end_face, end_location, tmesh);
 
-        shortest_paths->add_source_point(end_face, end_location);
+        if (!success_start || !success_end)
+        {
+            RCLCPP_ERROR(logger_, "[straight] Failed to locate face for point pair %lu -> %lu", i - 1, i);
+            continue;  // 또는 return path_points; 로 조기 종료 가능
+        }
 
-        shortest_paths->shortest_path_points_to_source_points(start_face, start_location, std::back_inserter(path_segment));
-        shortest_paths->remove_all_source_points();
-        complete_path.clear();
+        std::vector<Point_3> path_segment;
+        shortest_paths_local.add_source_point(end_face, end_location);
+        shortest_paths_local.shortest_path_points_to_source_points(
+            start_face, start_location, std::back_inserter(path_segment));
+        shortest_paths_local.remove_all_source_points();
+
         complete_path.insert(complete_path.end(), path_segment.begin(), path_segment.end());
-        shortest_paths->remove_all_source_points();
     }
 
-    nrs_path2::msg::Waypoints path_points; //// nrs_path::Waypoints path_points;
-    for (size_t i = 0; i < complete_path.size(); i++)
+    nrs_path2::msg::Waypoints path_points;
+
+    for (const auto& pt : complete_path)
     {
-        nrs_path2::msg::Waypoint wp; //// nrs_path::Waypoint wp;
-        wp.x = complete_path[i].x();
-        wp.y = complete_path[i].y();
-        wp.z = complete_path[i].z();
+        nrs_path2::msg::Waypoint wp;
+        wp.x = pt.x();
+        wp.y = pt.y();
+        wp.z = pt.z();
         path_points.waypoints.push_back(wp);
     }
 
     RCLCPP_INFO(logger_, "Generated geodesic path with %zu points", path_points.waypoints.size());
-    //// ROS_INFO("Generated geodesic path with %zu points", path_points.waypoints.size());
-    // 프로그램 종료 시간 기록
+
     auto end_time = std::chrono::high_resolution_clock::now();
-
-    // 시작과 종료 시간의 차이 계산 (밀리초 단위)
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
-
-    // 소요 시간 출력
     std::cout << "straight path generation time: " << duration << " s" << std::endl;
+
     return path_points;
 }
 
