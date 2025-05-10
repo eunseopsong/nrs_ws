@@ -88,6 +88,8 @@ bool nrs_callback::straightPathServiceCallback(
 {
     // (void)req;
     // (void)res;  // not used variable error prohibition
+    RCLCPP_INFO(node_->get_logger(), "[straight] Service was called!");
+    RCLCPP_INFO(node_->get_logger(), "[straight] selected_points size: %ld", selected_points.size());
 
     RCLCPP_INFO(node_->get_logger(), "Straight path service called. Generating Geodesic Path...");
     //// ROS_INFO("Straight path service called. Generating Geodesic Path...");
