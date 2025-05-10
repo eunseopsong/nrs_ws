@@ -87,8 +87,8 @@ bool nrs_callback::straightPathServiceCallback(
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
     // shared_ptr 사용 안 하는 경우엔 다음 두 줄로 경고 제거
-    (void)req;
-    (void)res;
+    // (void)req;
+    // (void)res;
 
     if (!node_) {
         std::cerr << "[FATAL] node_ is null!" << std::endl;
