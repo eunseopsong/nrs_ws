@@ -38,8 +38,8 @@ bool nrs_callback::splinePathServiceCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    (void)req;
-    (void)res;  // not used variable error prohibition
+    // (void)req;
+    // (void)res;  // not used variable error prohibition
 
     RCLCPP_INFO(node_->get_logger(), "Spline path service called. Generating Hermite Spline Path...");
     //// ROS_INFO("Spline path service called. Generating Hermite Spline Path...");
@@ -86,8 +86,8 @@ bool nrs_callback::straightPathServiceCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    (void)req;
-    (void)res;  // not used variable error prohibition
+    // (void)req;
+    // (void)res;  // not used variable error prohibition
 
     RCLCPP_INFO(node_->get_logger(), "Straight path service called. Generating Geodesic Path...");
     //// ROS_INFO("Straight path service called. Generating Geodesic Path...");
@@ -133,8 +133,8 @@ bool nrs_callback::PathInterpolationCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    (void)req;
-    (void)res;  // not used variable error prohibition
+    // (void)req;
+    // (void)res;  // not used variable error prohibition
 
     // 1. STL 파일 열기
     std::ifstream input(mesh_file_path, std::ios::binary);
@@ -200,8 +200,8 @@ bool nrs_callback::pathDeleteCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    (void)req;
-    (void)res;  // not used variable error prohibition
+    // (void)req;
+    // (void)res;  // not used variable error prohibition
 
     n_visualization.deleteMarkers();
     selected_points.clear();

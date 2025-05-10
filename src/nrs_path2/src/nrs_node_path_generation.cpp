@@ -8,15 +8,17 @@
 #include <fstream>
 #include <iostream>
 
+// CGAL 및 nrs_mesh 관련 헤더는 nrs_callback.h 에서 이미 include 되었다고 가정
+
 // === 전역 변수 ===
 nrs_callback callback_handler;
 Triangle_mesh tmesh;
 std::string mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
 
-// === 클릭 포인트 콜백 ===
+// [생성] : "/clicked_point" 토픽 콜백 함수 (경로 생성)
 void clickedPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
 {
-    RCLCPP_INFO(rclcpp::get_logger("nrs_combined_node"), "Clicked point received");
+    RCLCPP_INFO(rclcpp::get_logger("clicked_point"), "Clicked point received");
 
     Kernel::Point_3 clicked_point(msg->point.x, msg->point.y, msg->point.z);
 
@@ -25,7 +27,7 @@ void clickedPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
 
     if (!callback_handler.n_geodesic.locate_face_and_point(clicked_point, face, location, tmesh))
     {
-        RCLCPP_ERROR(rclcpp::get_logger("nrs_combined_node"), "Failed to locate clicked point on mesh.");
+        RCLCPP_ERROR(rclcpp::get_logger("clicked_point"), "Failed to locate clicked point on mesh.");
         return;
     }
 
