@@ -724,43 +724,40 @@ nrs_geodesic::ConvertToWaypoints(const std::vector<geometry_msgs::msg::Point> &p
     return waypoints;
 }
 
-nrs_path2::msg::Waypoints nrs_geodesic::GenerateStraightGeodesicPath(
-    const std::vector<Eigen::Vector3d>& points, const Triangle_mesh& tmesh)
+nrs_path2::msg::Waypoints nrs_geodesic::GenerateStraightGeodesicPath(const std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     std::vector<Point_3> complete_path;
-    Surface_mesh_shortest_path shortest_paths_local(tmesh);
 
     for (size_t i = 1; i < points.size(); ++i)
     {
+        std::vector<Point_3> path_segment;
+
         Point_3 start(points[i - 1].x(), points[i - 1].y(), points[i - 1].z());
         Point_3 end(points[i].x(), points[i].y(), points[i].z());
 
         face_descriptor start_face, end_face;
         Surface_mesh_shortest_path::Barycentric_coordinates start_location, end_location;
 
-        bool success_start = locate_face_and_point(start, start_face, start_location, tmesh);
-        bool success_end = locate_face_and_point(end, end_face, end_location, tmesh);
+        bool start_ok = locate_face_and_point(start, start_face, start_location, tmesh);
+        bool end_ok   = locate_face_and_point(end, end_face, end_location, tmesh);
 
-        if (!success_start || !success_end)
-        {
-            RCLCPP_ERROR(logger_, "[straight] Failed to locate face for point pair %lu -> %lu", i - 1, i);
-            continue;  // 또는 return path_points; 로 조기 종료 가능
+        if (!start_ok || !end_ok) {
+            RCLCPP_ERROR(logger_, "Failed to locate face for point segment %zu", i);
+            continue;
         }
 
-        std::vector<Point_3> path_segment;
-        shortest_paths_local.add_source_point(end_face, end_location);
-        shortest_paths_local.shortest_path_points_to_source_points(
-            start_face, start_location, std::back_inserter(path_segment));
-        shortest_paths_local.remove_all_source_points();
+        // ❗ 지역 변수로 선언
+        Surface_mesh_shortest_path shortest_path_local(tmesh);
+        shortest_path_local.add_source_point(end_face, end_location);
+        shortest_path_local.shortest_path_points_to_source_points(start_face, start_location, std::back_inserter(path_segment));
 
         complete_path.insert(complete_path.end(), path_segment.begin(), path_segment.end());
     }
 
     nrs_path2::msg::Waypoints path_points;
-
-    for (const auto& pt : complete_path)
+    for (const auto &pt : complete_path)
     {
         nrs_path2::msg::Waypoint wp;
         wp.x = pt.x();
@@ -777,6 +774,7 @@ nrs_path2::msg::Waypoints nrs_geodesic::GenerateStraightGeodesicPath(
 
     return path_points;
 }
+
 
 nrs_path2::msg::Waypoints //// nrs_path::Waypoints
 nrs_geodesic::GenerateHermiteSplinePath(std::vector<Eigen::Vector3d> &points, const Triangle_mesh &tmesh)
