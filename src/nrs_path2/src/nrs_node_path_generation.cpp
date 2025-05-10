@@ -60,6 +60,9 @@ int main(int argc, char **argv)
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared("nrs_combined_node");
 
+    // === 서비스 등록을 위한 생성자 호출 === (2025.05.10 22:12)
+    callback_handler = nrs_callback(node);
+
     // === Path Generation ===
     callback_handler.node_ = node;
     callback_handler.mesh_file_path = mesh_file_path;
