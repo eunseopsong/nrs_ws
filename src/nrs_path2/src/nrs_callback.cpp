@@ -86,68 +86,42 @@ bool nrs_callback::straightPathServiceCallback(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
     std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    // (void)req;
-    // (void)res;  // not used variable error prohibition
-    RCLCPP_INFO(node_->get_logger(), "[straight] Service was called!");
-    RCLCPP_INFO(node_->get_logger(), "[straight] selected_points size: %ld", selected_points.size());
+    // shared_ptr 사용 안 하는 경우엔 다음 두 줄로 경고 제거
+    (void)req;
+    (void)res;
 
-    RCLCPP_INFO(node_->get_logger(), "Straight path service called. Generating Geodesic Path...");
-    //// ROS_INFO("Straight path service called. Generating Geodesic Path...");
-
-    // === [디버깅 로그 추가 시작] ===
     if (!node_) {
         std::cerr << "[FATAL] node_ is null!" << std::endl;
         return false;
     }
-    RCLCPP_INFO(node_->get_logger(), "[DEBUG] straightPathServiceCallback triggered.");
+
+    RCLCPP_INFO(node_->get_logger(), "[straight] Service called!");
+    RCLCPP_INFO(node_->get_logger(), "[straight] selected_points size: %zu", selected_points.size());
 
     std::ifstream input(mesh_file_path, std::ios::binary);
     if (!input) {
-        RCLCPP_ERROR(node_->get_logger(), "Cannot open mesh file: %s", mesh_file_path.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "Failed to open mesh file: %s", mesh_file_path.c_str());
         return false;
-    } else {
-        RCLCPP_INFO(node_->get_logger(), "[DEBUG] Successfully opened mesh file.");
     }
 
-    RCLCPP_INFO(node_->get_logger(), "[DEBUG] selected_points.size() = %zu", selected_points.size());
-
-    // === [디버깅 로그 추가 끝] ===
-
-
-    // std::ifstream input(mesh_file_path, std::ios::binary);
     Triangle_mesh tmesh;
-    n_geodesic.load_stl_file(input, tmesh);
-    Tree *tree;
-    Surface_mesh_shortest_path *shortest_paths;
-    tree = new Tree(tmesh.faces().begin(), tmesh.faces().end(), tmesh);
-    tree->accelerate_distance_queries();
-    shortest_paths = new Surface_mesh_shortest_path(tmesh);
-    waypoints_msg.waypoints.clear();
-
-    // 최소 2개 이상의 선택된 점이 필요
-    if (selected_points.size() > 1)
-    {
-        // Geodesic 경로 생성 (selected_points와 tmesh 사용)
-        nrs_path2::msg::Waypoints path_points = n_geodesic.GenerateStraightGeodesicPath(selected_points, tmesh);
-        //// nrs_path::Waypoints path_points = n_geodesic.GenerateStraightGeodesicPath(selected_points, tmesh);
-
-        // 생성된 웨이포인트 퍼블리시
-        geodesic_waypoints_pub->publish(path_points);
-        //// geodesic_waypoints_pub.publish(path_points);
-
-        RCLCPP_INFO(node_->get_logger(), "Published Geodesic Path with %zu waypoints", path_points.waypoints.size());
-        //// ROS_INFO("Published Geodesic Path with %zu waypoints", path_points.waypoints.size());
-        n_io.clearFile(geodesic_waypoints_file_path);
-        n_io.saveWaypointsToFile(path_points, geodesic_waypoints_file_path);
-        return true;
-    }
-    else
-    {
-        RCLCPP_WARN(node_->get_logger(), "Not enough selected points for Geodesic Path generation.");
-        //// ROS_WARN("Not enough selected points for Geodesic Path generation.");
+    if (!n_geodesic.load_stl_file(input, tmesh)) {
+        RCLCPP_ERROR(node_->get_logger(), "Failed to load mesh.");
         return false;
     }
+
+    if (selected_points.size() < 2) {
+        RCLCPP_WARN(node_->get_logger(), "Not enough points.");
+        return false;
+    }
+
+    auto path_points = n_geodesic.GenerateStraightGeodesicPath(selected_points, tmesh);
+    geodesic_waypoints_pub->publish(path_points);
+    n_io.saveWaypointsToFile(path_points, geodesic_waypoints_file_path);
+
+    return true;
 }
+
 
 // Waypoints 콜백 함수 구현
 //// bool nrs_callback::PathInterpolationCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
