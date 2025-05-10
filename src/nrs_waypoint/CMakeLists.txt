@@ -3,17 +3,18 @@ project(nrs_waypoint)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
-add_executable(waypoint_publisher src/waypoint_publisher.cpp)
+add_executable(clicked_point_publisher src/clicked_point_publisher.cpp)
+
 ament_target_dependencies(
-  waypoint_publisher
+  clicked_point_publisher
   rclcpp
-  std_msgs
+  geometry_msgs
 )
 
 install(TARGETS
-  waypoint_publisher
+  clicked_point_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
 
