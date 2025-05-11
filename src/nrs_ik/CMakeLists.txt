@@ -28,6 +28,11 @@ ament_target_dependencies(forward_kinematics_node
   rclcpp std_msgs
 )
 
+add_executable(txt_trajectory_executor src/txt_trajectory_executor.cpp)
+ament_target_dependencies(txt_trajectory_executor rclcpp sensor_msgs Eigen3)
+install(TARGETS txt_trajectory_executor DESTINATION lib/${PROJECT_NAME})
+
+
 # 설치 설정
 install(TARGETS
   inverse_kinematics_node
