@@ -11,7 +11,8 @@
 // CGAL 및 nrs_mesh 관련 헤더는 nrs_callback.h 에서 이미 include 되었다고 가정
 
 // === 전역 변수 ===
-nrs_callback callback_handler;
+// nrs_callback callback_handler;
+
 Triangle_mesh tmesh;
 std::string mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
 
@@ -61,35 +62,12 @@ int main(int argc, char **argv)
     auto node = rclcpp::Node::make_shared("nrs_combined_node");
 
     // === 서비스 등록을 위한 생성자 호출 === (2025.05.10 22:12)
-    callback_handler = nrs_callback(node);
-
-    // // Spline Path Callback
-    // spline_service = node_->create_service<std_srvs::srv::Empty>(
-    //     "spline",
-    //     std::bind(&nrs_callback::splinePathServiceCallback, this,
-    //               std::placeholders::_1, std::placeholders::_2));
-
-    // // Geodesic (직선) 경로 생성 서비스 콜백 함수
-    // straight_service = node_->create_service<std_srvs::srv::Empty>(
-    //     "straight",
-    //     std::bind(&nrs_callback::straightPathServiceCallback, this,
-    //             std::placeholders::_1, std::placeholders::_2));
-
-    // // Waypoints 콜백 함수 구현
-    // interpolation_service = node_->create_service<std_srvs::srv::Empty>(
-    //     "interpolation",
-    //     std::bind(&nrs_callback::PathInterpolationCallback, this,
-    //             std::placeholders::_1, std::placeholders::_2));
-
-    // // Path Delete Callback
-    // path_delete_service = node_->create_service<std_srvs::srv::Empty>(
-    //     "delete",
-    //     std::bind(&nrs_callback::pathDeleteCallback, this,
-    //             std::placeholders::_1, std::placeholders::_2));
-
+    nrs_callback callback_handler(node);
+    // callback_handler = nrs_callback(node);
 
     // === Path Generation ===
-    callback_handler.node_ = node;
+    // callback_handler.node_ = node;
+
     callback_handler.mesh_file_path = mesh_file_path;
     callback_handler.geodesic_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt";
     callback_handler.geodesic_waypoints_pub =
