@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <iterator>
 
 using namespace std::chrono_literals;
 using Eigen::Matrix3d;
@@ -29,9 +30,9 @@ public:
     };
     joint_state_.position.resize(6, 0.0);
 
-    timer_ = this->create_wall_timer(100ms, std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
-
     load_waypoints("/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
+
+    timer_ = this->create_wall_timer(300ms, std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
   }
 
 private:
@@ -52,13 +53,33 @@ private:
   {
     std::ifstream infile(filepath);
     std::string line;
+    std::vector<std::vector<double>> raw_points;
+
     while (std::getline(infile, line)) {
       std::istringstream iss(line);
       std::vector<double> values((std::istream_iterator<double>(iss)), std::istream_iterator<double>());
       if (values.size() >= 3)
-        waypoints_.push_back(values);  // 3개 이상이면 받아줌
+        raw_points.push_back({values[0], values[1], values[2]});
     }
-    RCLCPP_INFO(this->get_logger(), "Loaded %zu waypoints.", waypoints_.size());
+
+    // Linear interpolation (5x)
+    for (size_t i = 0; i + 1 < raw_points.size(); ++i) {
+      Vector3d p1(raw_points[i][0], raw_points[i][1], raw_points[i][2]);
+      Vector3d p2(raw_points[i+1][0], raw_points[i+1][1], raw_points[i+1][2]);
+
+      for (int j = 0; j < 5; ++j) {
+        double t = static_cast<double>(j) / 5.0;
+        Vector3d p = (1 - t) * p1 + t * p2;
+        waypoints_.push_back({p[0], p[1], p[2]});
+      }
+    }
+    // 마지막 점 추가
+    if (!raw_points.empty()) {
+      waypoints_.push_back(raw_points.back());
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Loaded %zu original waypoints, interpolated to %zu points.",
+                raw_points.size(), waypoints_.size());
   }
 
   void publish_next_point()
@@ -70,10 +91,14 @@ private:
     }
 
     auto& wp = waypoints_[current_idx_++];
-    Vector3d p(wp[0], wp[1], wp[2]);
-    Matrix3d R = Matrix3d::Identity();  // orientation은 고정 (rpy = 0)
+    double x = wp[0];
+    double y = wp[1];
+    double z = wp[2];
 
-    Vector3d pwc = p - d6 * R.col(2);  // Wrist center
+    Vector3d p(x, y, z);
+    Matrix3d R = Matrix3d::Identity();
+
+    Vector3d pwc = p - d6 * R.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
     double q1 = atan2(yc, xc);
 
@@ -86,26 +111,20 @@ private:
       return;
     }
 
-    double q3 = atan2(-sqrt(1 - D*D), D); // elbow-down
+    double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
 
-    Matrix4d T01 = dh_transform(0, d1, 0, q1);
-    Matrix4d T12 = dh_transform(a2, 0, 0, q2);
-    Matrix4d T23 = dh_transform(a3, 0, 0, q3);
-    Matrix4d T03 = T01 * T12 * T23;
-    Matrix3d R03 = T03.block<3,3>(0,0);
-    Matrix3d R36 = R03.transpose() * R;
-
-    double q5 = atan2(sqrt(R36(0,2)*R36(0,2) + R36(1,2)*R36(1,2)), R36(2,2));
-    double q4 = atan2(R36(1,2), R36(0,2));
-    double q6 = atan2(R36(2,1), -R36(2,0));
+    double q4 = -M_PI / 2;
+    double q5 =  M_PI / 2;
+    double q6 =  0.0;
 
     joint_state_.position = {q1, q2, q3, q4, q5, q6};
     joint_state_.header.stamp = this->now();
     pub_->publish(joint_state_);
 
-    RCLCPP_INFO(this->get_logger(), "[%lu] Published joint: [%.3f %.3f %.3f %.3f %.3f %.3f]",
-      current_idx_, q1, q2, q3, q4, q5, q6);
+    RCLCPP_INFO(this->get_logger(),
+      "[%lu] Target xyz: [%.3f %.3f %.3f] | Joint: [%.3f %.3f %.3f %.3f %.3f %.3f]",
+      current_idx_, x, y, z, q1, q2, q3, q4, q5, q6);
   }
 
   Matrix4d dh_transform(double a, double d, double alpha, double theta)
@@ -119,7 +138,6 @@ private:
   }
 };
 
-// === main 함수 ===
 int main(int argc, char* argv[])
 {
   rclcpp::init(argc, argv);
