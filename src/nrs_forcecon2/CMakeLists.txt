@@ -20,8 +20,12 @@ include_directories(
   ${EIGEN3_INCLUDE_DIRS}
 )
 
-# 라이브러리 생성
-add_library(nrs_3step_faac src/nrs_3step_faac.cpp)
+# 🔧 라이브러리 소스 파일 2개로 구성: FAAC 구현 + FAAC 맵 정의
+add_library(nrs_3step_faac
+  src/nrs_3step_faac.cpp
+  src/nrs_3stepfaac_map.cpp   # ✅ 이 줄 추가!
+)
+
 ament_target_dependencies(nrs_3step_faac
   rclcpp
   std_msgs
@@ -30,7 +34,7 @@ ament_target_dependencies(nrs_3step_faac
   Eigen3
 )
 
-# 실행 노드: kf_acc_tester
+# 실행 노드
 add_executable(kf_acc_tester src/kf_acc_tester.cpp)
 target_link_libraries(kf_acc_tester
   nrs_3step_faac
