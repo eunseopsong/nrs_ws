@@ -1,9 +1,9 @@
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp> //// #include <ros/ros.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <Eigen/Dense>
-#include "nrs_forcecon/nrs_3step_faac.h"  // SimpleKalmanFilter 클래스 헤더 포함
+#include "nrs_forcecon2/nrs_3step_faac.h"  // SimpleKalmanFilter 클래스 헤더 포함
 
 // 텍스트 파일을 로드하여 특정 열 값들을 추출하고, 결과를 새로운 파일에 저장하는 함수
 void loadDataAndRunKalmanFilter(const std::string& inputFilename, const std::string& outputFilename, const int colSize, const int colIndex, SimpleKalmanFilter& kalmanFilter) {
@@ -50,15 +50,19 @@ void loadDataAndRunKalmanFilter(const std::string& inputFilename, const std::str
 }
 
 int main(int argc, char** argv) {
-    ros::init(argc, argv, "kf_acc_tester");
-    ros::NodeHandle nh;
+    rclcpp::init(argc, argv);
+    auto node = rclcpp::Node::make_shared("kf_acc_tester");
+    //// ros::init(argc, argv, "kf_acc_tester");
+    //// ros::NodeHandle nh;
+
     // 칼만 필터 생성 (dt=0.1, process_noise=0.01, measurement_noise=1.0)
     std::vector<double> processNoise = {0.1, 0.1, 0.1};  // 프로세스 노이즈
     std::vector<double> measurementNoise = {1.0, 1.0, 1.0};  // 측정 노이즈
     SimpleKalmanFilter kalman(0.002, processNoise, measurementNoise);
 
     // File path setting
-    std::string packagePath = "/home/nrsur10/catkin_ws/src/nrs_forcecon";  // 패키지 경로 가져오기
+    std::string packagePath = "/home/eunseop/nrs_ws/src/nrs_forcecon2";  // 패키지 경로 가져오기
+    //// std::string packagePath = "/home/nrsur10/catkin_ws/src/nrs_forcecon";  // 패키지 경로 가져오기
     std::string inputFilePath = packagePath + "/data/raw_data.txt";  // 입력 파일 경로
     std::string kfoutFilePath = packagePath + "/data/KFfiltered_results.txt";  // 출력 파일 경로
 
@@ -67,5 +71,6 @@ int main(int argc, char** argv) {
 
     std::cout << "결과가 'KFfiltered_results.txt'에 저장되었습니다." << std::endl;
 
+    rclcpp::shutdown();
     return 0;
 }

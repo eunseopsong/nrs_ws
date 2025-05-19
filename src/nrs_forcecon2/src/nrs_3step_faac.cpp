@@ -1,5 +1,4 @@
 #include "nrs_forcecon2/nrs_3step_faac.h"
-// #include "nrs_3step_faac.h"
 
 /* Acceleration calculation using kalman filter */
 
