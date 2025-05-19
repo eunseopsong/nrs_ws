@@ -31,22 +31,22 @@ ament_target_dependencies(nrs_3step_faac
 )
 
 # 실행 노드: kf_acc_tester
-# add_executable(kf_acc_tester src/kf_acc_tester.cpp)
-# target_link_libraries(kf_acc_tester
-#   nrs_3step_faac
-# )
-# ament_target_dependencies(kf_acc_tester
-#   rclcpp
-#   std_msgs
-#   geometry_msgs
-#   sensor_msgs
-#   Eigen3
-# )
+add_executable(kf_acc_tester src/kf_acc_tester.cpp)
+target_link_libraries(kf_acc_tester
+  nrs_3step_faac
+)
+ament_target_dependencies(kf_acc_tester
+  rclcpp
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  Eigen3
+)
 
 # 설치 대상 설정
 install(TARGETS
-  # nrs_3step_faac
-  # kf_acc_tester
+  nrs_3step_faac
+  kf_acc_tester
   DESTINATION lib/${PROJECT_NAME}
 )
 
