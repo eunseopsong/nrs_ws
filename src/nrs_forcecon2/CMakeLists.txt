@@ -21,14 +21,14 @@ include_directories(
 )
 
 # 라이브러리 생성
-# add_library(nrs_3step_faac src/nrs_3step_faac.cpp)
-# ament_target_dependencies(nrs_3step_faac
-#   rclcpp
-#   std_msgs
-#   geometry_msgs
-#   sensor_msgs
-#   Eigen3
-# )
+add_library(nrs_3step_faac src/nrs_3step_faac.cpp)
+ament_target_dependencies(nrs_3step_faac
+  rclcpp
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  Eigen3
+)
 
 # 실행 노드: kf_acc_tester
 # add_executable(kf_acc_tester src/kf_acc_tester.cpp)
