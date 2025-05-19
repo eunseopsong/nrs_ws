@@ -73,6 +73,7 @@ private:
         waypoints_.push_back({p[0], p[1], p[2]});
       }
     }
+    // 마지막 점 추가
     if (!raw_points.empty()) {
       waypoints_.push_back(raw_points.back());
     }
@@ -92,7 +93,7 @@ private:
     auto& wp = waypoints_[current_idx_++];
     double x = wp[0];
     double y = wp[1];
-    double z = wp[2] + 0.5;  // ✅ 보정된 z 사용
+    double z = wp[2] + 0.2; // Adjust z position
 
     Vector3d p(x, y, z);
     Matrix3d R = Matrix3d::Identity();
@@ -113,7 +114,10 @@ private:
     double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
 
-    double q4 = -M_PI / 2;
+    // double q4 = 0.0;
+    // double q5 = 0.0;
+    // double q6 = 0.0;
+    double q4 = -M_PI / 4;
     double q5 =  M_PI / 2;
     double q6 =  0.0;
 
