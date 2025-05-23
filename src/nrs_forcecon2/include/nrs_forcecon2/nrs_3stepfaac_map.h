@@ -2,6 +2,9 @@
 // Revised at: 25.04.13
 // Revised by: Jae-Yoon Shim
 
+// Revised at: 25.05.23
+// Revised by: Eun-Seop Song
+
 #pragma once
 
 namespace FAAC {
