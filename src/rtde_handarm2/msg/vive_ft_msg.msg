@@ -1,9 +1,9 @@
 # vive_ft_msg.msg
 
-float32 Fx
-float32 Fy
-float32 Fz
+float32 fx
+float32 fy
+float32 fz
 
-float32 Mx
-float32 My
-float32 Mz
+float32 m_x
+float32 m_y
+float32 m_z

@@ -1,0 +1,9 @@
+<launch>
+
+  <group ns="ns1">
+    <node pkg="rtde_handarm" type="Yoon_Hbutton_cmd" name="Yoon_Hbutton_cmd" output="screen" respawn="false" launch-prefix="sudo"/>
+
+  </group>
+
+
+</launch>
