@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="my_robot">
+    <!-- World 링크 정의 -->
+    <link name="world"/>
+
+    <!-- 로봇 베이스 조인트 (큐빅) -->
+    <link name="robot_base_joint">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.1 0.1 0.1"/> <!-- 10cm x 10cm x 10cm 큐빅 -->
+            </geometry>
+            <material name="white">
+                <color rgba="1 1 1 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.1 0.1 0.1"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="robot_base_joint_fixed" type="fixed">
+        <parent link="world"/>
+        <child link="robot_base_joint"/>
+    </joint>
+    
+    <!-- VR Tracker 모델 (크기 조정) -->
+    <link name="vr_tracker">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://rtde_handarm/meshes/VR_Tracker_with_FSensor.STL" scale="0.001 0.001 -0.001"/> 
+            </geometry>
+            <material name="blue">
+                <color rgba="0.0 0.0 1.0 1.0"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://rtde_handarm/meshes/VR_Tracker_with_FSensor.STL" scale="0.001 0.001 -0.001"/> 
+            </geometry>
+        </collision>
+    </link>
+    <joint name="vr_tracker_floating" type="floating">
+        <parent link="robot_base_joint"/>
+        <child link="vr_tracker"/>
+    </joint>
+    
+    <!-- 시편 모델 -->
+    <link name="workpiece">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://rtde_handarm/meshes/lid_wrap.STL"/>
+            </geometry>
+            <material name="green">
+                <color rgba="0.0 1.0 0.0 1.0"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://rtde_handarm/meshes/lid_wrap.STL"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="workpiece_fixed" type="fixed">
+        <parent link="robot_base_joint"/>
+        <child link="workpiece"/>
+    </joint>
+</robot>

@@ -1,0 +1,50 @@
+# This yaml file control controller parameters (For developer)
+
+#****** NOTE !!!! ******#
+# - This yaml file was constructed for "DEVELOPER(ex Jaeyoon)"
+# - To apply the modified value the "exe" file must be restarted 
+
+#****** Yoon_UR10e_main.cpp files ******#
+
+# Contact force control mode selector #
+Contact_Fcon_mode: 4 # 0:[static D, K=0], 1:[varialbe D, K=0], 2:[Variable K], 3: [Fuzzy variable K], 4: [Three step FAAC]
+
+# Initial admittance parameters for contact force control #
+ContactDesiredMass:
+  LamdaM1: 1.0 # 1.0
+  LamdaM2: 1.0 # 1.0
+  LamdaM3: 1.0 # 1.0
+ContactDesiredDamper:
+  LamdaD1: 2000.0 # 2000
+  LamdaD2: 2000.0 # 2000
+  LamdaD3: 2000.0 # 2000
+ContactDesiredSpring:
+  LamdaK1: 5000.0
+  LamdaK2: 5000.0
+  LamdaK3: 5000.0
+
+# AAC update ratio #
+AAC_update_ratio: 0.625 # Update ration of adaptive varaible admittance control (Range: 0.0 ~ 1.0) (0.625)
+
+# Upper & Lower saturation of AAC damper #
+AAC_Dsature: # Damping saturation MAX, MIN value
+  Upper_limit: 10000.0 # 7000.0
+  Lower_limit: 50.0 # 50.0
+
+AAC_Ksature: # Stiffness saturation MAX, MIN value
+  Upper_limit: 20000.0 # 7000.0
+  Lower_limit: 0.0 # 50.0
+
+#****** Kinematics.cpp files ******#
+
+# TCP center point from E.E (Based on End-joint coordinate) #
+TCP_center: # Unit: mm
+  TCP_x: 0.0
+  TCP_y: 0.0
+  TCP_z: 0.315
+  # TCP_z: 0.331 (latest)
+  # TCP_z: 0.136 sNIST tool, spindle,250102
+
+  # TCP_x: 0.0
+  # TCP_y: 0.0`
+  # TCP_z: 0.0
