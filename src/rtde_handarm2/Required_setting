@@ -1,0 +1,9 @@
+* It firstly be writened by Yoon
+
+
+* Additionally installed library to execute the program
+* (NOTE!! If additional external library was installed, MUST list up on here!!!)
+
+
+1. Yaml library install
+-> sudo apt-get install libyaml-cpp-dev
