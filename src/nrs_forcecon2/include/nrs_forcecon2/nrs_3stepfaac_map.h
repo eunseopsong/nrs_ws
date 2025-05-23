@@ -3,7 +3,7 @@
 // Revised by: Jae-Yoon Shim
 
 // Revised at: 25.05.23
-// Revised by: Eun-Seop Song
+// Revised by: Eun-Seop Song (data type Migration: FAAC_DelM_array -> FAAC::FAAC_DelM_array, ...)
 
 #pragma once
 
