@@ -1,0 +1,17 @@
+# This yaml file control desired control input (For user)
+
+#****** NOTE !!!! ******#
+# - After change the parameter & "restart" the program & you must "Regenerate" the trajectory!!
+# - If you are not well-educated user, the command handle is recommanded..please...
+
+AAC_Des_Force:
+  Fx: 0.0
+  Fy: 0.0
+  Fz: 20.0 # Desired surf. normal direction force, (Unit: N)
+
+AAC_Des_velocity:
+  Start2Contact: 0.01 # Desired velocity at Start to Contact section, (Unit: m/s) (0.01)
+  Contact2Termin: 0.01 # Desired velocity at Contact to Terminte section, (Unit: m/s) (0.01)
+  MMotion_vel: 0.05 # Desired velocity at Contact section, (Unit: m/s) (0.02) 0.078
+
+AAC_Des_WaitingT: 30.0 # Desired waiting time when the posture was overlapped, (Unit: s)
