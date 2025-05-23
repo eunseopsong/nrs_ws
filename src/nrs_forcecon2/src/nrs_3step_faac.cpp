@@ -207,11 +207,11 @@ double Nrs3StepFAAC::FAAC_DelM_Calc(double F_Err, double FDot_Err)
     int index1 = abs((int)floor((Normalized_input1+FAAC_MinMax)/FAAC_array_interval));
     int index2 = abs((int)floor((Normalized_input2+FAAC_MinMax)/FAAC_array_interval));
 
-    if(index1 >= FAAC_array_size[0]) {index1 = FAAC_array_size[0];}
-    if(index2 >= FAAC_array_size[1]) {index2 = FAAC_array_size[1];}
+    if(index1 >= FAAC::FAAC_array_size[0]) {index1 = FAAC::FAAC_array_size[0];}
+    if(index2 >= FAAC::FAAC_array_size[1]) {index2 = FAAC::FAAC_array_size[1];}
 
     // Step2 : Output value matching - DelK & DelEtha
-    double Normalized_output = FAAC_DelM_array[index1][index2];
+    double Normalized_output = FAAC::FAAC_DelM_array[index1][index2];
 
     // Step3 : Output denormalization
     return FAAC_Normalize(Normalized_output,-FAAC_MinMax,FAAC_MinMax,-DMMM,DMMM);
@@ -238,11 +238,11 @@ double Nrs3StepFAAC::FAAC_DelMDRatio_Calc(double F_Err, double FDot_Err)
     int index1 = abs((int)floor((Normalized_input1+FAAC_MinMax)/FAAC_array_interval));
     int index2 = abs((int)floor((Normalized_input2+FAAC_MinMax)/FAAC_array_interval));
 
-    if(index1 >= FAAC_array_size[0]) {index1 = FAAC_array_size[0];}
-    if(index2 >= FAAC_array_size[1]) {index2 = FAAC_array_size[1];}
+    if(index1 >= FAAC::FAAC_array_size[0]) {index1 = FAAC::FAAC_array_size[0];}
+    if(index2 >= FAAC::FAAC_array_size[1]) {index2 = FAAC::FAAC_array_size[1];}
 
     // Step2 : Output value matching - DelK & DelEtha
-    double Normalized_output = FAAC_DelMDRatio_array[index1][index2];
+    double Normalized_output = FAAC::FAAC_DelMDRatio_array[index1][index2];
 
     // Step3 : Output denormalization
     return FAAC_Normalize(Normalized_output,-FAAC_MinMax,FAAC_MinMax,-DMDRatio_MM,DMDRatio_MM);
@@ -269,11 +269,11 @@ double Nrs3StepFAAC::FAAC_DMdM_Calc(double epsilon, double Xc_X_std)
     int index1 = abs((int)floor((Normalized_input1+FAAC_MinMax)/FAAC_array_interval));
     int index2 = abs((int)floor((Normalized_input2+FAAC_MinMax)/FAAC_array_interval));
 
-    if(index1 >= FAAC_array_size[0]) {index1 = FAAC_array_size[0];}
-    if(index2 >= FAAC_array_size[1]) {index2 = FAAC_array_size[1];}
+    if(index1 >= FAAC::FAAC_array_size[0]) {index1 = FAAC::FAAC_array_size[0];}
+    if(index2 >= FAAC::FAAC_array_size[1]) {index2 = FAAC::FAAC_array_size[1];}
 
     // Step2 : Output value matching - DelK & DelEtha
-    double Normalized_output = FAAC_DMdM_array[index1][index2];
+    double Normalized_output = FAAC::FAAC_DMdM_array[index1][index2];
 
     // Step3 : Output denormalization
     return FAAC_Normalize(Normalized_output,-FAAC_MinMax,FAAC_MinMax,-DMdMM,DMdMM);
