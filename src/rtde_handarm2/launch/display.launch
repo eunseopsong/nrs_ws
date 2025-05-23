@@ -1,0 +1,16 @@
+<launch>
+    <arg name="rvizconfig" default="$(find rtde_handarm)/rviz/config.rviz" />
+
+    <!-- 로봇 모델 로드 -->
+    <param name="robot_description" command="$(find xacro)/xacro '$(find rtde_handarm)/urdf/robot.xacro'" />
+
+    <!-- Rviz 실행 -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true" />
+
+    <!-- ROS 토픽을 통해 VR 데이터 구독 -->
+    <node pkg="rtde_handarm" type="Yoon_UR10e_main" name="Yoon_UR10e_main" />
+
+    <!-- 정적 변환 퍼블리시 -->
+    <node pkg="tf" type="static_transform_publisher" name="static_transform_publisher_world_to_robot_base" args="0 0 0 0 0 0 world robot_base_joint 100" />
+    <node pkg="tf" type="static_transform_publisher" name="static_transform_publisher_world_to_workpiece" args="0 0 0 0 0 0 robot_base_joint workpiece 100" />
+</launch>

@@ -1,13 +1,13 @@
-float32 Fx
-float32 Fy
-float32 Fz
-float32 Mx
-float32 My
-float32 Mz
+float32 fx
+float32 fy
+float32 fz
+float32 m_x
+float32 m_y
+float32 m_z
 
-float32 CFx
-float32 CFy
-float32 CFz
-float32 CMx
-float32 CMy
-float32 CMz
+float32 cf_x
+float32 cf_y
+float32 cf_z
+float32 cm_x
+float32 cm_y
+float32 cm_z
