@@ -5,6 +5,8 @@
 // Revised at: 25.05.23
 // Revised by: Eun-Seop Song (data type Migration: FAAC_DelM_array -> FAAC::FAAC_DelM_array, ...)
 
+// full test from LAB: 2025.05.28 13:27
+
 #pragma once
 
 namespace FAAC {
