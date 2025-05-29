@@ -23,8 +23,9 @@
 #include "nrs_forcecon2/nrs_3step_faac.h"  // .h → .hpp로 변경
 
 /* MSG headers */
-#include "rtde_handarm2/msg/ArmMsg.msg"
-#include "rtde_handarm2/msg/FTsensorMsg.msg"
+// #include "rtde_handarm2/msg/ArmMsg.hpp"
+// #include "rtde_handarm2/msg/FTsensorMsg.msg"
+
 #include "std_msgs/msg/multi_array_layout.hpp"
 #include "std_msgs/msg/multi_array_dimension.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
@@ -32,8 +33,9 @@
 #include "std_msgs/msg/u_int16.hpp"
 #include "std_msgs/msg/u_int32.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
-#include "rtde_handarm/msg/vr_pos_rt_msg_rpy.hpp"
-#include "rtde_handarm/msg/vr_pos_rt_msg_qua.hpp"
+
+// #include "rtde_handarm/msg/vr_pos_rt_msg_rpy.hpp"
+// #include "rtde_handarm/msg/vr_pos_rt_msg_qua.hpp"
 
 #include <tf2_ros/transform_broadcaster.h>  // tf → tf2_ros로 대체
 
@@ -92,12 +94,12 @@ YAML::Node NRS_VR_setting = YAML::Load(fin4);
 /*---------------------------- System setting ---------------------------------*/
 float SwitchS[5];
 float SwitchPre[5];
-int PointTraj[30]; //Point or Trajectory, 0=none, 1=Path point, 2=Trajectory 
+int PointTraj[30]; //Point or Trajectory, 0=none, 1=Path point, 2=Trajectory
 char filename[100];
 int SEQ_switch=0,pointnum=0,SEQ_play=0,stop_flag=0,stop_flag2=0;
 int SEQ_record=0,SEQ_point=0,SEQ_traj=0;
 
-/* UR Setup parameters */ 
+/* UR Setup parameters */
 std::string robot_ip = NRS_IP["UR10IP"].as<std::string>();
 double rtde_frequency = 500.0; // Hz 500
 double dt = 1.0 / rtde_frequency; // 2ms
