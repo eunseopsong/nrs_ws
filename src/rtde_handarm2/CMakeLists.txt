@@ -60,6 +60,7 @@ ament_export_dependencies(
   yaml-cpp
   # ur_rtde
   Eigen3
+  rosidl_default_runtime
 )
 ament_export_include_directories(include)
 # -------------------------------#
