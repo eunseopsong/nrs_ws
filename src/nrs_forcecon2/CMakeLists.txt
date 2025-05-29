@@ -60,4 +60,5 @@ install(DIRECTORY include/
 )
 
 # ✅ 패키지 설정
+ament_export_include_directories(include)
 ament_package()
