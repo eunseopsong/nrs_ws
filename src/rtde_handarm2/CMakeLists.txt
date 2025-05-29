@@ -14,6 +14,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(yaml-cpp REQUIRED)
+
+find_package(nrs_forcecon2 REQUIRED)
 # -------------------------------#
 
 # ------- RTDE packages -------- #
@@ -108,7 +110,7 @@ set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Y
 add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp)
 # target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
 target_link_libraries(Yoon_UR10e_main yaml-cpp ${Yoon_LIB} Eigen3::Eigen)
-ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
+ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros nrs_forcecon2)
 
 # add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
 # target_link_libraries(Yoon_FT_acquisit ${Yoon_LIB} yaml-cpp::yaml-cpp)
