@@ -1,26 +1,42 @@
 cmake_minimum_required(VERSION 3.8)
 project(rtde_handarm2)
 
-# C++ 설정
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
-endif()
+set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 필수 의존성
+# ------- ROS packages -------- #
 find_package(ament_cmake REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(Eigen3 REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(yaml-cpp REQUIRED)
+# -------------------------------#
 
-# 실시간성을 보장하기 위한 package (ros2에서는 필요없어짐)
-## find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
-# find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
+# ------- RTDE packages -------- #
+# set(THIS_PACKAGE_INCLUDE_DIRS doc/interactivity/include)  # Not used directly in ROS 2
+# find_package(ur_rtde REQUIRED) # assumes installed system-wide or in CMAKE_PREFIX_PATH
+# --------------------------------#
 
-# 메시지 정의
+# ------- Eigen packages -------- #
+find_package(Eigen3 REQUIRED)
+if(Eigen3_FOUND)
+  message(STATUS "Eigen3 Found! - ${Eigen3_DIR}")
+endif()
+# -------------------------------#
+
+# ------- Yaml packages -------- #
+if(yaml-cpp_FOUND)
+  message(STATUS "yaml-cpp Found! - ${yaml-cpp_DIR}")
+endif()
+# -------------------------------#
+
+# ------- For ROS msg usage -------- #
+find_package(rosidl_default_generators REQUIRED)
+
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmMsg.msg"
   "msg/FtsensorMsg.msg"
@@ -28,43 +44,98 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/VrPosRtMsgQua.msg"
   DEPENDENCIES std_msgs
 )
+# -------------------------------#
 
-# include 디렉토리 설정
-include_directories(
-  include
-  ${EIGEN3_INCLUDE_DIRS}
-  ${yaml-cpp_INCLUDE_DIRS}
-)
-
-# 실행 노드 예시
-# add_executable(rtde_test src/rtde_test.cpp)
-# ament_target_dependencies(rtde_test
-#   rclcpp
-#   std_msgs
-#   geometry_msgs
-#   sensor_msgs
-#   yaml-cpp
-#   Eigen3
-# )
-
-install(DIRECTORY include/
-  DESTINATION include/
-)
-
-# ur_rtde 라이브러리 명시적으로 추가
-# target_link_libraries(rtde_test
-#   ${cpp_typesupport_target}
-#   ${YAML_CPP_LIBRARIES}
-# )
-
-# 패키지 export
-ament_export_include_directories(include)
+# ------- Add to package exports -------- #
 ament_export_dependencies(
   rclcpp
   std_msgs
   geometry_msgs
   sensor_msgs
+  tf2
+  tf2_ros
   yaml-cpp
+  # ur_rtde
   Eigen3
 )
+ament_export_include_directories(include)
+# -------------------------------#
+
+# include directories for all custom modules
+include_directories(
+  include
+  include/rtde_handarm/Arm_guide
+  include/rtde_handarm/Armtraj
+  include/rtde_handarm/UR10
+  include/rtde_handarm/Yoon_filters
+  include/rtde_handarm/Yoon_FT_sensor
+  include/rtde_handarm/Yoon_path
+  include/rtde_handarm/Yoon_force_control
+  include/rtde_handarm/Yoon_communication
+  include/rtde_handarm/Yoon_data_loader
+)
+
+# For folder directories
+include_directories(
+  src/Yoon_UR10e_main_subs
+  ${CMAKE_CURRENT_SOURCE_DIR}/NRS_yaml
+)
+
+# Define library group
+set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Yoon_force_control Text_loader Yoon_communication)
+
+# Executables and their dependencies
+
+# add_executable(rtde_test src/rtde_test.cpp)
+# target_link_libraries(rtde_test ur_rtde::rtde ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(rtde_test rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
+
+add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp)
+target_link_libraries(Yoon_UR10e_main ur_rtde::rtde ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
+
+# add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
+# target_link_libraries(Yoon_FT_acquisit ${Yoon_LIB} yaml-cpp::yaml-cpp)
+# ament_target_dependencies(Yoon_FT_acquisit rclcpp std_msgs)
+
+# add_executable(Yoon_UR10e_cmd src/Yoon_UR10e_cmd.cpp)
+# target_link_libraries(Yoon_UR10e_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(Yoon_UR10e_cmd rclcpp std_msgs)
+
+# add_executable(Yoon_Hbutton_cmd src/Yoon_Hbutton_cmd.cpp)
+# target_link_libraries(Yoon_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(Yoon_Hbutton_cmd rclcpp std_msgs)
+
+# add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp)
+# target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(NRS_Hbutton_cmd rclcpp std_msgs)
+
+# add_executable(VR_Hbutton_cmd src/VR_Hbutton_cmd.cpp)
+# target_link_libraries(VR_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(VR_Hbutton_cmd rclcpp std_msgs)
+
+# add_executable(euichan_path_receiver src/euichan_path_receiver.cpp)
+# target_link_libraries(euichan_path_receiver)
+# ament_target_dependencies(euichan_path_receiver rclcpp std_msgs)
+
+# Install targets
+install(TARGETS
+  # rtde_test
+  Yoon_UR10e_main
+  # Yoon_FT_acquisit
+  # Yoon_UR10e_cmd
+  # Yoon_Hbutton_cmd
+  # NRS_Hbutton_cmd
+  # VR_Hbutton_cmd
+  # euichan_path_receiver
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
+# Interface and package setup
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+# target_link_libraries(rtde_test ${cpp_typesupport_target})
 ament_package()
