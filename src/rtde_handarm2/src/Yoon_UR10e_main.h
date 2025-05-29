@@ -6,7 +6,7 @@
 #include <math.h>
 #include <cmath>
 #include <chrono>
-#include "ros/ros.h"
+#include "rclcpp/rclcpp.hpp"  // ROS2 기본 헤더
 #include <time.h> // to get milli-second for thread timer
 
 /* Custom library headers */
@@ -17,42 +17,43 @@
 #include "Yoon_force_control.h"
 #include "Yoon_filters.h"
 #include "Yoon_UR10e_cmd.h"
-#include "nrs_msgmonitoring/msg_monitoring.h"
+#include "nrs_msgmonitoring/msg_monitoring.hpp"  // .h → .hpp로 변경
 
 /* Custom Package headers */
-#include "nrs_forcecon/nrs_3step_faac.h"
+#include "nrs_forcecon/nrs_3step_faac.hpp"  // .h → .hpp로 변경
 
 /* MSG headers */
-#include "rtde_handarm/Armmsg.h"
-#include "rtde_handarm/ftsensorMsg.h"
-#include "std_msgs/MultiArrayLayout.h"
-#include "std_msgs/MultiArrayDimension.h"
-#include "std_msgs/Float64MultiArray.h"
-#include "std_msgs/Float64.h"
-#include "std_msgs/UInt16.h"
-#include "std_msgs/UInt32.h"
-#include "geometry_msgs/PoseStamped.h"
-#include "rtde_handarm/VRposRtMsg_RPY.h"
-#include "rtde_handarm/VRposRtMsg_Qua.h"
+#include "rtde_handarm/msg/armmsg.hpp"
+#include "rtde_handarm/msg/ftsensor_msg.hpp"
+#include "std_msgs/msg/multi_array_layout.hpp"
+#include "std_msgs/msg/multi_array_dimension.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
+#include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/u_int16.hpp"
+#include "std_msgs/msg/u_int32.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "rtde_handarm/msg/vr_pos_rt_msg_rpy.hpp"
+#include "rtde_handarm/msg/vr_pos_rt_msg_qua.hpp"
 
-#include <tf/transform_broadcaster.h>
+#include <tf2_ros/transform_broadcaster.h>  // tf → tf2_ros로 대체
 
 /* Signal handler headers */
 #include <errno.h>
 #include <sys/mman.h>
 #include <signal.h>
 /*---------------------------- URrtde---------------------------------*/
-#include <ur_rtde/rtde_control_interface.h>
-#include <ur_rtde/rtde_receive_interface.h>
-#include <ur_rtde/rtde_io_interface.h>
-#include <thread>
-#include <csignal>
-#include <cmath>
+// #include <ur_rtde/rtde_control_interface.h>
+// #include <ur_rtde/rtde_receive_interface.h>
+// #include <ur_rtde/rtde_io_interface.h>
+// #include <thread>
+// #include <csignal>
+// #include <cmath>
 /*---------------------------- Yaml file headers ---------------------------------*/
 #include <fstream>
 #include <iostream>
 #include <yaml-cpp/yaml.h>
 #include "NRS_yaml_location.h"
+
 /* ---------------------------- Macro setting ---------------------------------*/
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

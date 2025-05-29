@@ -39,7 +39,8 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmMsg.msg"
-  "msg/FtsensorMsg.msg"
+  "msg/FTsensorMsg.msg"
+  "msg/ViveFTMsg.msg"
   "msg/VrPosRtMsgRpy.msg"
   "msg/VrPosRtMsgQua.msg"
   DEPENDENCIES std_msgs
@@ -64,15 +65,29 @@ ament_export_include_directories(include)
 # include directories for all custom modules
 include_directories(
   include
-  include/rtde_handarm/Arm_guide
-  include/rtde_handarm/Armtraj
-  include/rtde_handarm/UR10
-  include/rtde_handarm/Yoon_filters
-  include/rtde_handarm/Yoon_FT_sensor
-  include/rtde_handarm/Yoon_path
-  include/rtde_handarm/Yoon_force_control
-  include/rtde_handarm/Yoon_communication
-  include/rtde_handarm/Yoon_data_loader
+  include/rtde_handarm2/Arm_guide
+  include/rtde_handarm2/Armtraj
+  include/rtde_handarm2/UR10
+  include/rtde_handarm2/Yoon_filters
+  include/rtde_handarm2/Yoon_FT_sensor
+  include/rtde_handarm2/Yoon_path
+  include/rtde_handarm2/Yoon_force_control
+  include/rtde_handarm2/Yoon_communication
+  include/rtde_handarm2/Yoon_data_loader
+)
+
+include_directories(
+  include
+  include/rtde_handarm2/Arm_guide
+  include/rtde_handarm2/Armtraj
+  include/rtde_handarm2/UR10
+  include/rtde_handarm2/Yoon_communication
+  include/rtde_handarm2/Yoon_data_loader
+  include/rtde_handarm2/Yoon_filters
+  include/rtde_handarm2/Yoon_force_control
+  include/rtde_handarm2/Yoon_FT_sensor
+  include/rtde_handarm2/Yoon_path
+  include/rtde_handarm2/Third_party/Eigen3/eigen
 )
 
 # For folder directories
@@ -86,12 +101,13 @@ set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Y
 
 # Executables and their dependencies
 
-# add_executable(rtde_test src/rtde_test.cpp)
-# target_link_libraries(rtde_test ur_rtde::rtde ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-# ament_target_dependencies(rtde_test rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
+### add_executable(rtde_test src/rtde_test.cpp)
+### target_link_libraries(rtde_test ur_rtde::rtde ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+### ament_target_dependencies(rtde_test rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
 
 add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp)
-target_link_libraries(Yoon_UR10e_main ur_rtde::rtde ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+target_link_libraries(Yoon_UR10e_main yaml-cpp ${Yoon_LIB} Eigen3::Eigen)
 ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
 
 # add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
