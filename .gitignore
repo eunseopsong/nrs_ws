@@ -3,3 +3,4 @@ install/
 log/
 *.pyc
 *.swp
+src/urdf_files_dataset/
