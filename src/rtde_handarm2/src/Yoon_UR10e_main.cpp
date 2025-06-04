@@ -42,44 +42,80 @@ void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 int main(int argc, char* argv[])
 {
     /*** Concerning for ROS start ***/
-    ros::init(argc, argv, "Yoon_UR10e_main");
-    ros::NodeHandle nh_; 
-    
+    //// ros::init(argc, argv, "Yoon_UR10e_main");
+    //// ros::NodeHandle nh_; 
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<rclcpp::Node>("Yoon_UR10e_main");
+
     /* Adaptive K publishing & recording */
+    //// std::string AdaptiveK_msgName = "AdaptiveK_msg";
+    //// MsgMonitoring AdaptiveK_msg(nh_, AdaptiveK_msgName);
     std::string AdaptiveK_msgName = "AdaptiveK_msg";
-    MsgMonitoring AdaptiveK_msg(nh_, AdaptiveK_msgName);
+    MsgMonitoring AdaptiveK_msg(node, AdaptiveK_msgName);
 
     /* 3step FAAC publishing & recording */
+    //// std::string FAAC3step_msgName = "FAAC3step_msg";
+    //// MsgMonitoring FAAC3step_msg(nh_, FAAC3step_msgName);
     std::string FAAC3step_msgName = "FAAC3step_msg";
-    MsgMonitoring FAAC3step_msg(nh_, FAAC3step_msgName);
+    MsgMonitoring FAAC3step_msg(node, FAAC3step_msgName);
 
     /* Publisher instance generation */
-    ros::Publisher YSurfN_Fext_pub = nh_.advertise<std_msgs::Float64>("YSurfN_Fext",20);
-    ros::Publisher UR10e_mode_pub = nh_.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
-    ros::Publisher UR10_Jangle_pub = nh_.advertise<std_msgs::Float64MultiArray>("UR10_Jangle",20);
-    ros::Publisher UR10_pose_pub = nh_.advertise<std_msgs::Float64MultiArray>("UR10_pose",20);
-    ros::Publisher UR10_wrench_pub = nh_.advertise<std_msgs::Float64MultiArray>("UR10_wrench",20);
+    //// ros::Publisher YSurfN_Fext_pub = nh_.advertise<std_msgs::Float64>("YSurfN_Fext",20);
+    //// ros::Publisher UR10e_mode_pub = nh_.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
+    //// ros::Publisher UR10_Jangle_pub = nh_.advertise<std_msgs::Float64MultiArray>("UR10_Jangle",20);
+    //// ros::Publisher UR10_pose_pub = nh_.advertise<std_msgs::Float64MultiArray>("UR10_pose",20);
+    //// ros::Publisher UR10_wrench_pub = nh_.advertise<std_msgs::Float64MultiArray>("UR10_wrench",20);
+    ////// ros::Publisher Rviz_vr_Qua_pub = nh_.advertise<geometry_msgs::PoseStamped>("pos_cal_Qua",20);
+    auto YSurfN_Fext_pub = node->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
+    auto UR10e_mode_pub = node->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
+    auto UR10_Jangle_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
+    auto UR10_pose_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
+    auto UR10_wrench_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
     // ros::Publisher Rviz_vr_Qua_pub = nh_.advertise<geometry_msgs::PoseStamped>("pos_cal_Qua",20);
 
     /* Publisher msg_structure instance generation */
-    std_msgs::Float64 YSurfN_Fext_msg;
-    std_msgs::UInt16 UR10e_mode_msg;
-    std_msgs::Float64MultiArray UR10_Jangle_msg;
-    std_msgs::Float64MultiArray UR10_pose_msg;
-    std_msgs::Float64MultiArray UR10_wrench_msg;
+    //// std_msgs::Float64 YSurfN_Fext_msg;
+    //// std_msgs::UInt16 UR10e_mode_msg;
+    //// std_msgs::Float64MultiArray UR10_Jangle_msg;
+    //// std_msgs::Float64MultiArray UR10_pose_msg;
+    //// std_msgs::Float64MultiArray UR10_wrench_msg;
+    std_msgs::msg::Float64 YSurfN_Fext_msg;
+    std_msgs::msg::UInt16 UR10e_mode_msg;
+    std_msgs::msg::Float64MultiArray UR10_Jangle_msg;
+    std_msgs::msg::Float64MultiArray UR10_pose_msg;
+    std_msgs::msg::Float64MultiArray UR10_wrench_msg;
 
     /* Subscriber instance generation*/
-    ros::Subscriber ft_sub = nh_.subscribe("ftsensor", 10,FTdataCallback); // FT sensor data subscriber
-    ros::Subscriber UR10e_mode_sub = nh_.subscribe("/Yoon_UR10e_mode",20,cmdModeCallback); // yoon user command subscriber
-    ros::Subscriber joint_cmd_sub = nh_.subscribe("/yoon_UR10e_joint_cmd",100,jointCmdCallback);
-    ros::Subscriber PB_iter_sub = nh_.subscribe("/Yoon_PbNum_cmd",100,PbIterCallback);
-    ros::Subscriber VR_sub = nh_.subscribe("/vive/pos0",100,VRdataCallback); // VR data subscriber
+    //// ros::Subscriber ft_sub = nh_.subscribe("ftsensor", 10,FTdataCallback); // FT sensor data subscriber
+    //// ros::Subscriber UR10e_mode_sub = nh_.subscribe("/Yoon_UR10e_mode",20,cmdModeCallback); // yoon user command subscriber
+    //// ros::Subscriber joint_cmd_sub = nh_.subscribe("/yoon_UR10e_joint_cmd",100,jointCmdCallback);
+    //// ros::Subscriber PB_iter_sub = nh_.subscribe("/Yoon_PbNum_cmd",100,PbIterCallback);
+    //// ros::Subscriber VR_sub = nh_.subscribe("/vive/pos0",100,VRdataCallback); // VR data subscriber
+    ////// ros::Subscriber VR_cal_sub = nh_.subscribe("VRposRtMsg",100,RvizVisul); // VR cal data subscriber
+    ////// ros::Subscriber VR_cal_sub_RPY = nh_.subscribe("VRposRtMsg_RPY",100,RvizVisul_RPY); // VR cal data subscriber
+    ////// ros::Subscriber VR_cal_sub_Qua = nh_.subscribe("VRposRtMsg_Qua",100,RvizVisul_Qua); // VR cal data subscriber
+    ////// ros::Subscriber pos_cal_rviz_sub = nh_.subscribe("pos_cal_rviz",100,posCalRvizCallback);
+    auto ft_sub = node->create_subscription<rtde_handarm::msg::FtsensorMsg>(
+        "ftsensor", 10, FTdataCallback);
+
+    auto UR10e_mode_sub = node->create_subscription<std_msgs::msg::UInt16>(
+        "/Yoon_UR10e_mode", 20, cmdModeCallback);
+
+    auto joint_cmd_sub = node->create_subscription<std_msgs::msg::Float64MultiArray>(
+        "/yoon_UR10e_joint_cmd", 100, jointCmdCallback);
+
+    auto PB_iter_sub = node->create_subscription<std_msgs::msg::UInt16>(
+        "/Yoon_PbNum_cmd", 100, PbIterCallback);
+
+    auto VR_sub = node->create_subscription<geometry_msgs::msg::PoseStamped>(
+        "/vive/pos0", 100, VRdataCallback);
     // ros::Subscriber VR_cal_sub = nh_.subscribe("VRposRtMsg",100,RvizVisul); // VR cal data subscriber
     // ros::Subscriber VR_cal_sub_RPY = nh_.subscribe("VRposRtMsg_RPY",100,RvizVisul_RPY); // VR cal data subscriber
     // ros::Subscriber VR_cal_sub_Qua = nh_.subscribe("VRposRtMsg_Qua",100,RvizVisul_Qua); // VR cal data subscriber
     // ros::Subscriber pos_cal_rviz_sub = nh_.subscribe("pos_cal_rviz",100,posCalRvizCallback);
+
     /*** Concerning for ROS end ***/
-    
+
     //
     // RvizVisul rviz_visul(nh_);
 

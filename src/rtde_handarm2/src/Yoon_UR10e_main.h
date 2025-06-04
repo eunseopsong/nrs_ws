@@ -72,7 +72,7 @@
 
 #define RT_printing 1 // 0: RT_printing off, 1: RT_printing on
 /*---------------------------- Namespace setting & instance generation ---------------------------------*/
-using namespace ur_rtde;
+//// using namespace ur_rtde;
 using namespace std::chrono;
 using namespace std;
 AKfun AKin;
@@ -101,19 +101,19 @@ int SEQ_record=0,SEQ_point=0,SEQ_traj=0;
 
 /* UR Setup parameters */
 std::string robot_ip = NRS_IP["UR10IP"].as<std::string>();
-double rtde_frequency = 500.0; // Hz 500
+//// double rtde_frequency = 500.0; // Hz 500
 double dt = 1.0 / rtde_frequency; // 2ms
-uint16_t flags = RTDEControlInterface::FLAG_VERBOSE | RTDEControlInterface::FLAG_UPLOAD_SCRIPT;
+//// uint16_t flags = RTDEControlInterface::FLAG_VERBOSE | RTDEControlInterface::FLAG_UPLOAD_SCRIPT;
 int ur_cap_port = 50002;
 
 /* ur_rtde realtime priorities */
 int rt_receive_priority = 90;
 int rt_control_priority = 85;
 
-RTDEControlInterface rtde_control(robot_ip, rtde_frequency, flags, ur_cap_port, rt_control_priority);
-RTDEReceiveInterface rtde_receive(robot_ip, rtde_frequency, {}, true, false, rt_receive_priority);
-// RTDEIOInterface rtde_io(NRS_IP["UR10IP"].as<std::string>());
-RTDEIOInterface rtde_io(robot_ip);
+//// RTDEControlInterface rtde_control(robot_ip, rtde_frequency, flags, ur_cap_port, rt_control_priority);
+//// RTDEReceiveInterface rtde_receive(robot_ip, rtde_frequency, {}, true, false, rt_receive_priority);
+////// RTDEIOInterface rtde_io(NRS_IP["UR10IP"].as<std::string>());
+//// RTDEIOInterface rtde_io(robot_ip);
 
 /*---------------------------- Parameters ----------------------------*/
 /* Motion parameters */
