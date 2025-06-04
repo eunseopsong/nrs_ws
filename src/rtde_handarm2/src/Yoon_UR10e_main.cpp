@@ -10,24 +10,24 @@
 
 /*==================== functions ==================*/
 bool running = true;
-void raiseFlag(int param)
-{
-    printf("rtde_control was terminated \n");
-    running = false;
-    rtde_control.servoStop();
-    rtde_control.stopScript();
-    exit(1);
-}
+//// void raiseFlag(int param)
+//// {
+////     printf("rtde_control was terminated \n");
+////     running = false;
+////     rtde_control.servoStop();
+////     rtde_control.stopScript();
+////     exit(1);
+//// }
 
-void getActualQ()
-{
-	std::vector<double> actual_q = rtde_receive.getActualQ();
-	for (int i = 0; i < 6; i++) {
-		RArm.qc(i) = actual_q[i];
-	}
-}
+//// void getActualQ()
+//// {
+//// 	std::vector<double> actual_q = rtde_receive.getActualQ();
+//// 	for (int i = 0; i < 6; i++) {
+//// 		RArm.qc(i) = actual_q[i];
+//// 	}
+//// }
 
-void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg);
+//// void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg);
 void cmdModeCallback(const std_msgs::UInt16::ConstPtr& msg);
 void jointCmdCallback(const std_msgs::Float64MultiArray::ConstPtr& msg);
 void PbIterCallback(const std_msgs::UInt16::ConstPtr& msg);
@@ -1152,7 +1152,7 @@ int main(int argc, char* argv[])
                         {
                             KdToZero_flag = true;
                             ZeroToKd_flag = false;
-                             
+
                             if(PB_iter_cmd > PB_iter_cur) // iterate the playback
                             {
                                 UR10e_mode_msg.data = Playback_mode_cmd;
