@@ -85,21 +85,21 @@ int main(int argc, char* argv[])
 
     /* Set application realtime priority */ 
     int priority = 80;
-    if (RTDEUtility::setRealtimePriority(priority)) {
-        std::cout << "Realtime priority was set to " << priority << std::endl;
-    } else {
-        std::cerr << "실시간 우선순위 설정에 실패했습니다. 관리자 권한이 필요할 수 있습니다." << std::endl;
-    }
+    //// if (RTDEUtility::setRealtimePriority(priority)) {
+    ////     std::cout << "Realtime priority was set to " << priority << std::endl;
+    //// } else {
+    ////     std::cerr << "실시간 우선순위 설정에 실패했습니다. 관리자 권한이 필요할 수 있습니다." << std::endl;
+    //// }
 
     /* rtde 연결 확인 로그 */
-    if (!rtde_control.isProgramRunning()) {
-        std::cerr << "RTDE 프로그램이 실행되지 않았습니다." << std::endl;
-        return -1;
-    }
-    if (!rtde_control.isConnected() || !rtde_receive.isConnected()) {
-    std::cerr << "RTDE connection failed!" << std::endl;
-    return -1;
-    }
+    //// if (!rtde_control.isProgramRunning()) {
+    ////     std::cerr << "RTDE 프로그램이 실행되지 않았습니다." << std::endl;
+    ////     return -1;
+    //// }
+    //// if (!rtde_control.isConnected() || !rtde_receive.isConnected()) {
+    //// std::cerr << "RTDE connection failed!" << std::endl;
+    //// return -1;
+    //// }
 
     signal(SIGINT, raiseFlag); // Active
 	signal(SIGTERM, raiseFlag); // Termination (ctrl + c)
@@ -326,8 +326,8 @@ int main(int argc, char* argv[])
                     joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
                     #endif
 
-                    rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
-                    rtde_control.waitPeriod(t_start);
+                    //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
+                    //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
                     continue;
@@ -394,8 +394,8 @@ int main(int argc, char* argv[])
                     joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
                     #endif
 
-                    rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
-                    rtde_control.waitPeriod(t_start);
+                    //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
+                    //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
                     continue;
@@ -616,14 +616,14 @@ int main(int argc, char* argv[])
                     joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
                     #endif
 
-                    rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
+                    //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
                     /* Transfer the command to manipulator end */
 
                     /* Data backup to past start */
                     Hadm_past_pos_act = Hadm_pos_act;
                     /* Data backup to past end */
 
-                    rtde_control.waitPeriod(t_start);
+                    //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
                     continue;
@@ -1176,8 +1176,8 @@ int main(int argc, char* argv[])
                     joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
                     #endif
 
-                    rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
-                    rtde_control.waitPeriod(t_start);
+                    //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
+                    //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
                     continue;
@@ -1202,7 +1202,7 @@ int main(int argc, char* argv[])
             
                 // double maxerrmin = 0.001;
 
-                rtde_control.waitPeriod(t_start);
+                //// rtde_control.waitPeriod(t_start);
             }
             break;
         
@@ -1212,8 +1212,8 @@ int main(int argc, char* argv[])
 
         std::cout << "Control interrupted!" << std::endl;
 
-        rtde_control.servoStop();
-        rtde_control.stopScript();
+        //// rtde_control.servoStop();
+        //// rtde_control.stopScript();
     }
     catch(std::exception& e)
     {
