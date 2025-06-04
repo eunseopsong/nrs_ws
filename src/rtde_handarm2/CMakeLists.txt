@@ -18,7 +18,6 @@ find_package(yaml-cpp REQUIRED)
 # 실시간성을 보장하기 위한 package (ros2에서는 필요없어짐)
 # find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
 
-<<<<<<< Updated upstream
 find_package(nrs_forcecon2 REQUIRED)
 # -------------------------------#
 
@@ -42,10 +41,6 @@ endif()
 
 # ------- For ROS msg usage -------- #
 find_package(rosidl_default_generators REQUIRED)
-=======
-# 실시간성을 보장하기 위한 package (ros2에서는 필요없어짐)
-# find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
->>>>>>> Stashed changes
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmMsg.msg"
