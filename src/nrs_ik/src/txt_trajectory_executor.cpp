@@ -117,7 +117,7 @@ private:
     // double q4 = 0.0;
     // double q5 = 0.0;
     // double q6 = 0.0;
-    double q4 = -M_PI / 4;
+    double q4 = -M_PI * 0.4;
     double q5 =  M_PI / 2;
     double q6 =  0.0;
 
