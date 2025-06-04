@@ -102,7 +102,8 @@ int SEQ_record=0,SEQ_point=0,SEQ_traj=0;
 /* UR Setup parameters */
 std::string robot_ip = NRS_IP["UR10IP"].as<std::string>();
 //// double rtde_frequency = 500.0; // Hz 500
-double dt = 1.0 / rtde_frequency; // 2ms
+//// double dt = 1.0 / rtde_frequency; // 2ms
+double dt = 0.002; // 2ms
 //// uint16_t flags = RTDEControlInterface::FLAG_VERBOSE | RTDEControlInterface::FLAG_UPLOAD_SCRIPT;
 int ur_cap_port = 50002;
 
