@@ -27,11 +27,11 @@ bool running = true;
 //// 	}
 //// }
 
-//// void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg);
-void cmdModeCallback(const std_msgs::UInt16::ConstPtr& msg);
-void jointCmdCallback(const std_msgs::Float64MultiArray::ConstPtr& msg);
-void PbIterCallback(const std_msgs::UInt16::ConstPtr& msg);
-void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+////// void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg);
+void cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg);             //// void cmdModeCallback(const std_msgs::UInt16::ConstPtr& msg);
+void jointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg); //// void jointCmdCallback(const std_msgs::Float64MultiArray::ConstPtr& msg);
+void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);              //// void PbIterCallback(const std_msgs::UInt16::ConstPtr& msg);
+void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);    //// void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 // void RvizVisul_RPY(const rtde_handarm::VRposRtMsg_RPY::ConstPtr& msg);
 // void RvizVisul_Qua(const rtde_handarm::VRposRtMsg_Qua::ConstPtr& msg);
 
@@ -48,16 +48,12 @@ int main(int argc, char* argv[])
     auto node = std::make_shared<rclcpp::Node>("Yoon_UR10e_main");
 
     /* Adaptive K publishing & recording */
-    //// std::string AdaptiveK_msgName = "AdaptiveK_msg";
-    //// MsgMonitoring AdaptiveK_msg(nh_, AdaptiveK_msgName);
-    std::string AdaptiveK_msgName = "AdaptiveK_msg";
-    MsgMonitoring AdaptiveK_msg(node, AdaptiveK_msgName);
+    std::string AdaptiveK_msgName = "AdaptiveK_msg";        //// std::string AdaptiveK_msgName = "AdaptiveK_msg";
+    MsgMonitoring AdaptiveK_msg(node, AdaptiveK_msgName);   //// MsgMonitoring AdaptiveK_msg(nh_, AdaptiveK_msgName);
 
     /* 3step FAAC publishing & recording */
-    //// std::string FAAC3step_msgName = "FAAC3step_msg";
-    //// MsgMonitoring FAAC3step_msg(nh_, FAAC3step_msgName);
-    std::string FAAC3step_msgName = "FAAC3step_msg";
-    MsgMonitoring FAAC3step_msg(node, FAAC3step_msgName);
+    std::string FAAC3step_msgName = "FAAC3step_msg";        //// std::string FAAC3step_msgName = "FAAC3step_msg";
+    MsgMonitoring FAAC3step_msg(node, FAAC3step_msgName);   //// MsgMonitoring FAAC3step_msg(nh_, FAAC3step_msgName);
 
     /* Publisher instance generation */
     //// ros::Publisher YSurfN_Fext_pub = nh_.advertise<std_msgs::Float64>("YSurfN_Fext",20);
