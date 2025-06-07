@@ -119,7 +119,12 @@ int rt_control_priority = 85;
 /*---------------------------- Parameters ----------------------------*/
 /* Motion parameters */
 double vel = 0.5;
-double acc = 10.0;
+double acc = 10.0; 
+
+
+
+
+
 double velocity = 0;
 double acceleration = 0;
 

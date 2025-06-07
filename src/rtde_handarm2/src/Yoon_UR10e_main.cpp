@@ -1,12 +1,12 @@
 /****************************************************
-  * 
+  *
   * All algorithm is for UR10CB
-  * 
+  *
   * All copyrights of this code belong to the Robotorry NRS team.
   *
 ****************************************************/
 #include "Yoon_UR10e_main.h"
-#include "Yoon_UR10e_main_subs/ROS_callbacks.cpp"
+// #include "Yoon_UR10e_main_subs/ROS_callbacks.cpp"
 
 /*==================== functions ==================*/
 bool running = true;
@@ -43,7 +43,7 @@ int main(int argc, char* argv[])
 {
     /*** Concerning for ROS start ***/
     //// ros::init(argc, argv, "Yoon_UR10e_main");
-    //// ros::NodeHandle nh_; 
+    //// ros::NodeHandle nh_;
     rclcpp::init(argc, argv);
     auto node = std::make_shared<rclcpp::Node>("Yoon_UR10e_main");
 
@@ -95,8 +95,8 @@ int main(int argc, char* argv[])
     ////// ros::Subscriber VR_cal_sub_RPY = nh_.subscribe("VRposRtMsg_RPY",100,RvizVisul_RPY); // VR cal data subscriber
     ////// ros::Subscriber VR_cal_sub_Qua = nh_.subscribe("VRposRtMsg_Qua",100,RvizVisul_Qua); // VR cal data subscriber
     ////// ros::Subscriber pos_cal_rviz_sub = nh_.subscribe("pos_cal_rviz",100,posCalRvizCallback);
-    auto ft_sub = node->create_subscription<rtde_handarm::msg::FtsensorMsg>(
-        "ftsensor", 10, FTdataCallback);
+    // auto ft_sub = node->create_subscription<rtde_handarm::msg::FtsensorMsg>(
+    //     "ftsensor", 10, FTdataCallback);
 
     auto UR10e_mode_sub = node->create_subscription<std_msgs::msg::UInt16>(
         "/Yoon_UR10e_mode", 20, cmdModeCallback);
@@ -119,7 +119,7 @@ int main(int argc, char* argv[])
     //
     // RvizVisul rviz_visul(nh_);
 
-    /* Set application realtime priority */ 
+    /* Set application realtime priority */
     int priority = 80;
     //// if (RTDEUtility::setRealtimePriority(priority)) {
     ////     std::cout << "Realtime priority was set to " << priority << std::endl;
@@ -234,11 +234,11 @@ int main(int argc, char* argv[])
             pause_cnt = 0;
             while (running)
             {
-                t_start = rtde_control.initPeriod();
-                getActualQ(); // Get the joint data of UR10e
+                // t_start = rtde_control.initPeriod();
+                // getActualQ(); // Get the joint data of UR10e
 
-                tcp_pose = rtde_receive.getActualTCPPose(); // Get the TCP data of UR10e
-                ros::spinOnce(); // Get the ROS message data
+                // tcp_pose = rtde_receive.getActualTCPPose(); // Get the TCP data of UR10e
+                // ros::spinOnce(); // Get the ROS message data
 
                 #if TCP_standard == 0
                 AKin.ForwardK_T(&RArm); // qc -> Tc, xc (current X,Y,Z)
