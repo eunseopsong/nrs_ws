@@ -145,7 +145,7 @@ int main(int argc, char* argv[])
 		RArm.dqd(i) = 0;
 		RArm.dqc(i) = 0;
 	}
-	getActualQ();
+	////// getActualQ();
 
 	RArm.qd = RArm.qc;
 	RArm.qt = RArm.qc;
