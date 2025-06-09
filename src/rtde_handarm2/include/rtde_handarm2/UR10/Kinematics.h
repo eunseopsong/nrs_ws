@@ -33,29 +33,22 @@ struct Quaternion { double w, x, y, z; };
 
 class Kinematic_func
 {
-private:
-    double s1, c1, s2, c2, s3, c3, s4, c4, s5, c5, s6, c6;
-    double s23, c23, s34, c34, s234, c234;
-    Matrix4d Ycontact_EE2TCP = Matrix4d::Zero();
-
-    double Ycontact_TCP_pos[3];  // TCP offset loaded from YAML
-    bool R2E_init_flag = false;
-    Vector3d R2E_pre_rpy = Vector3d::Zero();
-
 public:
     Kinematic_func();
 
-    void iForwardK_P(const VectorXd &q, Vector3d &x, double endlength = 0);
-    void iForwardK_T(const VectorXd &q, Matrix4d &T, double endlength = 0);
+    // ROS1에서 사용하던 시그니처 유지
+    void iForwardK_P(VectorXd &q, Vector3d &x, double endlength = 0);
+    void iForwardK_T(VectorXd &q, MatrixXd &T, double endlength = 0);
+
     void ForwardK_P(CArm *A);
     void ForwardK_T(CArm *A);
     void ForwardK_Td(CArm *A);
     void Ycontact_ForwardK_T(CArm *A);
     void Rotation2EulerAngle(CArm *A);
     void Quaternion2Rotation(CArm *A);
-    void iRotation2EulerAngle(const Matrix3d &R, Vector3d &th);
+    void iRotation2EulerAngle(Matrix3d &R, Vector3d &th);
     void Rotation2RPY(CArm *A);
-    void EulerAngle2Rotation(Matrix3d &R, const Vector3d &th);
+    void EulerAngle2Rotation(Matrix3d &R, Vector3d &th);
     Vector3d VR_Rot2RPY(const Matrix3d &rotationMatrix);
 
     int InverseK(CArm *qA);
@@ -73,7 +66,7 @@ public:
     Matrix3d RotY(double th);
     Matrix3d RotZ(double th);
 
-    Matrix3d angle_axis_representation(const Vector3d &axis, double angle);
+    Matrix3d angle_axis_representation(Vector3d rot_axis, double rot_angle);
     Matrix3d Qua2Rot(double w, double x, double y, double z);
     Quaterniond Rot2Qua(const Matrix3d &rotationMatrix);
 };
