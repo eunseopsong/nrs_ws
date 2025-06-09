@@ -461,7 +461,7 @@ int Kinematic_func::sgn(double x)
 {
 	if(x>0) return 1;
 	if(x<0) return -1;
-	if(x==0) return 0;	
+	if(x==0) return 0;
 }
 
 int Kinematic_func::InverseK(CArm *qA)
