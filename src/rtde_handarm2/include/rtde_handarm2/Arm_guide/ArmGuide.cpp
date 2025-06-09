@@ -285,7 +285,7 @@ int ArmGuide::ArmForceGuide4(AKfun *K, CArm *A)
 
 	for(int i=0;i<6;i++){
 		float tmp_dqd = A->dqd(i);
-		if(isnan(tmp_dqd)){
+		if(std::isnan(tmp_dqd)){
 			std::cout <<"NAN!!!!!!!!!!!!!!!!!" << std::endl;
 			A->dqd(i)=0;
 		}
@@ -416,7 +416,7 @@ int ArmGuide::ArmForceGuide_position(AKfun *K, CArm *A)
 
 	for(int i=0;i<6;i++){
 		float tmp_qd = A->qd(i);
-		if(isnan(tmp_qd)){
+		if(std::isnan(tmp_qd)){
 			std::cout <<"NAN!!!!!!!!!!!!!!!!!" << std::endl;
 			A->qd(i)=A->qc(i);
 		}
