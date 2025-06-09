@@ -15,10 +15,10 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
+find_package(nrs_forcecon2 REQUIRED)
 # 실시간성을 보장하기 위한 package (ros2에서는 필요없어짐)
 # find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
 
-find_package(nrs_forcecon2 REQUIRED)
 # -------------------------------#
 
 # ------- RTDE packages -------- #
@@ -41,6 +41,7 @@ endif()
 
 # ------- For ROS msg usage -------- #
 find_package(rosidl_default_generators REQUIRED)
+
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmMsg.msg"
@@ -111,6 +112,7 @@ set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Y
 ### target_link_libraries(rtde_test ur_rtde::rtde ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
 ### ament_target_dependencies(rtde_test rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
 
+#######
 add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp)
 # target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
 target_link_libraries(Yoon_UR10e_main yaml-cpp ${Yoon_LIB} Eigen3::Eigen)
