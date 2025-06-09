@@ -7,20 +7,20 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 # — find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp       REQUIRED)
-find_package(std_msgs     REQUIRED)
+find_package(ament_cmake   REQUIRED)
+find_package(rclcpp        REQUIRED)
+find_package(std_msgs      REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(sensor_msgs  REQUIRED)
-find_package(Eigen3       REQUIRED)
+find_package(sensor_msgs   REQUIRED)
+find_package(Eigen3        REQUIRED)
 
-# — include directories
+# — include dirs
 include_directories(
   include
   ${EIGEN3_INCLUDE_DIRS}
 )
 
-# — libraries
+# — 라이브러리
 add_library(nrs_3step_faac
   src/nrs_3step_faac.cpp
 )
@@ -28,7 +28,7 @@ ament_target_dependencies(nrs_3step_faac
   rclcpp std_msgs geometry_msgs sensor_msgs Eigen3
 )
 
-# — test 실행 파일 (이제 라이브러리가 아니고, 그대로 executable)
+# — 실행 파일
 add_executable(kf_acc_tester src/kf_acc_tester.cpp)
 target_link_libraries(kf_acc_tester
   nrs_3step_faac
@@ -37,11 +37,12 @@ ament_target_dependencies(kf_acc_tester
   rclcpp std_msgs geometry_msgs sensor_msgs Eigen3
 )
 
-# — install targets
+# — 설치 및 EXPORT 정의
 install(
   TARGETS
     nrs_3step_faac
     kf_acc_tester
+  EXPORT nrs_forcecon2Targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -52,17 +53,17 @@ install(
   DESTINATION include/
 )
 
-# — export library targets
-#    * 여기서 executable(kf_acc_tester)은 export 하지 않습니다!
-ament_export_libraries(nrs_3step_faac)
-ament_export_include_directories(include)
-ament_export_dependencies(rclcpp std_msgs geometry_msgs sensor_msgs Eigen3)
-
+# — EXPORT 파일 생성 (이 이름과 위 EXPORT 이름이 꼭 일치해야 합니다)
 install(
-  EXPORT export_${PROJECT_NAME}
-  FILE ${PROJECT_NAME}Targets.cmake
-  NAMESPACE ${PROJECT_NAME}::
-  DESTINATION share/${PROJECT_NAME}/cmake
+  EXPORT nrs_forcecon2Targets
+  FILE nrs_forcecon2Targets.cmake
+  NAMESPACE nrs_forcecon2::
+  DESTINATION share/nrs_forcecon2/cmake
 )
+
+# — ament export for find_package()
+ament_export_libraries(nrs_3step_faac)
+ament_export_dependencies(rclcpp std_msgs geometry_msgs sensor_msgs Eigen3)
+ament_export_include_directories(include)
 
 ament_package()

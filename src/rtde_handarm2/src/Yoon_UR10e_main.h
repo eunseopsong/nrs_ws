@@ -17,7 +17,7 @@
 #include "Yoon_force_control.h"
 #include "Yoon_filters.h"
 #include "Yoon_UR10e_cmd.h"
-// #include "nrs_msgmonitoring/msg_monitoring.hpp"  // .h → .hpp로 변경
+#include "nrs_msgmonitoring2/msg_monitoring.hpp"  // .h → .hpp로 변경
 
 /* Custom Package headers */
 #include "nrs_forcecon2/nrs_3step_faac.h"  // .h → .hpp로 변경
@@ -75,6 +75,8 @@
 //// using namespace ur_rtde;
 using namespace std::chrono;
 using namespace std;
+using nrs_msgmonitoring2::MsgMonitoring;
+
 AKfun AKin;
 CArm RArm;
 Armtraj A_Traj;
