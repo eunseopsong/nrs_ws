@@ -125,10 +125,36 @@ set(Yoon_LIB
 ### ament_target_dependencies(rtde_test rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros)
 
 #######
-add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp)
+file(GLOB_RECURSE MODULE_SRCS
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/*/*.cpp"
+)
+
+add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp ${MODULE_SRCS})
+
+# — 헤더 검색 경로 추가
+target_include_directories(Yoon_UR10e_main PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+
 # target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-target_link_libraries(Yoon_UR10e_main yaml-cpp ${Yoon_LIB} Eigen3::Eigen)
-ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros nrs_forcecon2 nrs_msgmonitoring2)
+target_link_libraries(Yoon_UR10e_main
+  yaml-cpp
+  Eigen3::Eigen
+  nrs_forcecon2::nrs_3step_faac
+  nrs_msgmonitoring2::msg_monitoring
+)
+
+ament_target_dependencies(Yoon_UR10e_main
+  rclcpp
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+  nrs_forcecon2
+  nrs_msgmonitoring2
+)
+
 
 # add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
 # target_link_libraries(Yoon_FT_acquisit ${Yoon_LIB} yaml-cpp::yaml-cpp)
