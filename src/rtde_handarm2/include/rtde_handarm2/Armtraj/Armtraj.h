@@ -1,49 +1,65 @@
-#ifndef __ARMTRAJ__
-#define __ARMTRAJ__
+/****************************************************
+  * 
+  * ArmTraj header file (Armtraj.h) for 6-DOF ARM
+  *
+  * Created on 2016. 9. 7. (Is it right?)
+  * Created by Gitae
+  *
+  * Revised on 2025. 6. 9.
+  * Revised by Eunseop
+****************************************************/
 
-#include	<iostream>
-#include 	<fcntl.h>
-#include 	<math.h>
-#include 	<stdio.h>
-#include 	<stdlib.h>
-#include 	<unistd.h>
-#include 	<termios.h>
-#include 	<errno.h>
-#include 	<sys/ioctl.h>
-#include	<string.h>
-#include	<Eigen/Dense>
-#include	"../UR10/Arm_class.h"
+#ifndef RTDE_HANDARM2_ARMTRAJ_H_
+#define RTDE_HANDARM2_ARMTRAJ_H_
+
+#include <iostream>
+#include <fcntl.h>
+#include <cmath>     // for math functions and isnan
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
+#include <termios.h>
+#include <cerrno>
+#include <sys/ioctl.h>
+#include <cstring>
+#include <Eigen/Dense>
+
+// 이전: "../UR10/Arm_class.h"
+// 변경: include 디렉토리에서 바로 찾도록 절대 경로 사용
+#include "rtde_handarm2/UR10/Arm_class.h"
 
 using namespace Eigen;
 
-#define		AHz				      (125)
-#define PI 3.14159265359
+#define AHz (125)
+#ifndef PI
+#define PI 3.14159265358979323846
+#endif
 
 typedef class Armtraj
 {
 private:
-	double a[6],Dir[6];
+	double a[6], Dir[6];
 	double MaxFinalTime;
-	double s,sdt,sdtdt;
+	double s, sdt, sdtdt;
 	int num = 0;
 	int SEQ = 0;
 	double JointMaxVel = 0.05;
 	double JointMaxAcc = 0.05;
 	double TaskMaxVel = 0.1;
 	double TaskMaxAcc = 0.1;
-	double vel[6],acc[6];
+	double vel[6], acc[6];
 	double beta = 1;
-	unsigned int	TaskIteration;
-	double		TaskTime;
-	VectorXd	Distance;
+	unsigned int TaskIteration;
+	double TaskTime;
+	VectorXd Distance;
 	double MaxDistance = 0;
-	VectorXd	JointPosStart;
-	VectorXd	JointPosStop;
-	VectorXd	TaskPosStart;
-	VectorXd	TaskPosStop;
-	VectorXd	JointVelStart;
-	VectorXd	TaskVelStart;
-	double t1[6],t2[6],tj[6],ta[6],tup,tm,tv,tj1,ta1,ti[6];
+	VectorXd JointPosStart;
+	VectorXd JointPosStop;
+	VectorXd TaskPosStart;
+	VectorXd TaskPosStop;
+	VectorXd JointVelStart;
+	VectorXd TaskVelStart;
+	double t1[6], t2[6], tj[6], ta[6], tup, tm, tv, tj1, ta1, ti[6];
 	double jerk;
 	unsigned int j = 1;
 	Vector3d Dist, tasktime, v0;
@@ -84,7 +100,7 @@ private:
 	double z_ch;
 	double z_change;
 
-	//Fogale
+	// Fogale
 	MatrixXd n_origin2;
 	Vector4d a_f;
 	MatrixXd v;
@@ -112,9 +128,6 @@ public:
 	int Traj_scurve_c(CArm *A, float CustomJointMaxVel, float CustomJointMaxAcc, float Custombeta);
 	int Traj_rspb_velocity(CArm *A);
 
-
-
 } Ctraj;
 
-
-#endif
+#endif  // RTDE_HANDARM2_ARMTRAJ_H_
