@@ -49,7 +49,7 @@ void Kinematic_func::iForwardK_P(VectorXd &q, Vector3d &x, double endlength)
 	x(2) = (d1 + (d6a*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6a*(c234*c5+s234*s5))/2.0 - d5*c234);
 }
 
-void Kinematic_func::iForwardK_T(VectorXd &q, MatrixXd &T, double endlength)
+void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // revise on 2025.06.09 //// MatrixXd &T, double endlength)
 {
 	// Input = Joint Angle q, additional end length endlength
 	// Output = Transformation Matrix T
