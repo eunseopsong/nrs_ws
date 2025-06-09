@@ -338,9 +338,9 @@ int main(int argc, char* argv[])
                     else {UR10_pose_msg.data.push_back(RArm.thc(i-3));}
                     UR10_wrench_msg.data.push_back(ftS2(i)); // Contact sensor data
                 }
-                UR10_Jangle_pub.publish(UR10_Jangle_msg);
-                UR10_pose_pub.publish(UR10_pose_msg);
-                UR10_wrench_pub.publish(UR10_wrench_msg);
+                UR10_Jangle_pub->publish(UR10_Jangle_msg); //// UR10_Jangle_pub.publish(UR10_Jangle_msg);
+                UR10_pose_pub->publish(UR10_pose_msg);     //// UR10_pose_pub.publish(UR10_pose_msg);
+                UR10_wrench_pub->publish(UR10_wrench_msg); //// UR10_wrench_pub.publish(UR10_wrench_msg);
 
                 /*====== Control modes ======*/
 
