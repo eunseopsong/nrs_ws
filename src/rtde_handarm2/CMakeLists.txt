@@ -6,17 +6,18 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ------- ROS packages -------- #
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(yaml-cpp REQUIRED)
 
-find_package(nrs_forcecon2 REQUIRED)
-# 실시간성을 보장하기 위한 package (ros2에서는 필요없어짐)
+find_package(ament_cmake      REQUIRED)
+find_package(rclcpp           REQUIRED)
+find_package(std_msgs         REQUIRED)
+find_package(geometry_msgs    REQUIRED)
+find_package(sensor_msgs      REQUIRED)
+find_package(tf2              REQUIRED)
+find_package(tf2_ros          REQUIRED)
+find_package(yaml-cpp         REQUIRED)      # yaml-cpp (non-namespaced)
+find_package(Eigen3           REQUIRED)
+find_package(nrs_forcecon2    REQUIRED)      # 이제 nrs_3step_faac 만 export 됩니다
+find_package(rosidl_default_generators REQUIRED)
 # find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
 
 # -------------------------------#
@@ -103,8 +104,18 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/NRS_yaml
 )
 
-# Define library group
-set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Yoon_force_control Text_loader Yoon_communication)
+# — Yoon_LIB 그룹
+set(Yoon_LIB
+  ArmGuide
+  Kinematics
+  Armtraj
+  Yoon_filters
+  Yoon_FT_sensor
+  Yoon_path
+  Yoon_force_control
+  Text_loader
+  Yoon_communication
+)
 
 # Executables and their dependencies
 
