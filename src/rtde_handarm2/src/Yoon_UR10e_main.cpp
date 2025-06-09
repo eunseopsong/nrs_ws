@@ -1135,7 +1135,7 @@ int main(int argc, char* argv[])
                             /* Surface normal force monitoring start */
                             PPB_surfN_Fext = Power_PB.PU3.transpose()*Contact_Rot_force;
                             YSurfN_Fext_msg.data = PPB_surfN_Fext;
-                            YSurfN_Fext_pub.publish(YSurfN_Fext_msg);
+                            YSurfN_Fext_pub->publish(YSurfN_Fext_msg); //// YSurfN_Fext_pub.publish(YSurfN_Fext_msg);
                             /* Surface normal force monitoring end */
 
                             /* Desired contact force vector */
