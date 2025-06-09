@@ -285,12 +285,13 @@ int ArmGuide::ArmForceGuide4(AKfun *K, CArm *A)
 
 	for(int i=0;i<6;i++){
 		float tmp_dqd = A->dqd(i);
-		if(std::isnan(tmp_dqd)){
+		if(std::isnan(tmp_dqd)){ // Revised on 2025. 6. 9.
 			std::cout <<"NAN!!!!!!!!!!!!!!!!!" << std::endl;
 			A->dqd(i)=0;
 		}
 	}
 
+	return 0; // Add on 2025. 6. 9.
 }
 
 int ArmGuide::ArmForceGuide_position(AKfun *K, CArm *A)
@@ -416,12 +417,12 @@ int ArmGuide::ArmForceGuide_position(AKfun *K, CArm *A)
 
 	for(int i=0;i<6;i++){
 		float tmp_qd = A->qd(i);
-		if(std::isnan(tmp_qd)){
+		if(std::isnan(tmp_qd)){ // Revised on 2025. 6. 9.
 			std::cout <<"NAN!!!!!!!!!!!!!!!!!" << std::endl;
 			A->qd(i)=A->qc(i);
 		}
 	}
-
+	return 0; // Add on 2025. 6. 9.
 }
 
 int ArmGuide::MovingAverageFilter(double *x, int length, int filternum)
@@ -449,6 +450,7 @@ int ArmGuide::MovingAverageFilter(double *x, int length, int filternum)
 
 		x[i]=avg[i];
 	}
+	return 0; // Add on 2025. 6. 9.
 }
 
 int ArmGuide::LowpassFilter(double *x, int length, double alpha)
@@ -461,5 +463,5 @@ int ArmGuide::LowpassFilter(double *x, int length, double alpha)
 		xbuf[i]= alpha*xbuf[i] + (1-alpha)*x[i];
 		x[i]=xbuf[i];
 	}
-
+	return 0; // Add on 2025. 6. 9.
 }
