@@ -17,6 +17,7 @@ find_package(tf2_ros          REQUIRED)
 find_package(yaml-cpp         REQUIRED)      # yaml-cpp (non-namespaced)
 find_package(Eigen3           REQUIRED)
 find_package(nrs_forcecon2    REQUIRED)      # 이제 nrs_3step_faac 만 export 됩니다
+find_package(nrs_msgmonitoring2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 # find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
 
@@ -127,7 +128,7 @@ set(Yoon_LIB
 add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp)
 # target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
 target_link_libraries(Yoon_UR10e_main yaml-cpp ${Yoon_LIB} Eigen3::Eigen)
-ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros nrs_forcecon2)
+ament_target_dependencies(Yoon_UR10e_main rclcpp std_msgs geometry_msgs sensor_msgs tf2 tf2_ros nrs_forcecon2 nrs_msgmonitoring2)
 
 # add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
 # target_link_libraries(Yoon_FT_acquisit ${Yoon_LIB} yaml-cpp::yaml-cpp)
