@@ -1197,7 +1197,7 @@ int main(int argc, char* argv[])
                             }
                             sprintf(Playback_iteration,"playback iter:(cur: %d/tot: %d)",PB_iter_cur,PB_iter_cmd);
                             memcpy(message_status,Playback_iteration,sizeof(Playback_iteration));
-                            UR10e_mode_pub.publish(UR10e_mode_msg);
+                            UR10e_mode_pub->publish(UR10e_mode_msg); //// UR10e_mode_pub.publish(UR10e_mode_msg);
                         }
                     }
 
