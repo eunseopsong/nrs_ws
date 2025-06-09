@@ -133,8 +133,8 @@ int main(int argc, char* argv[])
     //// return -1;
     //// }
 
-    signal(SIGINT, raiseFlag); // Active
-	signal(SIGTERM, raiseFlag); // Termination (ctrl + c)
+    //////signal(SIGINT, raiseFlag); // Active
+	////// signal(SIGTERM, raiseFlag); // Termination (ctrl + c)
 
     std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
     std::chrono::duration<double>pre_now = start-start;
@@ -1120,7 +1120,7 @@ int main(int argc, char* argv[])
                             {
                                 printf("Wrong control mode was selected \n");
                                 printf("Check the 'NRS_Fcon_setting.yaml' \n");
-                                raiseFlag(0); // Stop the servo & program
+                                ////// raiseFlag(0); // Stop the servo & program
                             }
 
                             /* [Power playback real-time input upload] */
@@ -1250,7 +1250,7 @@ int main(int argc, char* argv[])
     catch(std::exception& e)
     {
         std::cerr << "error: " << e.what() << "\n";
-        raiseFlag(0);
+        ////// raiseFlag(0);
     }
     catch(...)
     {
