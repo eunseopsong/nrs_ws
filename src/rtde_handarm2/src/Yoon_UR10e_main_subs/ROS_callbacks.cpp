@@ -232,7 +232,8 @@ void VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg)
 
 }
 
-void cmdModeCallback(const std_msgs::UInt16::ConstPtr& msg)
+//// void cmdModeCallback(const std_msgs::UInt16::ConstPtr& msg)
+void cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     mode_cmd = msg->data;
 
