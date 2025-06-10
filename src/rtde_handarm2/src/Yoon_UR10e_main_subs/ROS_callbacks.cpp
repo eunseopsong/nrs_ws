@@ -4,6 +4,8 @@
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 
+#include "../Yoon_UR10e_main.h"
+
 // void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg) // FT sensor data callback
 // {
 
@@ -80,7 +82,8 @@
 //     ftS2(5) = Rot_Cmoment2(2);
 // }
 
-void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+//// void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+void VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
     /* Calibration matrix load from yaml file */
     if(VR_yaml_loader == false) // To load the CM once 
