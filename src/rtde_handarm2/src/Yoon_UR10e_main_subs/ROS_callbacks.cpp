@@ -1,78 +1,78 @@
-void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg) // FT sensor data callback
-{
+// void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg) // FT sensor data callback
+// {
 
-    /**** Sensor raw data aquisition ****/
-    //Sensor1
-	Rot_force1(0) = msg->Fx;
-	Rot_force1(1) = msg->Fy;
-	Rot_force1(2) = msg->Fz;
-	Rot_moment1(0) = msg->Mx;
-	Rot_moment1(1) = msg->My;
-	Rot_moment1(2) = msg->Mz;
-    //Sensor2
-    Rot_Cforce1(0) = msg->CFx;
-	Rot_Cforce1(1) = msg->CFy;
-	Rot_Cforce1(2) = msg->CFz;
-	Rot_Cmoment1(0) = msg->CMx;
-	Rot_Cmoment1(1) = msg->CMy;
-	Rot_Cmoment1(2) = msg->CMz;
+//     /**** Sensor raw data aquisition ****/
+//     //Sensor1
+// 	Rot_force1(0) = msg->Fx;
+// 	Rot_force1(1) = msg->Fy;
+// 	Rot_force1(2) = msg->Fz;
+// 	Rot_moment1(0) = msg->Mx;
+// 	Rot_moment1(1) = msg->My;
+// 	Rot_moment1(2) = msg->Mz;
+//     //Sensor2
+//     Rot_Cforce1(0) = msg->CFx;
+// 	Rot_Cforce1(1) = msg->CFy;
+// 	Rot_Cforce1(2) = msg->CFz;
+// 	Rot_Cmoment1(0) = msg->CMx;
+// 	Rot_Cmoment1(1) = msg->CMy;
+// 	Rot_Cmoment1(2) = msg->CMz;
 
-    /**** Step 1 : Sensor weight recovery ****/
+//     /**** Step 1 : Sensor weight recovery ****/
     
-    Rot_force1(2) = Rot_force1(2) - Handle_weight; // if sensor local coordinate is opposite with gravity direction: (-) Handle_weight
-    Rot_Cforce1(2) = Rot_Cforce1(2) - Tool_weight;
+//     Rot_force1(2) = Rot_force1(2) - Handle_weight; // if sensor local coordinate is opposite with gravity direction: (-) Handle_weight
+//     Rot_Cforce1(2) = Rot_Cforce1(2) - Tool_weight;
     
-    //YN: Contact FT 여기까지 수정!//
+//     //YN: Contact FT 여기까지 수정!//
     
-    /**** Step 2 : Sensor weight compensation ****/
+//     /**** Step 2 : Sensor weight compensation ****/
 
-    HTM_URRot = RArm.Tc.block(0,0,3,3);
-    /* Handle sensor was installed with rotz(180) & roty(-90) */
-    HTM_FT2UR = HTM_URRot*AKin.RotX((3.14/180)*(180))*AKin.RotZ((3.14/180)*90);
-    /* Contact sensor was installed with rotz(180) & roty(-90) */
-    HTM_CFT2UR = HTM_URRot*AKin.RotX((3.14/180)*(180))*AKin.RotZ((3.14/180)*90);
+//     HTM_URRot = RArm.Tc.block(0,0,3,3);
+//     /* Handle sensor was installed with rotz(180) & roty(-90) */
+//     HTM_FT2UR = HTM_URRot*AKin.RotX((3.14/180)*(180))*AKin.RotZ((3.14/180)*90);
+//     /* Contact sensor was installed with rotz(180) & roty(-90) */
+//     HTM_CFT2UR = HTM_URRot*AKin.RotX((3.14/180)*(180))*AKin.RotZ((3.14/180)*90);
 
-    Rot_force1(0) = Rot_force1(0) + HTM_FT2UR(2,0)*Handle_weight;
-    Rot_force1(1) = Rot_force1(1) + HTM_FT2UR(2,1)*Handle_weight;
-    Rot_force1(2) = Rot_force1(2) + HTM_FT2UR(2,2)*Handle_weight;
+//     Rot_force1(0) = Rot_force1(0) + HTM_FT2UR(2,0)*Handle_weight;
+//     Rot_force1(1) = Rot_force1(1) + HTM_FT2UR(2,1)*Handle_weight;
+//     Rot_force1(2) = Rot_force1(2) + HTM_FT2UR(2,2)*Handle_weight;
 
-    Rot_Cforce1(0) = Rot_Cforce1(0) + HTM_CFT2UR(2,0)*Tool_weight;
-    Rot_Cforce1(1) = Rot_Cforce1(1) + HTM_CFT2UR(2,1)*Tool_weight;
-    Rot_Cforce1(2) = Rot_Cforce1(2) + HTM_CFT2UR(2,2)*Tool_weight;
+//     Rot_Cforce1(0) = Rot_Cforce1(0) + HTM_CFT2UR(2,0)*Tool_weight;
+//     Rot_Cforce1(1) = Rot_Cforce1(1) + HTM_CFT2UR(2,1)*Tool_weight;
+//     Rot_Cforce1(2) = Rot_Cforce1(2) + HTM_CFT2UR(2,2)*Tool_weight;
 
 
-    /**** Step 3 : Sensor frame change (From local end-effector To robot base coordinate) ****/
-    /** Handle sensor frame change **/
-    // Force rotation
-    Rot_force2 = HTM_FT2UR*Rot_force1;
-    // Moment rotation
-    Rot_moment2 = HTM_FT2UR*Rot_moment1;
+//     /**** Step 3 : Sensor frame change (From local end-effector To robot base coordinate) ****/
+//     /** Handle sensor frame change **/
+//     // Force rotation
+//     Rot_force2 = HTM_FT2UR*Rot_force1;
+//     // Moment rotation
+//     Rot_moment2 = HTM_FT2UR*Rot_moment1;
 
-    /** Contact sensor frame change **/
-    Rot_Cforce2 = HTM_CFT2UR*Rot_Cforce1;
-    Rot_Cmoment2 = HTM_CFT2UR*Rot_Cmoment1;
+//     /** Contact sensor frame change **/
+//     Rot_Cforce2 = HTM_CFT2UR*Rot_Cforce1;
+//     Rot_Cmoment2 = HTM_CFT2UR*Rot_Cmoment1;
 
-    /**** Step 4 : Sensor data update ****/
-    /** Handle sensor data **/
-    // Force update
-    ftS1(0) = Rot_force2(0);
-    ftS1(1) = Rot_force2(1);
-    ftS1(2) = Rot_force2(2);
-    // Moment update
-    ftS1(3) = Rot_moment2(0);
-    ftS1(4) = Rot_moment2(1);
-    ftS1(5) = Rot_moment2(2);
+//     /**** Step 4 : Sensor data update ****/
+//     /** Handle sensor data **/
+//     // Force update
+//     ftS1(0) = Rot_force2(0);
+//     ftS1(1) = Rot_force2(1);
+//     ftS1(2) = Rot_force2(2);
+//     // Moment update
+//     ftS1(3) = Rot_moment2(0);
+//     ftS1(4) = Rot_moment2(1);
+//     ftS1(5) = Rot_moment2(2);
 
-    /** Contact sensor data **/
-    // Force update
-    ftS2(0) = Rot_Cforce2(0);
-    ftS2(1) = Rot_Cforce2(1);
-    ftS2(2) = Rot_Cforce2(2);
-    // Moment update
-    ftS2(3) = Rot_Cmoment2(0);
-    ftS2(4) = Rot_Cmoment2(1);
-    ftS2(5) = Rot_Cmoment2(2);
-}
+//     /** Contact sensor data **/
+//     // Force update
+//     ftS2(0) = Rot_Cforce2(0);
+//     ftS2(1) = Rot_Cforce2(1);
+//     ftS2(2) = Rot_Cforce2(2);
+//     // Moment update
+//     ftS2(3) = Rot_Cmoment2(0);
+//     ftS2(4) = Rot_Cmoment2(1);
+//     ftS2(5) = Rot_Cmoment2(2);
+// }
 
 
 void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
