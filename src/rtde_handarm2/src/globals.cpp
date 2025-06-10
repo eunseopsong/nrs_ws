@@ -265,11 +265,18 @@ NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
 NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, FAAC_HPF_cf, FAAC_HPF_threshold);
 
 /* Three-step FAAC */
-std::vector<double> process_noise = {0.1,0.1,0.1};
-std::vector<double> measurement_noise = {10,10,10};
-Nrs3StepFAAC FAAC3step(NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>(), 
-NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
-NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, process_noise, measurement_noise);
+std::vector<double> process_noise    = {0.1, 0.1, 0.1};
+std::vector<double> measurement_noise = {10, 10, 10};
+
+Nrs3StepFAAC FAAC3step(
+  NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>(),
+  NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
+  NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(),
+  dt,
+  process_noise,
+  measurement_noise
+);
+
 
 
 /* VR parameters */

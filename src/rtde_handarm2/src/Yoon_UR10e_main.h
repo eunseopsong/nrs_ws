@@ -320,6 +320,7 @@ extern double FAAC_HPF_threshold; // N
 /* Three-step FAAC */
 extern std::vector<double> process_noise;
 extern std::vector<double> measurement_noise;
+extern Nrs3StepFAAC FAAC3step;
 // extern Nrs3StepFAAC FAAC3step,
 // NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
 // NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, process_noise, measurement_noise);
