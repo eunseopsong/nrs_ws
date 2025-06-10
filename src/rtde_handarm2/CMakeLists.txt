@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ------- ROS packages -------- #
-
 find_package(ament_cmake      REQUIRED)
 find_package(rclcpp           REQUIRED)
 find_package(std_msgs         REQUIRED)
@@ -16,11 +15,10 @@ find_package(tf2              REQUIRED)
 find_package(tf2_ros          REQUIRED)
 find_package(yaml-cpp         REQUIRED)      # yaml-cpp (non-namespaced)
 find_package(Eigen3           REQUIRED)
-find_package(nrs_forcecon2    REQUIRED)      # 이제 nrs_3step_faac 만 export 됩니다
+find_package(nrs_forcecon2    REQUIRED)
 find_package(nrs_msgmonitoring2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 # find_package(ur_rtde REQUIRED PATHS "/home/nrsur10/ur_rtde/build/ur_rtde")
-
 # -------------------------------#
 
 # ------- RTDE packages -------- #
@@ -43,7 +41,6 @@ endif()
 
 # ------- For ROS msg usage -------- #
 find_package(rosidl_default_generators REQUIRED)
-
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmMsg.msg"
@@ -83,19 +80,6 @@ include_directories(
   include/rtde_handarm2/Yoon_force_control
   include/rtde_handarm2/Yoon_communication
   include/rtde_handarm2/Yoon_data_loader
-)
-
-include_directories(
-  include
-  include/rtde_handarm2/Arm_guide
-  include/rtde_handarm2/Armtraj
-  include/rtde_handarm2/UR10
-  include/rtde_handarm2/Yoon_communication
-  include/rtde_handarm2/Yoon_data_loader
-  include/rtde_handarm2/Yoon_filters
-  include/rtde_handarm2/Yoon_force_control
-  include/rtde_handarm2/Yoon_FT_sensor
-  include/rtde_handarm2/Yoon_path
   include/rtde_handarm2/Third_party/Eigen3/eigen
 )
 
