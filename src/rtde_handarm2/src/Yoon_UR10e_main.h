@@ -75,6 +75,8 @@
 // using namespace ur_rtde;
 using namespace std::chrono;
 using namespace std;
+using nrs_msgmonitoring2::MsgMonitoring; // Add on 2025.06.10 17:23
+
 extern AKfun AKin;
 extern CArm RArm;
 extern Armtraj A_Traj;
