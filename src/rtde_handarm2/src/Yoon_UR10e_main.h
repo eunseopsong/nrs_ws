@@ -192,34 +192,34 @@ Eigen::Vector3d Contact_Rot_force(3), Contact_Rot_moment(3);
 
 Eigen::VectorXd Hadm_FT_data = Eigen::VectorXd::Zero(6);
 
-Eigen::VectorXd Hadmit_M = Eigen::VectorXd::Zero(6);
-Eigen::VectorXd Hadmit_D = Eigen::VectorXd::Zero(6);
-Eigen::VectorXd Hadmit_K = Eigen::VectorXd::Zero(6);
+extern Eigen::VectorXd Hadmit_M;
+extern Eigen::VectorXd Hadmit_D;
+extern Eigen::VectorXd Hadmit_K;
 
-Eigen::VectorXd Cadmit_PB_M = Eigen::VectorXd::Zero(6);
-Eigen::VectorXd Cadmit_PB_D = Eigen::VectorXd::Zero(6);
-Eigen::VectorXd Cadmit_PB_K = Eigen::VectorXd::Zero(6);
+extern Eigen::VectorXd Cadmit_PB_M;
+extern Eigen::VectorXd Cadmit_PB_D;
+extern Eigen::VectorXd Cadmit_PB_K;
 
-Yoon_force_control Hadmit_force[6];
-Yoon_force_control Cadmit_playback[6];
+extern Yoon_force_control Hadmit_force[6];
+extern Yoon_force_control Cadmit_playback[6];
 
 /* For Energy tank hand-guiding */
 Eigen::VectorXd PHadmit_M = Eigen::VectorXd::Zero(6);
 Eigen::VectorXd PHadmit_D = Eigen::VectorXd::Zero(6);
 
 /* For energy tank */
-Eigen::VectorXf et_car_vel = Eigen::VectorXf::Zero(6);
-Eigen::VectorXf et_pcar_vel = Eigen::VectorXf::Zero(6);
-Eigen::VectorXf et_an_vel = Eigen::VectorXf::Zero(6);
+extern Eigen::VectorXf et_car_vel;
+extern Eigen::VectorXf et_pcar_vel;
+extern Eigen::VectorXf et_an_vel;
 double et_norm[6] = {0,};
 double et_norm_threshold[6] = {0.8,0.8,0.8,0.08,0.08,0.08}; // Algorithm execution threshold
-Yoon_filters et_HFT_HPF[6]; // High pass filter for hand-guiding energy tank
+extern Yoon_filters et_HFT_HPF[6]; // High pass filter for hand-guiding energy tank
 
 double admit_FT_in[6] = {0,};
 double admit_vel_in[6] = {0,};
 
-Etank_HG AD_HG_et[6]; // Admittance control hand-guding energy tank instance
-Etank_HG et_adap; // energy tank paramter structure for adaptation 
+extern Etank_HG AD_HG_et[6]; // Admittance control hand-guding energy tank instance
+extern Etank_HG et_adap; // energy tank paramter structure for adaptation 
 
 double Md_ti[6] = {0,}; // Mass at the ti 
 double Md_tf[6] = {0,}; // Mass at the tf
@@ -243,10 +243,10 @@ double Tool_weight = 16.0; //set the correct value!!! (Spindle : 16 N)
 
 // uint16_t mode_cmd = 0;
 extern uint16_t mode_cmd;
-Yoon_path path_planning,PB_PL_X,PB_PL_Y,PB_PL_Z,PB_PL_RX,PB_PL_RY,PB_PL_RZ; // path planning instance
+extern Yoon_path path_planning,PB_PL_X,PB_PL_Y,PB_PL_Z,PB_PL_RX,PB_PL_RY,PB_PL_RZ; // path planning instance
 Yoon_path J_single; // Single joint path planning
-Eigen::VectorXd TCP_path_start = Eigen::VectorXd::Zero(6);
-Eigen::VectorXd Joint_path_start = Eigen::VectorXd::Zero(6);
+extern Eigen::VectorXd TCP_path_start;
+extern Eigen::VectorXd Joint_path_start;
 
 /* Status message start */
 extern char path_gen_done[32];
@@ -266,14 +266,14 @@ bool PB_starting_path_done_flag = false;
 extern bool path_recording_flag;
 FILE *path_recording_pos, *path_recording_joint, *Hand_G_recording, *Hand_G_playback, *Descre_P_recording,
 *EXPdata1, *VRCali_UR10CB_EE, *VRCali_UR10CB_VR;
-int EXPdata1_switch = NRS_recording["EXPdata1_switch"].as<int>();
+extern int EXPdata1_switch;
 float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_resi,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY for playback
 double PB_RCF_norm = 0; // For contact detection on playback control with recorded contact force
 double PB_des_CF[3] = {0,}; // Desired contact force at power playback
 extern std::vector<double> mjoint_cmd; //// std::vector<double> mjoint_cmd;
 Yoon_path Posture_PB; // Posture playback instance
-DS_power_playback Power_PB; // Power(posture & force) playback instance
-DS_power_PB_RTinput PPB_RTinput; // Power playback real-time input instance
+extern DS_power_playback Power_PB; // Power(posture & force) playback instance
+extern DS_power_PB_RTinput PPB_RTinput; // Power playback real-time input instance
 double Norm_LD_CF = 0;
 double CF_gen_threshold = 0; // Contact force generation threshold(unit: N)
 double PPB_surfN_Fext = 0;
@@ -281,17 +281,17 @@ uint32_t PB_iter_cmd = 0; // number of playback iteration
 uint32_t PB_iter_cur = 0; // current itereation status
 
 /* descrete points path parms */
-Eigen::MatrixXd Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
-Eigen::MatrixXd Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
+extern Eigen::MatrixXd Decr_RD_points;
+extern Eigen::MatrixXd Inst_RD_points;
 extern int Num_RD_points;
 
-Eigen::MatrixXd Decr_EE_points = Eigen::MatrixXd::Zero(1,12);
-Eigen::MatrixXd Inst_EE_points = Eigen::MatrixXd::Zero(1,12);
+extern Eigen::MatrixXd Decr_EE_points;
+extern Eigen::MatrixXd Inst_EE_points;
 extern int Num_EE_points;
-Eigen::MatrixXd Decr_VR_points = Eigen::MatrixXd::Zero(1,7); // Quaternion (7 cols.)
-Eigen::MatrixXd Inst_VR_points = Eigen::MatrixXd::Zero(1,7); // Quaternion (7 cols.)
+extern Eigen::MatrixXd Decr_VR_points; // Quaternion (7 cols.)
+extern Eigen::MatrixXd Inst_VR_points; // Quaternion (7 cols.)
 extern int Num_VR_points;
-Yoon_path Descr_RD_blending1,Descr_RD_blending2,Descr_RD_blending3;
+extern Yoon_path Descr_RD_blending1,Descr_RD_blending2,Descr_RD_blending3;
 bool Descr_RD_blending_done = false;
 
 /* Variable stiffness control (Kd to Zero) */
