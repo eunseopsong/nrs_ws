@@ -86,16 +86,21 @@ extern CArm RArm;
 extern Armtraj A_Traj;
 extern ArmGuide A_Guide;
 
-FILE *fp_ur_record, *fp_servo, *fp_record, *fp_replay;
+extern FILE *fp_ur_record, *fp_servo, *fp_record, *fp_replay;
 /*---------------------------- Yaml file load ---------------------------------*/
-std::ifstream fin1(NRS_UR10_IP_loc);
-std::ifstream fin2(NRS_Record_Printing_loc);
-std::ifstream fin3(NRS_Fcon_setting_loc);
-std::ifstream fin4(NRS_VR_setting_loc);
-YAML::Node NRS_IP = YAML::Load(fin1);
-YAML::Node NRS_recording = YAML::Load(fin2);
-YAML::Node NRS_Fcon_setting = YAML::Load(fin3);
-YAML::Node NRS_VR_setting = YAML::Load(fin4);
+//// std::ifstream fin1(NRS_UR10_IP_loc);
+//// std::ifstream fin2(NRS_Record_Printing_loc);
+//// std::ifstream fin3(NRS_Fcon_setting_loc);
+//// std::ifstream fin4(NRS_VR_setting_loc);
+// extern std::ifstream fin1;
+// extern std::ifstream fin2;
+// extern std::ifstream fin3;
+// extern std::ifstream fin4;
+
+extern YAML::Node NRS_IP;
+extern YAML::Node NRS_recording;
+extern YAML::Node NRS_Fcon_setting;
+extern YAML::Node NRS_VR_setting;
 
 /*---------------------------- System setting ---------------------------------*/
 float SwitchS[5];
@@ -110,9 +115,9 @@ std::string robot_ip = NRS_IP["UR10IP"].as<std::string>();
 //// double rtde_frequency = 500.0; // Hz 500
 //// double dt = 1.0 / rtde_frequency; // 2ms
 // double dt = 0.002; // 2ms
-extern double dt = 0.002; // 2ms
+extern double dt; // 2ms
 //// uint16_t flags = RTDEControlInterface::FLAG_VERBOSE | RTDEControlInterface::FLAG_UPLOAD_SCRIPT;
-int ur_cap_port = 50002;
+extern int ur_cap_port;
 
 /* ur_rtde realtime priorities */
 int rt_receive_priority = 90;
@@ -237,20 +242,20 @@ double Handle_weight = 3.0; //unit : N (must be plus)
 double Tool_weight = 16.0; //set the correct value!!! (Spindle : 16 N)
 
 // uint16_t mode_cmd = 0;
-extern uint16_t mode_cmd = 0;
+extern uint16_t mode_cmd;
 Yoon_path path_planning,PB_PL_X,PB_PL_Y,PB_PL_Z,PB_PL_RX,PB_PL_RY,PB_PL_RZ; // path planning instance
 Yoon_path J_single; // Single joint path planning
 Eigen::VectorXd TCP_path_start = Eigen::VectorXd::Zero(6);
 Eigen::VectorXd Joint_path_start = Eigen::VectorXd::Zero(6);
 
 /* Status message start */
-char path_gen_done[32] = "Path generation done";
-char ST_path_gen_done[32] = "Starting path generation done";
-char Hand_guiding_mode[32] = "Hand guiding control mode";
-char Motion_stop_mode[32] = "Motion stop";
-char Data_recording_on[32] = "Data recording on";
-char Data_recording_off[32] = "Data recording off";
-char Saved_way_point[32] = "Saved way points: ";
+extern char path_gen_done[32];
+extern char ST_path_gen_done[32];
+extern char Hand_guiding_mode[32];
+extern char Motion_stop_mode[32];
+extern char Data_recording_on[32];
+extern char Data_recording_off[32];
+extern char Saved_way_point[32];
 char Playback_terminated[32] = "Payback was terminated";
 char Playback_iteration[32] = "Payback: ";
 
@@ -258,7 +263,7 @@ char Playback_iteration[32] = "Payback: ";
 int Path_point_num = -1;
 bool path_done_flag = false;
 bool PB_starting_path_done_flag = false;
-bool path_recording_flag = false;
+extern bool path_recording_flag;
 FILE *path_recording_pos, *path_recording_joint, *Hand_G_recording, *Hand_G_playback, *Descre_P_recording,
 *EXPdata1, *VRCali_UR10CB_EE, *VRCali_UR10CB_VR;
 int EXPdata1_switch = NRS_recording["EXPdata1_switch"].as<int>();
@@ -278,14 +283,14 @@ uint32_t PB_iter_cur = 0; // current itereation status
 /* descrete points path parms */
 Eigen::MatrixXd Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
 Eigen::MatrixXd Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
-int Num_RD_points = 0;
+extern int Num_RD_points;
 
 Eigen::MatrixXd Decr_EE_points = Eigen::MatrixXd::Zero(1,12);
 Eigen::MatrixXd Inst_EE_points = Eigen::MatrixXd::Zero(1,12);
-int Num_EE_points = 0;
+extern int Num_EE_points;
 Eigen::MatrixXd Decr_VR_points = Eigen::MatrixXd::Zero(1,7); // Quaternion (7 cols.)
 Eigen::MatrixXd Inst_VR_points = Eigen::MatrixXd::Zero(1,7); // Quaternion (7 cols.)
-int Num_VR_points = 0;
+extern int Num_VR_points;
 Yoon_path Descr_RD_blending1,Descr_RD_blending2,Descr_RD_blending3;
 bool Descr_RD_blending_done = false;
 
@@ -301,57 +306,51 @@ double CR_startZP,CR_endZP;
 Vector3d CR_start, CR_start_dist;
 
 /* Dynamical system based adaptive variable damping admittance law */
-int Contact_Fcon_mode = NRS_Fcon_setting["Contact_Fcon_mode"].as<int>();
-double DB_AVA_Rd = NRS_Fcon_setting["AAC_update_ratio"].as<double>(); // Desired update ratio, 0~1, (0.625) -> to make the sigma 0.5
+extern int Contact_Fcon_mode;
+extern double DB_AVA_Rd; // Desired update ratio, 0~1, (0.625) -> to make the sigma 0.5
 double DB_AVA_sigma; // Calculated update rate
 double DB_AVA_phi = 0;
 double DB_AVA_Dd_init;
 double DB_AVA_Xc, DB_AVA_Xc_pre, DB_AVA_Xc_dot;
-double DB_AVA_Dsature[2] = {NRS_Fcon_setting["AAC_Dsature"]["Lower_limit"].as<double>(),
-NRS_Fcon_setting["AAC_Dsature"]["Upper_limit"].as<double>()}; // Damping saturation MAX, MIN value
+extern double DB_AVA_Dsature[2]; // Damping saturation MAX, MIN value
 
 /* Dynamical system based adaptive variable stiffness admittance law */
 double DB_AVA_Kd_init;
 double DB_AVA_Xr, DB_AVA_X;
-double DB_AVA_Ksature[2] = {NRS_Fcon_setting["AAC_Ksature"]["Lower_limit"].as<double>(),
-NRS_Fcon_setting["AAC_Ksature"]["Upper_limit"].as<double>()}; // Damping saturation MAX, MIN value
+extern double DB_AVA_Ksature[2]; // Damping saturation MAX, MIN value
 
 /* Fuzzy based adaptive variable stiffness admittance law */
 double Fuzzy_F_error, Fuzzy_F_Perror, Fuzzy_F_error_dot;
-Fuzzy_adaptive_k FAK("Fs_Cf");
+extern Fuzzy_adaptive_k FAK;
 
 /* Fuzzy based adaptive variable mass & damping admittance law */
 double Fuzzy_mass_var, Fuzzy_md_ratio;
 double Fuzzy_mass_limit[2] = {0.5, 5}; // {0.5, 5}
 // Fuzzy_adaptive_md FAMD("cu");
-double FAAC_HPF_cf = 15; // Hz
-double FAAC_HPF_threshold = 1; // N
-Fuzzy_adaptive_md FAMD("cu",NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>(), 
-NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
-NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, FAAC_HPF_cf, FAAC_HPF_threshold);
+extern double FAAC_HPF_cf; // Hz
+extern double FAAC_HPF_threshold; // N
+extern Fuzzy_adaptive_md FAMD;
 
 /* Three-step FAAC */
-std::vector<double> process_noise = {0.1,0.1,0.1};
-std::vector<double> measurement_noise = {10,10,10};
-Nrs3StepFAAC FAAC3step(NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>(), 
-NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
-NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, process_noise, measurement_noise);
+extern std::vector<double> process_noise;
+extern std::vector<double> measurement_noise;
+extern Nrs3StepFAAC FAAC3step;
 
 
 /* VR parameters */
-extern bool VR_yaml_loader = false; //// bool VR_yaml_loader = false; // VR yaml calibration matrix load flag
+extern bool VR_yaml_loader; //// bool VR_yaml_loader = false; // VR yaml calibration matrix load flag
 double VR_pose[7] = {0,}; // VR pose (Position-3, Orientation-quaternion)
-double VR_cal_pose[7] = {0,}; 
+double VR_cal_pose[7] = {0,};
 
-Eigen::MatrixXd VR_Q2Rot = Eigen::MatrixXd::Zero(3,3);
-Eigen::MatrixXd VR_PoseM = Eigen::MatrixXd::Zero(4,4);
-Eigen::MatrixXd VR_CalPoseM = Eigen::MatrixXd::Zero(4,4);
-Eigen::VectorXd VR_CalRPY = Eigen::VectorXd::Zero(3);
-Eigen::VectorXd VR_CalPoseRPY = Eigen::VectorXd::Zero(6);
-Eigen::MatrixXd VR_Cali_TAD = Eigen::MatrixXd::Zero(4,4);
-Eigen::MatrixXd VR_Cali_TBC = Eigen::MatrixXd::Zero(4,4);
-Eigen::MatrixXd VR_Cali_TBC_inv = Eigen::MatrixXd::Zero(4,4);
-Eigen::MatrixXd VR_Cali_TBC_PB = Eigen::MatrixXd::Zero(4,4);
-Eigen::MatrixXd VR_Cali_TCE = Eigen::MatrixXd::Zero(4,4);
-Eigen::MatrixXd VR_Cali_RAdj = Eigen::MatrixXd::Zero(3,3);
-Eigen::MatrixXd VR_Cali_TAdj = Eigen::MatrixXd::Zero(4,4);
+extern Eigen::MatrixXd VR_Q2Rot;
+extern Eigen::MatrixXd VR_PoseM;
+extern Eigen::MatrixXd VR_CalPoseM;
+extern Eigen::VectorXd VR_CalRPY;
+extern Eigen::VectorXd VR_CalPoseRPY;
+extern Eigen::MatrixXd VR_Cali_TAD;
+extern Eigen::MatrixXd VR_Cali_TBC;
+extern Eigen::MatrixXd VR_Cali_TBC_inv;
+extern Eigen::MatrixXd VR_Cali_TBC_PB;
+extern Eigen::MatrixXd VR_Cali_TCE;
+extern Eigen::MatrixXd VR_Cali_RAdj;
+extern Eigen::MatrixXd VR_Cali_TAdj;
