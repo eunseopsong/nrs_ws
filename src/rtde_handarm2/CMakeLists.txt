@@ -128,8 +128,16 @@ set(Yoon_LIB
 file(GLOB_RECURSE MODULE_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/*/*.cpp"
 )
+# 콜백 구현 파일들을 포함하도록 Subscriber 소스 glob 추가
+file(GLOB SUBSCRIBER_SRCS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_main_subs/*.cpp"
+)
 
-add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp ${MODULE_SRCS})
+add_executable(Yoon_UR10e_main
+  src/Yoon_UR10e_main.cpp
+  ${MODULE_SRCS}
+  ${SUBSCRIBER_SRCS}
+)
 
 # — 헤더 검색 경로 추가
 target_include_directories(Yoon_UR10e_main PUBLIC
@@ -137,12 +145,17 @@ target_include_directories(Yoon_UR10e_main PUBLIC
 )
 
 # target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-target_link_libraries(Yoon_UR10e_main PRIVATE
-  yaml-cpp::yaml-cpp    # namespaced import target
-  Eigen3::Eigen         # namespaced import target
-  nrs_3step_faac        # nrs_forcecon2가 만든 라이브러리 이름
-  msg_monitoring        # nrs_msgmonitoring2가 만든 라이브러리 이름
+target_link_libraries(Yoon_UR10e_main
+  yaml-cpp
+  Eigen3::Eigen
 )
+
+# target_link_libraries(Yoon_UR10e_main
+#   yaml-cpp
+#   Eigen3::Eigen
+#   nrs_3step_faac
+#   msg_monitoring
+# )
 
 ament_target_dependencies(Yoon_UR10e_main
   rclcpp
@@ -151,8 +164,8 @@ ament_target_dependencies(Yoon_UR10e_main
   sensor_msgs
   tf2
   tf2_ros
-  nrs_forcecon2
-  nrs_msgmonitoring2
+  nrs_forcecon2         # 이 줄이 nrs_3step_faac 라이브러리를 자동 링크해 줍니다
+  nrs_msgmonitoring2    # 이 줄이 msg_monitoring 라이브러리를 자동 링크해 줍니다
 )
 
 
