@@ -132,42 +132,25 @@ file(GLOB_RECURSE MODULE_SRCS
 file(GLOB SUBSCRIBER_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_main_subs/*.cpp"
 )
-
-add_executable(Yoon_UR10e_main
-  src/Yoon_UR10e_main.cpp
-  src/globals.cpp
-  ${MODULE_SRCS}
-  ${SUBSCRIBER_SRCS}
-)
-
-# — 헤더 검색 경로 추가
-target_include_directories(Yoon_UR10e_main PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
-
-# target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-target_link_libraries(Yoon_UR10e_main
-  yaml-cpp
-  Eigen3::Eigen
-)
-
-# target_link_libraries(Yoon_UR10e_main
-#   yaml-cpp
-#   Eigen3::Eigen
-#   nrs_3step_faac
-#   msg_monitoring
-# )
-
-ament_target_dependencies(Yoon_UR10e_main
+# 공통 dependencies 변수 정의
+set(COMMON_DEPENDENCIES
   rclcpp
   std_msgs
   geometry_msgs
   sensor_msgs
   tf2
   tf2_ros
-  nrs_forcecon2         # 이 줄이 nrs_3step_faac 라이브러리를 자동 링크해 줍니다
-  nrs_msgmonitoring2    # 이 줄이 msg_monitoring 라이브러리를 자동 링크해 줍니다
+  nrs_forcecon2
+  nrs_msgmonitoring2
 )
+
+######################################
+#### Yoon_UR10e_main Dependencies ####
+######################################
+add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
+target_include_directories(Yoon_UR10e_main PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>) # — 헤더 검색 경로 추가
+target_link_libraries(Yoon_UR10e_main yaml-cpp Eigen3::Eigen) ## target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+ament_target_dependencies(Yoon_UR10e_main ${COMMON_DEPENDENCIES})
 
 
 # add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
@@ -182,9 +165,14 @@ ament_target_dependencies(Yoon_UR10e_main
 # target_link_libraries(Yoon_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
 # ament_target_dependencies(Yoon_Hbutton_cmd rclcpp std_msgs)
 
-# add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp)
-# target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-# ament_target_dependencies(NRS_Hbutton_cmd rclcpp std_msgs)
+
+######################################
+#### NRS_Hbutton_cmd Dependencies ####
+######################################
+# add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS}) ## add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp)
+# target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp Eigen3::Eigen)                                 ## target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(NRS_Hbutton_cmd ${COMMON_DEPENDENCIES})                                         ## ament_target_dependencies(NRS_Hbutton_cmd rclcpp std_msgs)
+
 
 # add_executable(VR_Hbutton_cmd src/VR_Hbutton_cmd.cpp)
 # target_link_libraries(VR_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
