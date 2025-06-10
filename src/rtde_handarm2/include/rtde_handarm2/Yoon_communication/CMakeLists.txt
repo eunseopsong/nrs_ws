@@ -1,3 +1,3 @@
-project(Yoon_communication)
+# project(Yoon_communication)
 
-add_library(Yoon_communication Yoon_communi.cpp)
+# add_library(Yoon_communication Yoon_communi.cpp)
