@@ -135,6 +135,7 @@ file(GLOB SUBSCRIBER_SRCS
 
 add_executable(Yoon_UR10e_main
   src/Yoon_UR10e_main.cpp
+  src/globals.cpp
   ${MODULE_SRCS}
   ${SUBSCRIBER_SRCS}
 )
