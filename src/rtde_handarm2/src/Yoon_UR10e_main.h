@@ -77,10 +77,14 @@ using namespace std::chrono;
 using namespace std;
 using nrs_msgmonitoring2::MsgMonitoring;
 
-AKfun AKin;
-CArm RArm;
-Armtraj A_Traj;
-ArmGuide A_Guide;
+// AKfun AKin;
+// CArm RArm;
+// Armtraj A_Traj;
+// ArmGuide A_Guide;
+extern AKfun AKin;
+extern CArm RArm;
+extern Armtraj A_Traj;
+extern ArmGuide A_Guide;
 
 FILE *fp_ur_record, *fp_servo, *fp_record, *fp_replay;
 /*---------------------------- Yaml file load ---------------------------------*/
@@ -105,7 +109,8 @@ int SEQ_record=0,SEQ_point=0,SEQ_traj=0;
 std::string robot_ip = NRS_IP["UR10IP"].as<std::string>();
 //// double rtde_frequency = 500.0; // Hz 500
 //// double dt = 1.0 / rtde_frequency; // 2ms
-double dt = 0.002; // 2ms
+// double dt = 0.002; // 2ms
+extern double dt = 0.002; // 2ms
 //// uint16_t flags = RTDEControlInterface::FLAG_VERBOSE | RTDEControlInterface::FLAG_UPLOAD_SCRIPT;
 int ur_cap_port = 50002;
 
@@ -231,7 +236,8 @@ Eigen::Matrix3d HTM_URRot, HTM_FT2UR, HTM_CFT2UR;
 double Handle_weight = 3.0; //unit : N (must be plus)
 double Tool_weight = 16.0; //set the correct value!!! (Spindle : 16 N)
 
-uint16_t mode_cmd = 0;
+// uint16_t mode_cmd = 0;
+extern uint16_t mode_cmd = 0;
 Yoon_path path_planning,PB_PL_X,PB_PL_Y,PB_PL_Z,PB_PL_RX,PB_PL_RY,PB_PL_RZ; // path planning instance
 Yoon_path J_single; // Single joint path planning
 Eigen::VectorXd TCP_path_start = Eigen::VectorXd::Zero(6);
@@ -259,7 +265,7 @@ int EXPdata1_switch = NRS_recording["EXPdata1_switch"].as<int>();
 float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_resi,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY for playback
 double PB_RCF_norm = 0; // For contact detection on playback control with recorded contact force
 double PB_des_CF[3] = {0,}; // Desired contact force at power playback
-std::vector<double> mjoint_cmd;
+extern std::vector<double> mjoint_cmd; //// std::vector<double> mjoint_cmd;
 Yoon_path Posture_PB; // Posture playback instance
 DS_power_playback Power_PB; // Power(posture & force) playback instance
 DS_power_PB_RTinput PPB_RTinput; // Power playback real-time input instance
@@ -333,7 +339,7 @@ NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, process_no
 
 
 /* VR parameters */
-bool VR_yaml_loader = false; // VR yaml calibration matrix load flag
+extern bool VR_yaml_loader = false; //// bool VR_yaml_loader = false; // VR yaml calibration matrix load flag
 double VR_pose[7] = {0,}; // VR pose (Position-3, Orientation-quaternion)
 double VR_cal_pose[7] = {0,}; 
 
