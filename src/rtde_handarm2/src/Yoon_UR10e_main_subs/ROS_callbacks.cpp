@@ -573,14 +573,16 @@ void cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 	}
 }
 
-void PbIterCallback(const std_msgs::UInt16::ConstPtr& msg)
+//// void PbIterCallback(const std_msgs::UInt16::ConstPtr& msg)
+void PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     PB_iter_cmd = msg->data;
     PB_iter_cur = 1; // 1 is right
 }
 
 
-void jointCmdCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
+//// void jointCmdCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
+void jointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
     mjoint_cmd = msg->data;
     printf("\nSelected joint: %1.0f, Target relative joint angle: %4f \n", mjoint_cmd[0],mjoint_cmd[1]);
