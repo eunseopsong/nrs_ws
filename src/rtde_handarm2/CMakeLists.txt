@@ -137,11 +137,11 @@ target_include_directories(Yoon_UR10e_main PUBLIC
 )
 
 # target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-target_link_libraries(Yoon_UR10e_main
-  yaml-cpp
-  Eigen3::Eigen
-  nrs_forcecon2::nrs_3step_faac
-  nrs_msgmonitoring2::msg_monitoring
+target_link_libraries(Yoon_UR10e_main PRIVATE
+  yaml-cpp::yaml-cpp    # namespaced import target
+  Eigen3::Eigen         # namespaced import target
+  nrs_3step_faac        # nrs_forcecon2가 만든 라이브러리 이름
+  msg_monitoring        # nrs_msgmonitoring2가 만든 라이브러리 이름
 )
 
 ament_target_dependencies(Yoon_UR10e_main
