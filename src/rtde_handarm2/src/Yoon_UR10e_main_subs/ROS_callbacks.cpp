@@ -1,3 +1,9 @@
+// ROS2 메시지 헤더
+// #include "rtde_handarm2/msg/FTsensorMsg.msg"
+#include <std_msgs/msg/u_int16.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
 // void FTdataCallback(const rtde_handarm::ftsensorMsg::ConstPtr& msg) // FT sensor data callback
 // {
 
@@ -73,7 +79,6 @@
 //     ftS2(4) = Rot_Cmoment2(1);
 //     ftS2(5) = Rot_Cmoment2(2);
 // }
-
 
 void VRdataCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
