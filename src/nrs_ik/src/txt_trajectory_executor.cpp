@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 #include <chrono>
-#include <iterator>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <pthread.h>
+#include <sched.h>
 
-using namespace std::chrono_literals;
 using Eigen::Matrix3d;
 using Eigen::Matrix4d;
 using Eigen::Vector3d;
@@ -18,7 +20,9 @@ class TxtTrajectoryExecutor : public rclcpp::Node
 public:
   TxtTrajectoryExecutor() : Node("txt_trajectory_executor")
   {
-    pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands", 10);
+    // QoS 수정: reliable()로 설정 (Isaac Sim 호환)
+    pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
+      "/isaac_joint_commands", rclcpp::QoS(10).reliable());
 
     joint_state_.name = {
       "shoulder_pan_joint",
@@ -32,7 +36,12 @@ public:
 
     load_waypoints("/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
 
-    timer_ = this->create_wall_timer(300ms, std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
+    start_time_ = last_time_ = std::chrono::high_resolution_clock::now();
+
+    // 500Hz → 2ms 주기
+    timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(2),
+      std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
   }
 
 private:
@@ -48,6 +57,7 @@ private:
   sensor_msgs::msg::JointState joint_state_;
   std::vector<std::vector<double>> waypoints_;
   size_t current_idx_ = 0;
+  std::chrono::time_point<std::chrono::high_resolution_clock> start_time_, last_time_;
 
   void load_waypoints(const std::string& filepath)
   {
@@ -62,24 +72,24 @@ private:
         raw_points.push_back({values[0], values[1], values[2]});
     }
 
-    // Linear interpolation (5x)
+    // 5배 선형 보간
     for (size_t i = 0; i + 1 < raw_points.size(); ++i) {
       Vector3d p1(raw_points[i][0], raw_points[i][1], raw_points[i][2]);
       Vector3d p2(raw_points[i+1][0], raw_points[i+1][1], raw_points[i+1][2]);
-
       for (int j = 0; j < 5; ++j) {
         double t = static_cast<double>(j) / 5.0;
         Vector3d p = (1 - t) * p1 + t * p2;
         waypoints_.push_back({p[0], p[1], p[2]});
       }
     }
-    // 마지막 점 추가
+
     if (!raw_points.empty()) {
       waypoints_.push_back(raw_points.back());
     }
 
-    RCLCPP_INFO(this->get_logger(), "Loaded %zu original waypoints, interpolated to %zu points.",
-                raw_points.size(), waypoints_.size());
+    RCLCPP_INFO(this->get_logger(),
+      "Loaded %zu original waypoints, interpolated to %zu points.",
+      raw_points.size(), waypoints_.size());
   }
 
   void publish_next_point()
@@ -90,22 +100,22 @@ private:
       return;
     }
 
-    auto& wp = waypoints_[current_idx_++];
-    double x = wp[0];
-    double y = wp[1];
-    double z = wp[2] + 0.2; // Adjust z position
+    auto t_now = std::chrono::high_resolution_clock::now();
+    double elapsed_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_now - start_time_).count();
+    double delta_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_now - last_time_).count();
+    last_time_ = t_now;
 
+    auto& wp = waypoints_[current_idx_++];
+    double x = wp[0], y = wp[1], z = wp[2] + 0.2;
     Vector3d p(x, y, z);
     Matrix3d R = Matrix3d::Identity();
 
     Vector3d pwc = p - d6 * R.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
     double q1 = atan2(yc, xc);
-
-    double r = sqrt(xc*xc + yc*yc);
-    double s = zc - d1;
-
+    double r = sqrt(xc*xc + yc*yc), s = zc - d1;
     double D = (r*r + s*s - a2*a2 - a3*a3) / (2*a2*a3);
+
     if (D < -1 || D > 1) {
       RCLCPP_WARN(this->get_logger(), "Unreachable point at idx %zu", current_idx_ - 1);
       return;
@@ -113,21 +123,15 @@ private:
 
     double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
-
-    // double q4 = 0.0;
-    // double q5 = 0.0;
-    // double q6 = 0.0;
-    double q4 = -M_PI * 0.4;
-    double q5 =  M_PI / 2;
-    double q6 =  0.0;
+    double q4 = -M_PI * 0.4, q5 = M_PI / 2, q6 = 0.0;
 
     joint_state_.position = {q1, q2, q3, q4, q5, q6};
     joint_state_.header.stamp = this->now();
     pub_->publish(joint_state_);
 
     RCLCPP_INFO(this->get_logger(),
-      "[%lu] Target xyz: [%.3f %.3f %.3f] | Joint: [%.3f %.3f %.3f %.3f %.3f %.3f]",
-      current_idx_, x, y, z, q1, q2, q3, q4, q5, q6);
+      "step %zu: elapsed %.3f ms, delta %.3f ms",
+      current_idx_, elapsed_ms, delta_ms);
   }
 
   Matrix4d dh_transform(double a, double d, double alpha, double theta)
@@ -143,6 +147,18 @@ private:
 
 int main(int argc, char* argv[])
 {
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+    RCLCPP_WARN(rclcpp::get_logger("main"),
+      "mlockall failed: insufficient privileges or limits. Page faults may occur.");
+  } else {
+    RCLCPP_INFO(rclcpp::get_logger("main"), "Memory locked: no page faults.");
+  }
+
+  struct sched_param schedp{.sched_priority = 80};
+  if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedp) != 0) {
+    RCLCPP_WARN(rclcpp::get_logger("main"), "Failed to set real-time scheduling: %m");
+  }
+
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<TxtTrajectoryExecutor>());
   rclcpp::shutdown();
