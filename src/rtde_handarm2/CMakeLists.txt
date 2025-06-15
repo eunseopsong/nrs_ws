@@ -137,9 +137,11 @@ target_link_libraries(Yoon_UR10e_main yaml-cpp Eigen3::Eigen) ## target_link_lib
 ament_target_dependencies(Yoon_UR10e_main ${COMMON_DEPENDENCIES})
 
 
+# It is not need because I use Isaac sim(Simlation)
 # add_executable(Yoon_FT_acquisit src/Yoon_FT_acquisit.cpp)
 # target_link_libraries(Yoon_FT_acquisit ${Yoon_LIB} yaml-cpp::yaml-cpp)
 # ament_target_dependencies(Yoon_FT_acquisit rclcpp std_msgs)
+
 
 # add_executable(Yoon_UR10e_cmd src/Yoon_UR10e_cmd.cpp)
 # target_link_libraries(Yoon_UR10e_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
