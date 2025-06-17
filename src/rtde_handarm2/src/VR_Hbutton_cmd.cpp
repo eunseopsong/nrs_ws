@@ -68,6 +68,7 @@ int main(int argc, char **argv)
     char phase1[] = "Teaching(Discrete) phase";
     // char phase2[] = "Teaching(Continuous) phase";
 
+    // point 저장, path generation, iteration 횟수 지정, path execution
     /* Mode status statement start */
     char current_mode[32]= "Stanby mode";
     char mode0[] = "Stanby mode";
@@ -108,6 +109,7 @@ int main(int argc, char **argv)
 
     ros::Rate loop_rate(100);
 
+    // point 저장, path generation, iteration 횟수 지정, path execution
     /* Phase selcection start */
     Phase_sel_window:
     std::cout << "\n Select the handle phase (0:Calibration, 1:Teaching(Descrete), 2:Teaching(Continuous)): ";
