@@ -38,24 +38,47 @@
 #define TEACHING_MODE 0 // Direct Teaching: 0, VR-Vision Teaching: 1 (Danang Demo)
 #define Handle_OnOff 1 // Handle on : 1, Handle off : 0
 
+
+rclcpp::Node::SharedPtr node_;
+rclcpp::Duration loop_period_;
+rclcpp::Time last_time_;
+
+
+
 /* Main calss */
 class NRS_Hbutton_cmd
 {
     public:
-        NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate);
+        NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate); //// NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate);
         ~NRS_Hbutton_cmd();
 
         /*** Functions definition ***/
 
         /* ROS_MSG Callback functions */
-        void VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+        void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg); 
+        //// void VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 
         /* Service handles */
-        bool SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV12_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+        //// bool SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+        bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                 std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+        //// bool SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+        bool SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+        //// bool SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+        bool SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+        ////  bool SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+        bool SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+        //// bool SRV12_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+        bool SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
 
         /* Main function */
         void HButton_main();
@@ -72,7 +95,7 @@ class NRS_Hbutton_cmd
 
         /*** Parameters setting ***/
         /* ROS setting */
-        ros::Rate loop_rate;
+        rclcpp::Rate loop_rate(10);  //// ros::Rate loop_rate;
 
         /* UART instance */
         Yoon_UART* Yuart;
@@ -85,24 +108,24 @@ class NRS_Hbutton_cmd
         YAML::Node NRS_Fcon_desired;
 
         /* ROS Message instance */
-        ros::Publisher yoon_mode_pub;
-        ros::Publisher PbNum_command_pub;
-        ros::Publisher Clicked_pub;
-        ros::Subscriber VRPose_sub;
+        rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr yoon_mode_pub;           //// ros::Publisher yoon_mode_pub;
+        rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr PbNum_command_pub;       //// ros::Publisher PbNum_command_pub;
+        rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr Clicked_pub;             //// ros::Publisher Clicked_pub;
+        rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub; //// ros::Subscriber VRPose_sub;
 
-        geometry_msgs::PointStamped Clicked_msg;
-        std_msgs::UInt16 yoon_mode_msg;
-        std_msgs::UInt32 PbNum_command_msg;
+        geometry_msgs::msg::PointStamped Clicked_msg; //// geometry_msgs::PointStamped Clicked_msg;
+        std_msgs::msg::UInt16 yoon_mode_msg;          //// std_msgs::UInt16 yoon_mode_msg;
+        std_msgs::msg::UInt32 PbNum_command_msg;      //// std_msgs::UInt32 PbNum_command_msg;
 
         /* ROS Service instance */
-        ros::ServiceServer Aidin_gui_srv1;
-        ros::ServiceServer Aidin_gui_srv3;
-        ros::ServiceServer Aidin_gui_srv4;
-        ros::ServiceServer Aidin_gui_srv11;
-        ros::ServiceServer Aidin_gui_srv12;
+        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;  //// ros::ServiceServer Aidin_gui_srv1;
+        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv3;  //// ros::ServiceServer Aidin_gui_srv3;
+        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv4;  //// ros::ServiceServer Aidin_gui_srv4;
+        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv11; //// ros::ServiceServer Aidin_gui_srv11;
+        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv12; //// os::ServiceServer Aidin_gui_srv12;
 
         /* Normal parameters */
-        geometry_msgs::Point VRPose_point;
+        geometry_msgs::msg::Point VRPose_point; //// geometry_msgs::Point VRPose_point;
         char buffer[1024] = {0};
         bool pre_button_val = false;
         bool button_val = false;
@@ -125,8 +148,10 @@ class NRS_Hbutton_cmd
 
 };
 
-NRS_Hbutton_cmd::NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate)
-: loop_rate(Loop_rate), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
+// NRS_Hbutton_cmd::NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate)
+// : loop_rate(Loop_rate), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
+NRS_Hbutton_cmd::NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate_val)
+: node_(node), loop_rate_val_(loop_rate_val), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
 {
     /* UART init */
     #if(Handle_OnOff == 1)
