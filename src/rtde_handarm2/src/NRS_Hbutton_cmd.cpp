@@ -7,19 +7,19 @@
 #include <rclcpp/rclcpp.hpp> //// #include "ros/ros.h"
 
 // For ROS message
-#include "std_msgs/MultiArrayLayout.h"
-#include "std_msgs/MultiArrayDimension.h"
-#include "std_msgs/Float64MultiArray.h"
-#include "std_msgs/Float64.h"
-#include "std_msgs/UInt16.h"
-#include "std_msgs/UInt32.h"
+#include "std_msgs/msg/multi_array_layout.hpp"    //// #include "std_msgs/MultiArrayLayout.h"
+#include "std_msgs/msg/multi_array_dimension.hpp" //// #include "std_msgs/MultiArrayDimension.h"
+#include "std_msgs/msg/float64_multi_array.hpp"   //// #include "std_msgs/Float64MultiArray.h"
+#include "std_msgs/msg/float64.hpp"               //// #include "std_msgs/Float64.h"
+#include "std_msgs/msg/u_int16.hpp"               //// #include "std_msgs/UInt16.h"
+#include "std_msgs/msg/u_int32.hpp"               //// #include "std_msgs/UInt32.h"
 
-#include "geometry_msgs/PointStamped.h"
-#include "geometry_msgs/PoseStamped.h"
-#include "rtde_handarm/VRposRtMsg_Qua.h"
+#include "geometry_msgs/msg/point_stamped.hpp"   //// #include "geometry_msgs/PointStamped.h"
+#include "geometry_msgs/msg/pose_stamped.hpp"    //// #include "geometry_msgs/PoseStamped.h"
+// #include "rtde_handarm2/VrPosRtMsgQua.msg"         //// #include "rtde_handarm/VRposRtMsg_Qua.h" // 보류
 
 // For ROS service - AIDIN GUI SERVER
-#include <std_srvs/Empty.h>
+#include "std_srvs/srv/empty.hpp"                //// #include <std_srvs/Empty.h>
 
 // For trajectory generation
 #include "Text_loader.h"
