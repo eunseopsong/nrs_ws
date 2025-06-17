@@ -228,7 +228,8 @@ void NRS_Hbutton_cmd::catch_signal(int sig)
 }
 
 /* ROS_MSG functions */
-void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+// void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 { 
     VRPose_point.x = msg->pose.position.x;
     VRPose_point.y = msg->pose.position.y; 
@@ -238,7 +239,10 @@ void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr
 }
 
 /* Service functions */
-bool NRS_Hbutton_cmd::SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+// bool NRS_Hbutton_cmd::SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+bool NRS_Hbutton_cmd::SRV1_Handle(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+  std::shared_ptr<std_srvs::srv::Empty::Response> response)
 {   
     #if(TEACHING_MODE == 0)
     Mode_chage();
@@ -248,7 +252,10 @@ bool NRS_Hbutton_cmd::SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty
     return true;
 }
 
-bool NRS_Hbutton_cmd::SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+// bool NRS_Hbutton_cmd::SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+bool NRS_Hbutton_cmd::SRV3_Handle(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+  std::shared_ptr<std_srvs::srv::Empty::Response> response)
 {
     #if(TEACHING_MODE == 0)
     Way_point_save();
@@ -258,7 +265,10 @@ bool NRS_Hbutton_cmd::SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty
     return true;
 }
 
-bool NRS_Hbutton_cmd::SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+// bool NRS_Hbutton_cmd::SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+bool NRS_Hbutton_cmd::SRV4_Handle(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+  std::shared_ptr<std_srvs::srv::Empty::Response> response)
 {
     #if(TEACHING_MODE == 0)
     Trajectory_gen();
@@ -267,7 +277,10 @@ bool NRS_Hbutton_cmd::SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty
 }
 
 /* Iteration number set */
-bool NRS_Hbutton_cmd::SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+// bool NRS_Hbutton_cmd::SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+bool NRS_Hbutton_cmd::SRV11_Handle(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+  std::shared_ptr<std_srvs::srv::Empty::Response> response)
 {
     #if(TEACHING_MODE == 0)
     Iter_num_set();
@@ -276,7 +289,10 @@ bool NRS_Hbutton_cmd::SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empt
 }
 
 /* Playback execution */
-bool NRS_Hbutton_cmd::SRV12_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+// bool NRS_Hbutton_cmd::SRV12_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+bool NRS_Hbutton_cmd::SRV12_Handle(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+  std::shared_ptr<std_srvs::srv::Empty::Response> response)
 {
     #if(TEACHING_MODE == 0)
     Playback_exe();
@@ -293,8 +309,8 @@ void NRS_Hbutton_cmd::Mode_chage()
 
         #if(Handle_OnOff == 1)
         yoon_mode_msg.data = Hand_guiding_mode_cmd;
-        yoon_mode_pub.publish(yoon_mode_msg);
-        ros::spinOnce();
+        yoon_mode_pub->publish(yoon_mode_msg);  //// yoon_mode_pub.publish(yoon_mode_msg);
+        rclcpp::spin_some(node_);               //// ros::spinOnce();
         #endif
     }
     else // change to stanby mode
@@ -305,16 +321,16 @@ void NRS_Hbutton_cmd::Mode_chage()
         #if(Handle_OnOff == 1)
         // Stanby mode message publish 
         yoon_mode_msg.data = Motion_stop_cmd;
-        yoon_mode_pub.publish(yoon_mode_msg);
-        ros::spinOnce();
+        yoon_mode_pub->publish(yoon_mode_msg); //// yoon_mode_pub.publish(yoon_mode_msg);
+        rclcpp::spin_some(node_);              //// ros::spinOnce();
         #endif
 
         if(point_counter != 0)
         {
             // Way point save termination message publish
             yoon_mode_msg.data = Descrete_recording_save;
-            yoon_mode_pub.publish(yoon_mode_msg);
-            ros::spinOnce();
+            yoon_mode_pub->publish(yoon_mode_msg); //// yoon_mode_pub.publish(yoon_mode_msg);
+            rclcpp::spin_some(node_);              //// ros::spinOnce();
         }
     }
 }
@@ -336,8 +352,8 @@ void NRS_Hbutton_cmd::VR_mode_change()
 void NRS_Hbutton_cmd::Way_point_save()
 {
     yoon_mode_msg.data = Descrete_reording_start;
-    yoon_mode_pub.publish(yoon_mode_msg);
-    ros::spinOnce();
+    yoon_mode_pub->publish(yoon_mode_msg); //// yoon_mode_pub.publish(yoon_mode_msg);
+    rclcpp::spin_some(node_);              //// ros::spinOnce();
     point_counter ++;
 }
 
@@ -346,8 +362,8 @@ void NRS_Hbutton_cmd::VR_point_save()
     Clicked_msg.point.x = VRPose_point.x;
     Clicked_msg.point.y = VRPose_point.y;
     Clicked_msg.point.z = VRPose_point.z;
-    Clicked_pub.publish(Clicked_msg);
-    ros::spinOnce();
+    Clicked_pub->publish(Clicked_msg); //// Clicked_pub.publish(Clicked_msg);
+    rclcpp::spin_some(node_);          //// ros::spinOnce();
     point_counter ++;
 }
 
@@ -466,8 +482,8 @@ void NRS_Hbutton_cmd::Playback_exe()
         {
             // Playback iteration number publish
             PbNum_command_msg.data = iter_num;
-            PbNum_command_pub.publish(PbNum_command_msg);
-            ros::spinOnce();
+            PbNum_command_pub->publish(PbNum_command_msg); //// PbNum_command_pub.publish(PbNum_command_msg);
+            rclcpp::spin_some(node_);                      //// ros::spinOnce();
             current_status = mode2;
             PB_exe_counter++;
         }
@@ -475,8 +491,8 @@ void NRS_Hbutton_cmd::Playback_exe()
         {
             /*** STEP1 : Playback start ***/
             yoon_mode_msg.data = Playback_mode_cmd;
-            yoon_mode_pub.publish(yoon_mode_msg);
-            ros::spinOnce();
+            yoon_mode_pub->publish(yoon_mode_msg); //// yoon_mode_pub.publish(yoon_mode_msg);
+            rclcpp::spin_some(node_);              //// ros::spinOnce();
             current_status = mode3;
             iter_num = 0;
             PB_exe_counter = 0;
@@ -552,7 +568,8 @@ void NRS_Hbutton_cmd::HButton_main()
 
         }
         #endif
-        ros::spinOnce(); // For service callback
+        rclcpp::spin_some(node_);  // For service callback
+        // ros::spinOnce();
     }
     exit(0);
     #if(Handle_OnOff == 1)
@@ -560,22 +577,58 @@ void NRS_Hbutton_cmd::HButton_main()
     #endif
 }
 
+
+// 종료 시그널 처리 함수
 void catch_signal(int sig)
 {
-    printf("Program was terminated \n");
-    exit(1);
+    (void)sig;  // unused 경고 제거
+    printf("Program was terminated\n");
+    rclcpp::shutdown();  // ROS 2에서는 shutdown이 안전하게 종료됨
+    exit(0);
 }
 
 int main(int argc, char **argv)
 {
-    ros::init(argc,argv,"NRS_Hbutton_cmd");
-    ros::NodeHandle _nh;
-    NRS_Hbutton_cmd NRS_HB_cmd(_nh,100);
+    // ROS 2 초기화
+    rclcpp::init(argc, argv);
 
-    signal(SIGTERM, catch_signal);// Termination
-	signal(SIGINT, catch_signal);// Active
+    // ROS 2 노드 생성
+    auto node = rclcpp::Node::make_shared("nrs_hbutton_cmd");
 
+    // 클래스 인스턴스 생성: node와 loop rate 전달
+    NRS_Hbutton_cmd NRS_HB_cmd(node, 100);
+
+    // 종료 시그널 핸들러 등록
+    signal(SIGTERM, catch_signal);
+    signal(SIGINT, catch_signal);
+
+    // 메인 함수 실행
     NRS_HB_cmd.HButton_main();
 
     return 0;
 }
+
+
+
+// void catch_signal(int sig)
+// {
+//     printf("Program was terminated \n");
+//     exit(1);
+// }
+
+
+// int main(int argc, char **argv)
+// {
+//     // ros::init(argc,argv,"NRS_Hbutton_cmd");
+//     // ros::NodeHandle _nh;
+//     rclcpp::init(argc, argv);
+//     auto node = rclcpp::Node::make_shared("nrs_hbutton_cmd");
+//     NRS_Hbutton_cmd NRS_HB_cmd(_nh,100);
+
+//     signal(SIGTERM, catch_signal);// Termination
+// 	signal(SIGINT, catch_signal);// Active
+
+//     NRS_HB_cmd.HButton_main();
+
+//     return 0;
+// }
