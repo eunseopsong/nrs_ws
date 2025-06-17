@@ -52,8 +52,8 @@ rclcpp::Time last_time_;
 class NRS_Hbutton_cmd
 {
     public:
-        NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate); //// NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate);
-        ~NRS_Hbutton_cmd();
+        // NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate); //// NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate);
+        // ~NRS_Hbutton_cmd();
 
         /*** Functions definition ***/
 
