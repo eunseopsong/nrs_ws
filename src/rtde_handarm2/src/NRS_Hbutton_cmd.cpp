@@ -40,7 +40,8 @@
 
 
 rclcpp::Node::SharedPtr node_;
-rclcpp::Duration loop_period_;
+rclcpp::Duration loop_period_ = rclcpp::Duration::from_seconds(0.01);  // 예: 10ms
+// rclcpp::Duration loop_period_;
 rclcpp::Time last_time_;
 
 
@@ -163,21 +164,52 @@ NRS_Hbutton_cmd::NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_r
     NRS_Fcon_desired = YAML::Load(fin2);
     
     /* ROS Message */
-    yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
-    PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
-    Clicked_pub = nh.advertise<geometry_msgs::PointStamped>("/clicked_point",20);
-    VRPose_sub = nh.subscribe("/pos_cal_rviz",20,&NRS_Hbutton_cmd::VRPose_Callback,this);
+    yoon_mode_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 10);
+    PbNum_command_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_PbNum_cmd", 10);
+    Clicked_pub = node_->create_publisher<geometry_msgs::msg::PointStamped>("/clicked_point", 10);
+    //// yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
+    //// PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
+    //// Clicked_pub = nh.advertise<geometry_msgs::PointStamped>("/clicked_point",20);
+
+    VRPose_sub = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
+    "/pos_cal_rviz", 10,
+    std::bind(&NRS_Hbutton_cmd::VRPose_Callback, this, std::placeholders::_1)
+    );
+    //// VRPose_sub = nh.subscribe("/pos_cal_rviz",20,&NRS_Hbutton_cmd::VRPose_Callback,this);
 
     /* ROS Service */
 
     // Concerning for waypoint save & trajectory generation
-    Aidin_gui_srv1 = nh.advertiseService("teaching_mode",&NRS_Hbutton_cmd::SRV1_Handle,this);
-    Aidin_gui_srv3 = nh.advertiseService("save_waypoint",&NRS_Hbutton_cmd::SRV3_Handle,this);
-    Aidin_gui_srv4 = nh.advertiseService("trajectory_generation",&NRS_Hbutton_cmd::SRV4_Handle,this);
+    //// Aidin_gui_srv1 = nh.advertiseService("teaching_mode",&NRS_Hbutton_cmd::SRV1_Handle,this);
+    Aidin_gui_srv1 = node_->create_service<your_pkg::srv::TeachingMode>(
+        "teaching_mode",
+        std::bind(&NRS_Hbutton_cmd::SRV1_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    );
+
+    // Aidin_gui_srv3 = nh.advertiseService("save_waypoint",&NRS_Hbutton_cmd::SRV3_Handle,this);
+    Aidin_gui_srv3 = node_->create_service<your_pkg::srv::SaveWaypoint>(
+    "save_waypoint",
+    std::bind(&NRS_Hbutton_cmd::SRV3_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    );
+
+    // Aidin_gui_srv4 = nh.advertiseService("trajectory_generation",&NRS_Hbutton_cmd::SRV4_Handle,this);
+    Aidin_gui_srv4 = node_->create_service<your_pkg::srv::TrajectoryGeneration>(
+    "trajectory_generation",
+    std::bind(&NRS_Hbutton_cmd::SRV4_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    );
 
     // Concerning for execution
-    Aidin_gui_srv11 = nh.advertiseService("Iteration_set",&NRS_Hbutton_cmd::SRV11_Handle,this);
-    Aidin_gui_srv12 = nh.advertiseService("Playback_execution",&NRS_Hbutton_cmd::SRV12_Handle,this);
+    // Aidin_gui_srv11 = nh.advertiseService("Iteration_set",&NRS_Hbutton_cmd::SRV11_Handle,this);
+    Aidin_gui_srv11 = node_->create_service<your_pkg::srv::IterationSet>(
+    "Iteration_set",
+    std::bind(&NRS_Hbutton_cmd::SRV11_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    );
+
+    // Aidin_gui_srv12 = nh.advertiseService("Playback_execution",&NRS_Hbutton_cmd::SRV12_Handle,this);
+    Aidin_gui_srv12 = node_->create_service<your_pkg::srv::PlaybackExecution>(
+    "Playback_execution",
+    std::bind(&NRS_Hbutton_cmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    );
 
     /* State & mode */
 
