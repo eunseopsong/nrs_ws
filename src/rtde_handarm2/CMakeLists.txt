@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ament_cmake      REQUIRED)
 find_package(rclcpp           REQUIRED)
 find_package(std_msgs         REQUIRED)
+find_package(std_srvs         REQUIRED)
 find_package(geometry_msgs    REQUIRED)
 find_package(sensor_msgs      REQUIRED)
 find_package(tf2              REQUIRED)
@@ -56,6 +57,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 ament_export_dependencies(
   rclcpp
   std_msgs
+  std_srvs
   geometry_msgs
   sensor_msgs
   tf2
@@ -120,6 +122,7 @@ file(GLOB SUBSCRIBER_SRCS
 set(COMMON_DEPENDENCIES
   rclcpp
   std_msgs
+  std_srvs
   geometry_msgs
   sensor_msgs
   tf2
@@ -175,7 +178,7 @@ install(TARGETS
   # Yoon_FT_acquisit
   # Yoon_UR10e_cmd
   # Yoon_Hbutton_cmd
-  # NRS_Hbutton_cmd
+  NRS_Hbutton_cmd
   # VR_Hbutton_cmd
   # euichan_path_receiver
   DESTINATION lib/${PROJECT_NAME}
