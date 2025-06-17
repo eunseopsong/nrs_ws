@@ -1,3 +1,5 @@
+#include "NRS_Hbutton_cmd.h"
+
 #include <iostream>
 #include <stdio.h>
 #include <string.h>
@@ -181,34 +183,34 @@ NRS_Hbutton_cmd::NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_r
 
     // Concerning for waypoint save & trajectory generation
     //// Aidin_gui_srv1 = nh.advertiseService("teaching_mode",&NRS_Hbutton_cmd::SRV1_Handle,this);
-    Aidin_gui_srv1 = node_->create_service<your_pkg::srv::TeachingMode>(
+    Aidin_gui_srv1 = node_->create_service<std_srvs::srv::Empty>(
         "teaching_mode",
         std::bind(&NRS_Hbutton_cmd::SRV1_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    // Aidin_gui_srv3 = nh.advertiseService("save_waypoint",&NRS_Hbutton_cmd::SRV3_Handle,this);
-    Aidin_gui_srv3 = node_->create_service<your_pkg::srv::SaveWaypoint>(
-    "save_waypoint",
-    std::bind(&NRS_Hbutton_cmd::SRV3_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    //// Aidin_gui_srv3 = nh.advertiseService("save_waypoint",&NRS_Hbutton_cmd::SRV3_Handle,this);
+    Aidin_gui_srv3 = node_->create_service<std_srvs::srv::Empty>(
+        "save_waypoint",
+        std::bind(&NRS_Hbutton_cmd::SRV3_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    // Aidin_gui_srv4 = nh.advertiseService("trajectory_generation",&NRS_Hbutton_cmd::SRV4_Handle,this);
-    Aidin_gui_srv4 = node_->create_service<your_pkg::srv::TrajectoryGeneration>(
-    "trajectory_generation",
-    std::bind(&NRS_Hbutton_cmd::SRV4_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    //// Aidin_gui_srv4 = nh.advertiseService("trajectory_generation",&NRS_Hbutton_cmd::SRV4_Handle,this);
+    Aidin_gui_srv4 = node_->create_service<std_srvs::srv::Empty>(
+        "trajectory_generation",
+        std::bind(&NRS_Hbutton_cmd::SRV4_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
     // Concerning for execution
-    // Aidin_gui_srv11 = nh.advertiseService("Iteration_set",&NRS_Hbutton_cmd::SRV11_Handle,this);
-    Aidin_gui_srv11 = node_->create_service<your_pkg::srv::IterationSet>(
-    "Iteration_set",
-    std::bind(&NRS_Hbutton_cmd::SRV11_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    //// Aidin_gui_srv11 = nh.advertiseService("Iteration_set",&NRS_Hbutton_cmd::SRV11_Handle,this);
+    Aidin_gui_srv11 = node_->create_service<std_srvs::srv::Empty>(
+        "Iteration_set",
+        std::bind(&NRS_Hbutton_cmd::SRV11_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    // Aidin_gui_srv12 = nh.advertiseService("Playback_execution",&NRS_Hbutton_cmd::SRV12_Handle,this);
-    Aidin_gui_srv12 = node_->create_service<your_pkg::srv::PlaybackExecution>(
-    "Playback_execution",
-    std::bind(&NRS_Hbutton_cmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2)
+    //// Aidin_gui_srv12 = nh.advertiseService("Playback_execution",&NRS_Hbutton_cmd::SRV12_Handle,this);
+    Aidin_gui_srv12 = node_->create_service<std_srvs::srv::Empty>(
+        "Playback_execution",
+        std::bind(&NRS_Hbutton_cmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
     /* State & mode */
@@ -242,7 +244,7 @@ NRS_Hbutton_cmd::NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_r
 }
 
 NRS_Hbutton_cmd::~NRS_Hbutton_cmd()
-{ 
+{
     #if(Handle_OnOff == 1)
     Yuart->YUART_terminate();
     delete Yuart;
@@ -262,7 +264,7 @@ void NRS_Hbutton_cmd::catch_signal(int sig)
 /* ROS_MSG functions */
 // void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
-{ 
+{
     VRPose_point.x = msg->pose.position.x;
     VRPose_point.y = msg->pose.position.y; 
     VRPose_point.z = msg->pose.position.z;
@@ -275,7 +277,7 @@ void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::Sha
 bool NRS_Hbutton_cmd::SRV1_Handle(
   const std::shared_ptr<std_srvs::srv::Empty::Request> request,
   std::shared_ptr<std_srvs::srv::Empty::Response> response)
-{   
+{
     #if(TEACHING_MODE == 0)
     Mode_chage();
     #elif(TEACHING_MODE == 1)
@@ -394,9 +396,11 @@ void NRS_Hbutton_cmd::VR_point_save()
     Clicked_msg.point.x = VRPose_point.x;
     Clicked_msg.point.y = VRPose_point.y;
     Clicked_msg.point.z = VRPose_point.z;
-    Clicked_pub->publish(Clicked_msg); //// Clicked_pub.publish(Clicked_msg);
-    rclcpp::spin_some(node_);          //// ros::spinOnce();
-    point_counter ++;
+
+    Clicked_pub->publish(Clicked_msg);  //// Clicked_pub.publish(Clicked_msg);
+    rclcpp::spin_some(node_);           //// ros::spinOnce();
+
+    point_counter++;
 }
 
 void NRS_Hbutton_cmd::Trajectory_gen()
@@ -639,7 +643,6 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
 
 
 // void catch_signal(int sig)
