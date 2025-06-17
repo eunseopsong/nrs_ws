@@ -51,105 +51,90 @@ rclcpp::Time last_time_;
 /* Main calss */
 class NRS_Hbutton_cmd
 {
-    public:
-        // NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate); //// NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate);
-        // ~NRS_Hbutton_cmd();
+public:
+    // 생성자 및 소멸자 선언 (필요시 정의 추가)
+    // NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate);
+    // ~NRS_Hbutton_cmd();
 
-        /*** Functions definition ***/
+    /*** Functions definition ***/
 
-        /* ROS_MSG Callback functions */
-        void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg); 
-        //// void VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 
-        /* Service handles */
-        //// bool SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                 std::shared_ptr<std_srvs::srv::Empty::Response> response);
+    bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                     std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
-        //// bool SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+    bool SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                     std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
-        //// bool SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+    bool SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                     std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
-        ////  bool SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+    bool SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                      std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
-        //// bool SRV12_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
-        bool SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                        std::shared_ptr<std_srvs::srv::Empty::Response> response);
+    bool SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+                      std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
+    void HButton_main();
+    void Mode_chage();
+    void VR_mode_change();
+    void Way_point_save();
+    void VR_point_save();
+    void Trajectory_gen();
+    void Iter_num_set();
+    void Playback_exe();
+    void catch_signal(int sig);
 
-        /* Main function */
-        void HButton_main();
+    /*** Parameters setting ***/
 
-        /* Mode functions */
-        void Mode_chage();
-        void VR_mode_change();
-        void Way_point_save();
-        void VR_point_save();
-        void Trajectory_gen();
-        void Iter_num_set();
-        void Playback_exe();
-        void catch_signal(int sig);
+    rclcpp::Rate loop_rate{10};
 
-        /*** Parameters setting ***/
-        /* ROS setting */
-        rclcpp::Rate loop_rate(10);  //// ros::Rate loop_rate;
+    Yoon_UART* Yuart;
 
-        /* UART instance */
-        Yoon_UART* Yuart;
+    std::ifstream fin1;
+    std::ifstream fin2;
 
-        /* Yaml-file instance */
-        std::ifstream fin1;
-        std::ifstream fin2;
+    YAML::Node NRS_recording;
+    YAML::Node NRS_Fcon_desired;
 
-        YAML::Node NRS_recording;
-        YAML::Node NRS_Fcon_desired;
+    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr yoon_mode_pub;
+    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr PbNum_command_pub;
+    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr Clicked_pub;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub;
 
-        /* ROS Message instance */
-        rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr yoon_mode_pub;           //// ros::Publisher yoon_mode_pub;
-        rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr PbNum_command_pub;       //// ros::Publisher PbNum_command_pub;
-        rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr Clicked_pub;             //// ros::Publisher Clicked_pub;
-        rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub; //// ros::Subscriber VRPose_sub;
+    geometry_msgs::msg::PointStamped Clicked_msg;
+    std_msgs::msg::UInt16 yoon_mode_msg;
+    std_msgs::msg::UInt32 PbNum_command_msg;
 
-        geometry_msgs::msg::PointStamped Clicked_msg; //// geometry_msgs::PointStamped Clicked_msg;
-        std_msgs::msg::UInt16 yoon_mode_msg;          //// std_msgs::UInt16 yoon_mode_msg;
-        std_msgs::msg::UInt32 PbNum_command_msg;      //// std_msgs::UInt32 PbNum_command_msg;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv3;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv4;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv11;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv12;
 
-        /* ROS Service instance */
-        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;  //// ros::ServiceServer Aidin_gui_srv1;
-        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv3;  //// ros::ServiceServer Aidin_gui_srv3;
-        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv4;  //// ros::ServiceServer Aidin_gui_srv4;
-        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv11; //// ros::ServiceServer Aidin_gui_srv11;
-        rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv12; //// os::ServiceServer Aidin_gui_srv12;
+    geometry_msgs::msg::Point VRPose_point;
+    char buffer[1024] = {0};
+    bool pre_button_val = false;
+    bool button_val = false;
 
-        /* Normal parameters */
-        geometry_msgs::msg::Point VRPose_point; //// geometry_msgs::Point VRPose_point;
-        char buffer[1024] = {0};
-        bool pre_button_val = false;
-        bool button_val = false;
+    int Mode_val = 0;
+    int Pre_Mode_val = 0;
 
-        int Mode_val = 0;
-        int Pre_Mode_val = 0;
+    bool guiding_mode = false;
+    int point_counter = 0;
+    int iter_num = 0;
+    int PB_exe_counter = 0;
 
-        bool guiding_mode = false; // false: stanby mode, true: guiding mode
-        int point_counter = 0; // Saved way points
-        int iter_num = 0; // Iteration number
-        int PB_exe_counter = 0; // 1: ready status, 2: execution
+    std::string current_status;
+    std::string mode0, mode1, mode2, mode3, mode4;
+    std::string modeErr1;
 
-        /* State & mode */
-        std::string current_status;
-        std::string mode0,mode1,mode2,mode3,mode4;
-        std::string modeErr1;
+    std::string Hmode0, Hmode1, Hmode2, Hmode3, Hmode4, Hmode5;
 
-        std::string Hmode0,Hmode1,Hmode2,Hmode3,Hmode4,Hmode5;
-    private:
-
+private:
+    // 여기에 private 멤버 변수나 함수가 있다면 추가
 };
+
 
 // NRS_Hbutton_cmd::NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate)
 // : loop_rate(Loop_rate), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
