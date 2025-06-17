@@ -123,7 +123,7 @@ private:
 
     double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
-    double q4 = -M_PI * 0.4, q5 = M_PI / 2, q6 = 0.0;
+    double q4 = -M_PI / 2, q5 = M_PI / 2, q6 = 0.0;
 
     joint_state_.position = {q1, q2, q3, q4, q5, q6};
     joint_state_.header.stamp = this->now();
