@@ -366,7 +366,7 @@ int main(int argc, char* argv[])
                 }
 
                 /* Cartesian position control mode */
-                else if (ctrl == 1) { 
+                else if (ctrl == 1) {
 
                     // Path execution
                     if(path_done_flag == true)

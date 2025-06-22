@@ -40,201 +40,332 @@
 #define TEACHING_MODE 0 // Direct Teaching: 0, VR-Vision Teaching: 1 (Danang Demo)
 #define Handle_OnOff 1 // Handle on : 1, Handle off : 0
 
-
-rclcpp::Node::SharedPtr node_;
-rclcpp::Duration loop_period_ = rclcpp::Duration::from_seconds(0.01);  // 예: 10ms
-// rclcpp::Duration loop_period_;
-rclcpp::Time last_time_;
-
-
-
 /* Main calss */
-class NRS_Hbutton_cmd
-{
-public:
-    // 생성자 및 소멸자 선언 (필요시 정의 추가)
-    // NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate);
-    // ~NRS_Hbutton_cmd();
-
-    /*** Functions definition ***/
-
-    void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-
-    bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                     std::shared_ptr<std_srvs::srv::Empty::Response> response);
-
-    bool SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                     std::shared_ptr<std_srvs::srv::Empty::Response> response);
-
-    bool SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                     std::shared_ptr<std_srvs::srv::Empty::Response> response);
-
-    bool SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                      std::shared_ptr<std_srvs::srv::Empty::Response> response);
-
-    bool SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
-                      std::shared_ptr<std_srvs::srv::Empty::Response> response);
-
-    void HButton_main();
-    void Mode_chage();
-    void VR_mode_change();
-    void Way_point_save();
-    void VR_point_save();
-    void Trajectory_gen();
-    void Iter_num_set();
-    void Playback_exe();
-    void catch_signal(int sig);
-
-    /*** Parameters setting ***/
-
-    rclcpp::Rate loop_rate{10};
-
-    Yoon_UART* Yuart;
-
-    std::ifstream fin1;
-    std::ifstream fin2;
-
-    YAML::Node NRS_recording;
-    YAML::Node NRS_Fcon_desired;
-
-    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr yoon_mode_pub;
-    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr PbNum_command_pub;
-    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr Clicked_pub;
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub;
-
-    geometry_msgs::msg::PointStamped Clicked_msg;
-    std_msgs::msg::UInt16 yoon_mode_msg;
-    std_msgs::msg::UInt32 PbNum_command_msg;
-
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv3;
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv4;
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv11;
-    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv12;
-
-    geometry_msgs::msg::Point VRPose_point;
-    char buffer[1024] = {0};
-    bool pre_button_val = false;
-    bool button_val = false;
-
-    int Mode_val = 0;
-    int Pre_Mode_val = 0;
-
-    bool guiding_mode = false;
-    int point_counter = 0;
-    int iter_num = 0;
-    int PB_exe_counter = 0;
-
-    std::string current_status;
-    std::string mode0, mode1, mode2, mode3, mode4;
-    std::string modeErr1;
-
-    std::string Hmode0, Hmode1, Hmode2, Hmode3, Hmode4, Hmode5;
-
-private:
-    // 여기에 private 멤버 변수나 함수가 있다면 추가
-};
-
-
-// NRS_Hbutton_cmd::NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate)
-// : loop_rate(Loop_rate), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
+/* Constructor */
 NRS_Hbutton_cmd::NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate_val)
-: node_(node), loop_rate_val_(loop_rate_val), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
+: node_(node),
+  loop_rate(loop_rate_val),
+  loop_period_(rclcpp::Duration::from_seconds(0.01)),
+  last_time_(node->now())
 {
-    /* UART init */
-    #if(Handle_OnOff == 1)
-    Yuart = new Yoon_UART("/dev/ttyACM0",(int)115200);
-    #endif
 
-    /* Yaml-file */
+    /* UART instance */
+#if (Handle_OnOff == 1)
+    // Yuart = new Yoon_UART("/dev/ttyACM0", 115200);
+    Yuart = new Yoon_UART(const_cast<char*>("/dev/ttyACM0"), 115200);
+#endif
+
+    /* Yaml-file instance */
+    fin1.open(NRS_Record_Printing_loc);
+    fin2.open(NRS_Fcon_desired_loc);
     NRS_recording = YAML::Load(fin1);
     NRS_Fcon_desired = YAML::Load(fin2);
-    
-    /* ROS Message */
-    yoon_mode_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 10);
-    PbNum_command_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_PbNum_cmd", 10);
-    Clicked_pub = node_->create_publisher<geometry_msgs::msg::PointStamped>("/clicked_point", 10);
-    //// yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
-    //// PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
-    //// Clicked_pub = nh.advertise<geometry_msgs::PointStamped>("/clicked_point",20);
+
+    /* ROS Message instance */
+    yoon_mode_pub      = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 10);
+    PbNum_command_pub  = node_->create_publisher<std_msgs::msg::UInt32>("Yoon_PbNum_cmd", 10);
+    Clicked_pub        = node_->create_publisher<geometry_msgs::msg::PointStamped>("/clicked_point", 10);
 
     VRPose_sub = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/pos_cal_rviz", 10,
-    std::bind(&NRS_Hbutton_cmd::VRPose_Callback, this, std::placeholders::_1)
+        "/pos_cal_rviz", 10,
+        std::bind(&NRS_Hbutton_cmd::VRPose_Callback, this, std::placeholders::_1)
     );
-    //// VRPose_sub = nh.subscribe("/pos_cal_rviz",20,&NRS_Hbutton_cmd::VRPose_Callback,this);
 
-    /* ROS Service */
-
-    // Concerning for waypoint save & trajectory generation
-    //// Aidin_gui_srv1 = nh.advertiseService("teaching_mode",&NRS_Hbutton_cmd::SRV1_Handle,this);
+    /* ROS Service instance */
     Aidin_gui_srv1 = node_->create_service<std_srvs::srv::Empty>(
         "teaching_mode",
         std::bind(&NRS_Hbutton_cmd::SRV1_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    //// Aidin_gui_srv3 = nh.advertiseService("save_waypoint",&NRS_Hbutton_cmd::SRV3_Handle,this);
     Aidin_gui_srv3 = node_->create_service<std_srvs::srv::Empty>(
         "save_waypoint",
         std::bind(&NRS_Hbutton_cmd::SRV3_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    //// Aidin_gui_srv4 = nh.advertiseService("trajectory_generation",&NRS_Hbutton_cmd::SRV4_Handle,this);
     Aidin_gui_srv4 = node_->create_service<std_srvs::srv::Empty>(
         "trajectory_generation",
         std::bind(&NRS_Hbutton_cmd::SRV4_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    // Concerning for execution
-    //// Aidin_gui_srv11 = nh.advertiseService("Iteration_set",&NRS_Hbutton_cmd::SRV11_Handle,this);
     Aidin_gui_srv11 = node_->create_service<std_srvs::srv::Empty>(
         "Iteration_set",
         std::bind(&NRS_Hbutton_cmd::SRV11_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    //// Aidin_gui_srv12 = nh.advertiseService("Playback_execution",&NRS_Hbutton_cmd::SRV12_Handle,this);
     Aidin_gui_srv12 = node_->create_service<std_srvs::srv::Empty>(
         "Playback_execution",
         std::bind(&NRS_Hbutton_cmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2)
     );
 
     /* State & mode */
-
-    #if(TEACHING_MODE == 0)
-        #if(Handle_OnOff == 0)
-        current_status = "Stanby mode - No Handle";
-        mode0 = "Stanby mode - No Handle";
-        mode1 = "Teaching mode - No Handle";
-        #elif(Handle_OnOff == 1)
+#if (TEACHING_MODE == 0)
+    #if (Handle_OnOff == 1)
         current_status = "Handle stanby mode";
         mode0 = "Handle stanby mode";
         mode1 = "Handle-guiding mode";
-        #endif
-    #elif(TEACHING_MODE == 1)
-        current_status = "VR stanby mode";
-        mode0 = "VR stanby mode";
-        mode1 = "VR-teaching mode";
+    #else
+        current_status = "Stanby mode - No Handle";
+        mode0 = "Stanby mode - No Handle";
+        mode1 = "Teaching mode - No Handle";
     #endif
+#elif (TEACHING_MODE == 1)
+    current_status = "VR stanby mode";
+    mode0 = "VR stanby mode";
+    mode1 = "VR-teaching mode";
+#endif
+
     mode2 = "Playback ready";
     mode3 = "Playback execution";
     mode4 = "Path generation done";
     modeErr1 = "Wrong iter number(1~9)";
 
-    Hmode0 = "MODE 0"; // Defualt value
-    Hmode1 = "MODE 1"; // Mode change (Stanby mode, guiding mode)
-    Hmode2 = "MODE 2"; // Way point save
-    Hmode3 = "MODE 3"; // Playback start (Ready , execution)
-    Hmode4 = "MODE 4"; // Iteration number
+    Hmode0 = "MODE 0"; // Default
+    Hmode1 = "MODE 1"; // Mode change
+    Hmode2 = "MODE 2"; // Waypoint save
+    Hmode3 = "MODE 3"; // Playback start
+    Hmode4 = "MODE 4"; // Iteration set
     Hmode5 = "MODE 5"; // Trajectory generation
 }
 
+/* Destructor */
 NRS_Hbutton_cmd::~NRS_Hbutton_cmd()
 {
-    #if(Handle_OnOff == 1)
-    Yuart->YUART_terminate();
-    delete Yuart;
-    #endif
+#if (Handle_OnOff == 1)
+    if (Yuart)
+    {
+        Yuart->YUART_terminate();
+        delete Yuart;
+    }
+#endif
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// class NRS_Hbutton_cmd
+// {
+//     public:
+//         NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate); //// NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate);
+//         ~NRS_Hbutton_cmd();
+
+//         /*** Functions definition ***/
+
+//         /* ROS_MSG Callback functions */
+//         void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+//         //// void VRPose_Callback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+
+//         /* Service handles */
+//         //// bool SRV1_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+//         bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+//                  std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+//         //// bool SRV3_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+//         bool SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+//                         std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+//         //// bool SRV4_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+//         bool SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+//                         std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+//         ////  bool SRV11_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+//         bool SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+//                         std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+//         //// bool SRV12_Handle(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+//         bool SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
+//                         std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+
+//         /* Main function */
+//         void HButton_main();
+
+//         /* Mode functions */
+//         void Mode_chage();
+//         void VR_mode_change();
+//         void Way_point_save();
+//         void VR_point_save();
+//         void Trajectory_gen();
+//         void Iter_num_set();
+//         void Playback_exe();
+//         void catch_signal(int sig);
+
+//         /*** Parameters setting ***/
+//         /* ROS setting */
+//         rclcpp::Rate loop_rate(10);  //// ros::Rate loop_rate;
+
+//         /* UART instance */
+//         Yoon_UART* Yuart;
+
+//         /* Yaml-file instance */
+//         std::ifstream fin1;
+//         std::ifstream fin2;
+
+//         YAML::Node NRS_recording;
+//         YAML::Node NRS_Fcon_desired;
+
+//         /* ROS Message instance */
+//         rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr yoon_mode_pub;           //// ros::Publisher yoon_mode_pub;
+//         rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr PbNum_command_pub;       //// ros::Publisher PbNum_command_pub;
+//         rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr Clicked_pub;             //// ros::Publisher Clicked_pub;
+//         rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub; //// ros::Subscriber VRPose_sub;
+
+//         geometry_msgs::msg::PointStamped Clicked_msg; //// geometry_msgs::PointStamped Clicked_msg;
+//         std_msgs::msg::UInt16 yoon_mode_msg;          //// std_msgs::UInt16 yoon_mode_msg;
+//         std_msgs::msg::UInt32 PbNum_command_msg;      //// std_msgs::UInt32 PbNum_command_msg;
+
+//         /* ROS Service instance */
+//         rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;  //// ros::ServiceServer Aidin_gui_srv1;
+//         rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv3;  //// ros::ServiceServer Aidin_gui_srv3;
+//         rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv4;  //// ros::ServiceServer Aidin_gui_srv4;
+//         rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv11; //// ros::ServiceServer Aidin_gui_srv11;
+//         rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv12; //// os::ServiceServer Aidin_gui_srv12;
+
+//         /* Normal parameters */
+//         geometry_msgs::msg::Point VRPose_point; //// geometry_msgs::Point VRPose_point;
+//         char buffer[1024] = {0};
+//         bool pre_button_val = false;
+//         bool button_val = false;
+
+//         int Mode_val = 0;
+//         int Pre_Mode_val = 0;
+
+//         bool guiding_mode = false; // false: stanby mode, true: guiding mode
+//         int point_counter = 0; // Saved way points
+//         int iter_num = 0; // Iteration number
+//         int PB_exe_counter = 0; // 1: ready status, 2: execution
+
+//         /* State & mode */
+//         std::string current_status;
+//         std::string mode0,mode1,mode2,mode3,mode4;
+//         std::string modeErr1;
+
+//         std::string Hmode0,Hmode1,Hmode2,Hmode3,Hmode4,Hmode5;
+//     private:
+
+// };
+
+
+// // NRS_Hbutton_cmd::NRS_Hbutton_cmd(ros::NodeHandle &nh, int Loop_rate)
+// // : loop_rate(Loop_rate), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
+// NRS_Hbutton_cmd::NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate_val)
+// : node_(node), loop_rate_val_(loop_rate_val), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
+// {
+//     /* UART init */
+//     #if(Handle_OnOff == 1)
+//     Yuart = new Yoon_UART("/dev/ttyACM0",(int)115200);
+//     #endif
+
+//     /* Yaml-file */
+//     NRS_recording = YAML::Load(fin1);
+//     NRS_Fcon_desired = YAML::Load(fin2);
+    
+//     /* ROS Message */
+//     yoon_mode_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 10);
+//     PbNum_command_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_PbNum_cmd", 10);
+//     Clicked_pub = node_->create_publisher<geometry_msgs::msg::PointStamped>("/clicked_point", 10);
+//     //// yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
+//     //// PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
+//     //// Clicked_pub = nh.advertise<geometry_msgs::PointStamped>("/clicked_point",20);
+
+//     VRPose_sub = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
+//     "/pos_cal_rviz", 10,
+//     std::bind(&NRS_Hbutton_cmd::VRPose_Callback, this, std::placeholders::_1)
+//     );
+//     //// VRPose_sub = nh.subscribe("/pos_cal_rviz",20,&NRS_Hbutton_cmd::VRPose_Callback,this);
+
+//     /* ROS Service */
+
+//     // Concerning for waypoint save & trajectory generation
+//     //// Aidin_gui_srv1 = nh.advertiseService("teaching_mode",&NRS_Hbutton_cmd::SRV1_Handle,this);
+//     Aidin_gui_srv1 = node_->create_service<std_srvs::srv::Empty>(
+//         "teaching_mode",
+//         std::bind(&NRS_Hbutton_cmd::SRV1_Handle, this, std::placeholders::_1, std::placeholders::_2)
+//     );
+
+//     //// Aidin_gui_srv3 = nh.advertiseService("save_waypoint",&NRS_Hbutton_cmd::SRV3_Handle,this);
+//     Aidin_gui_srv3 = node_->create_service<std_srvs::srv::Empty>(
+//         "save_waypoint",
+//         std::bind(&NRS_Hbutton_cmd::SRV3_Handle, this, std::placeholders::_1, std::placeholders::_2)
+//     );
+
+//     //// Aidin_gui_srv4 = nh.advertiseService("trajectory_generation",&NRS_Hbutton_cmd::SRV4_Handle,this);
+//     Aidin_gui_srv4 = node_->create_service<std_srvs::srv::Empty>(
+//         "trajectory_generation",
+//         std::bind(&NRS_Hbutton_cmd::SRV4_Handle, this, std::placeholders::_1, std::placeholders::_2)
+//     );
+
+//     // Concerning for execution
+//     //// Aidin_gui_srv11 = nh.advertiseService("Iteration_set",&NRS_Hbutton_cmd::SRV11_Handle,this);
+//     Aidin_gui_srv11 = node_->create_service<std_srvs::srv::Empty>(
+//         "Iteration_set",
+//         std::bind(&NRS_Hbutton_cmd::SRV11_Handle, this, std::placeholders::_1, std::placeholders::_2)
+//     );
+
+//     //// Aidin_gui_srv12 = nh.advertiseService("Playback_execution",&NRS_Hbutton_cmd::SRV12_Handle,this);
+//     Aidin_gui_srv12 = node_->create_service<std_srvs::srv::Empty>(
+//         "Playback_execution",
+//         std::bind(&NRS_Hbutton_cmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2)
+//     );
+
+//     /* State & mode */
+
+//     #if(TEACHING_MODE == 0)
+//         #if(Handle_OnOff == 0)
+//         current_status = "Stanby mode - No Handle";
+//         mode0 = "Stanby mode - No Handle";
+//         mode1 = "Teaching mode - No Handle";
+//         #elif(Handle_OnOff == 1)
+//         current_status = "Handle stanby mode";
+//         mode0 = "Handle stanby mode";
+//         mode1 = "Handle-guiding mode";
+//         #endif
+//     #elif(TEACHING_MODE == 1)
+//         current_status = "VR stanby mode";
+//         mode0 = "VR stanby mode";
+//         mode1 = "VR-teaching mode";
+//     #endif
+//     mode2 = "Playback ready";
+//     mode3 = "Playback execution";
+//     mode4 = "Path generation done";
+//     modeErr1 = "Wrong iter number(1~9)";
+
+//     Hmode0 = "MODE 0"; // Defualt value
+//     Hmode1 = "MODE 1"; // Mode change (Stanby mode, guiding mode)
+//     Hmode2 = "MODE 2"; // Way point save
+//     Hmode3 = "MODE 3"; // Playback start (Ready , execution)
+//     Hmode4 = "MODE 4"; // Iteration number
+//     Hmode5 = "MODE 5"; // Trajectory generation
+// }
+
+// NRS_Hbutton_cmd::~NRS_Hbutton_cmd()
+// {
+//     #if(Handle_OnOff == 1)
+//     Yuart->YUART_terminate();
+//     delete Yuart;
+//     #endif
+// }
+
+
+
+
+
+
+
+
 
 void NRS_Hbutton_cmd::catch_signal(int sig)
 {
