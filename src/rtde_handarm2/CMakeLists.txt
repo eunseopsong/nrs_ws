@@ -158,9 +158,9 @@ ament_target_dependencies(Yoon_UR10e_main ${COMMON_DEPENDENCIES})
 ######################################
 #### NRS_Hbutton_cmd Dependencies ####
 ######################################
-add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS}) ## add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp)
-target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp Eigen3::Eigen)                                 ## target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-ament_target_dependencies(NRS_Hbutton_cmd ${COMMON_DEPENDENCIES})                                         ## ament_target_dependencies(NRS_Hbutton_cmd rclcpp std_msgs)
+# add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS}) ## add_executable(NRS_Hbutton_cmd src/NRS_Hbutton_cmd.cpp)
+# target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp Eigen3::Eigen)                                 ## target_link_libraries(NRS_Hbutton_cmd ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(NRS_Hbutton_cmd ${COMMON_DEPENDENCIES})                                         ## ament_target_dependencies(NRS_Hbutton_cmd rclcpp std_msgs)
 
 
 # add_executable(VR_Hbutton_cmd src/VR_Hbutton_cmd.cpp)
@@ -178,7 +178,7 @@ install(TARGETS
   # Yoon_FT_acquisit
   # Yoon_UR10e_cmd
   # Yoon_Hbutton_cmd
-  NRS_Hbutton_cmd
+  # NRS_Hbutton_cmd
   # VR_Hbutton_cmd
   # euichan_path_receiver
   DESTINATION lib/${PROJECT_NAME}
@@ -187,6 +187,10 @@ install(TARGETS
 install(DIRECTORY include/
   DESTINATION include/
 )
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+
 
 # Interface and package setup
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")

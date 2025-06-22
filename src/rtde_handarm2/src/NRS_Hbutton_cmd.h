@@ -20,6 +20,11 @@ public:
     NRS_Hbutton_cmd(const rclcpp::Node::SharedPtr &node, int loop_rate);
     ~NRS_Hbutton_cmd();
 
+    rclcpp::Node::SharedPtr node_;
+    // rclcpp::Duration loop_period_ = rclcpp::Duration::from_seconds(0.01);  // 예: 10ms
+    rclcpp::Duration loop_period_;
+    rclcpp::Time last_time_;
+
     void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
     bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> request,
                      std::shared_ptr<std_srvs::srv::Empty::Response> response);
