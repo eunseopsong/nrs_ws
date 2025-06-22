@@ -252,7 +252,7 @@ int main(int argc, char* argv[])
                     printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,ctrl,pre_ctrl,path_exe_counter,Path_point_num); //show the current mode data
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
-                    
+
                     // UR10e actual joint angle monitoring
                     printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
                     RArm.qc(0),RArm.qc(0)*(180/PI), RArm.qc(1),RArm.qc(1)*(180/PI), RArm.qc(2),RArm.qc(2)*(180/PI),
@@ -308,7 +308,7 @@ int main(int argc, char* argv[])
                     printf("RotZ1: %.3f, RotZ2: %.3f, RotZ3: %.3f \n",Desired_rot(0,2),Desired_rot(1,2),Desired_rot(2,2));
                     #endif
 
-                    // VR data 
+                    // VR data
                     #if 0 // [Raw & quaternion value]
                     printf("VR_X: %.4f, VR_Y: %.4f, VR_Z: %.4f \n",VR_pose[0],VR_pose[1],VR_pose[2]);
                     printf("VR_Qw: %.4f, VR_Qx: %.4f, VR_Qy: %.4f, VR_Qz: %.4f \n",VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6]);
@@ -318,7 +318,7 @@ int main(int argc, char* argv[])
                     VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2), 
                     VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
                     #endif
-        
+
                     #endif
                     printer_counter = 0;
                 }
@@ -345,13 +345,13 @@ int main(int argc, char* argv[])
                 /*====== Control modes ======*/
 
                 /* Inital state (stay at the inital pose) */
-                if (ctrl == 0) { 
+                if (ctrl == 0) {
                     speedmode = 0;
                     //RArm.qd = RArm.qc;
                     RArm.qt = RArm.qc;
                     RArm.dqc << 0,0,0,0,0,0;
                     pause_cnt=0;
-                    
+
                     #if Actual_mode == 0 // test mode
                     joint_q = {Init_qc(0), Init_qc(1), Init_qc(2), Init_qc(3), Init_qc(4), Init_qc(5)};
                     #elif Actual_mode == 1 // actual control mode
@@ -400,7 +400,7 @@ int main(int argc, char* argv[])
                                         Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
                                         0               ,0               ,0               ,1;
 
-                                
+
                                 #if TCP_standard == 0
                                 AKin.InverseK_min(&RArm); // input: Td , output: qd
                                 #elif TCP_standard == 1
@@ -436,7 +436,7 @@ int main(int argc, char* argv[])
 
 
                 /* Hand-guiding control mode */
-                else if (ctrl == 2) { 
+                else if (ctrl == 2) {
                     speedmode = 0;
                     //RArm.qd = RArm.qc;
                     RArm.qt = RArm.qc;
@@ -447,11 +447,11 @@ int main(int argc, char* argv[])
                     Hadm_pos_act << RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2);
 
                     /*Hand-guiding initialization*/
-                    if(pre_ctrl != ctrl) 
+                    if(pre_ctrl != ctrl)
                     {
                         Hadm_pos_cmd << RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2);
                         Hspring_mode_init_pos << RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2);
-                        
+
                         Hadm_past_pos_act = Hadm_pos_act;
                         for(int i=0;i<6;i++)
                         {
@@ -459,18 +459,18 @@ int main(int argc, char* argv[])
                             Hadmit_force[i].adm_1D_init(0-Hadm_pos_cmd(i),0-Hadm_FT_data(i),dt);
                             /* Hand-guding mode initial end */
 
-                            /* Handle VAC energy tank initial start */       
+                            /* Handle VAC energy tank initial start */
                             // 1) High Pass Filter initialization
                             et_HFT_HPF[i].HPF_par.ts = dt; // Sampling time(s)
                             et_HFT_HPF[i].HPF_par.f_cut = 5; // Cut-off frequency(Hz)
                             et_HFT_HPF[i].HPF_par.zeta = 0.7; // Damping ratio of HPF
-                            
+
                             // 2) parameter adaptation parameter initialization
                             AD_HG_et[i].init_Md = Hadmit_M(i);
                             AD_HG_et[i].init_Dd = Hadmit_D(i);
 
                             PHadmit_M(i) = Hadmit_M(i);
-                      
+
                             /* Handle VAC energy tank initial end */
                         }
                     }
@@ -480,7 +480,7 @@ int main(int argc, char* argv[])
                     /*** UR10e moment conversion ***/
                     /** in UR10e Mx must be applied on -pitch & My must be applied Roll **/
                     /* For handle sensor */
-                    Handle_Rot_force(0) = ftS1(0); 
+                    Handle_Rot_force(0) = ftS1(0);
                     Handle_Rot_force(1) = ftS1(1);
                     Handle_Rot_force(2) = ftS1(2);
 
@@ -488,7 +488,7 @@ int main(int argc, char* argv[])
                     Handle_Rot_moment(1) = ftS1(3);
                     Handle_Rot_moment(2) = ftS1(5);
                     /* For contact sensor */
-                    Contact_Rot_force(0) = ftS2(0); 
+                    Contact_Rot_force(0) = ftS2(0);
                     Contact_Rot_force(1) = ftS2(1);
                     Contact_Rot_force(2) = ftS2(2);
 
@@ -497,7 +497,7 @@ int main(int argc, char* argv[])
                     Contact_Rot_moment(2) = ftS2(5);
 
                     /* Force shaping algorithm --- start */
-                    
+
                     shaped_F_dot = Handle_Rot_force(0)*Contact_Rot_force(0)+Handle_Rot_force(1)*Contact_Rot_force(1)+Handle_Rot_force(2)*Contact_Rot_force(2);
                     shaped_F_criteria = shaped_F_dot/Contact_Rot_force.norm();
 
@@ -518,9 +518,9 @@ int main(int argc, char* argv[])
 
                         if(shaped_F_offset <= offset_satur_min) shaped_F_offset = offset_satur_min;
 
-                        
+
                         shaped_F_compen = Handle_Rot_force - shaped_F_dot*(Contact_Rot_force/pow(Contact_Rot_force.norm(),2));
-                        
+
                         Shaped_Force = Handle_Rot_force - shaped_F_dot*(Contact_Rot_force/pow(Contact_Rot_force.norm(),2))
                         - (tan(shaped_F_alpha)*shaped_F_compen.norm()+shaped_F_offset)*(Contact_Rot_force/Contact_Rot_force.norm());
                     }
@@ -538,15 +538,15 @@ int main(int argc, char* argv[])
                     Hadm_FT_data(4) = Handle_Rot_moment(1);
                     Hadm_FT_data(5) = Handle_Rot_moment(2);
 
-                    
+
                     #if Adm_mode == 1
-                    
+
                     for(int i=0;i<6;i++)
                     {
                         /* Energy tank start(The order is important) */
-                        
+
                         // 1) Tank input parameter calculation
-                        et_car_vel(i) = (Hadm_pos_act(i)-Hadm_past_pos_act(i))/dt; // Actual velocity calculation                       
+                        et_car_vel(i) = (Hadm_pos_act(i)-Hadm_past_pos_act(i))/dt; // Actual velocity calculation
                         et_norm[i] = fabs(et_HFT_HPF[i].HighPassFilter(Hadm_FT_data(i))); // nominal equation must be like this form
 
                         // 2) Energy tank execution
@@ -592,7 +592,7 @@ int main(int argc, char* argv[])
                         }
                         #endif
                         /* Energy tank end */
-                        
+
                         /* Hand-guiding mode start */
                         Hadmit_force[i].adm_1D_MDK((double)Hadmit_M(i),(double)Hadmit_D(i),(double)Hadmit_K(i));
                         Hadm_pos_cmd(i)=Hadmit_force[i].adm_1D_control((double)0,(double)0, Hadm_FT_data(i));
@@ -605,7 +605,7 @@ int main(int argc, char* argv[])
                             {
                                 init_divi_M[i] = Hadmit_M(i) - AD_HG_et[i].init_Md;
                             }
-                            
+
                             Hadmit_M(i) = AD_HG_et[i].init_Md + init_divi_M[i]*exp(-et_decre_par[i]*et_decre_counter[i]);
                             Hadmit_D(i) = Hadmit_M(i)*(AD_HG_et[i].init_Dd/AD_HG_et[i].init_Md);
                             et_decre_counter[i]++;
@@ -624,7 +624,7 @@ int main(int argc, char* argv[])
                             Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
                             Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
                             0               ,0               ,0               ,1;
-                    
+
                     #if TCP_standard == 0
                     AKin.InverseK_min(&RArm); // input: Td , output: qd
                     #elif TCP_standard == 1
@@ -662,8 +662,8 @@ int main(int argc, char* argv[])
                 }
 
                 /* Posture/Power playback control mode */
-                else if (ctrl == 3) 
-                {  
+                else if (ctrl == 3)
+                {
                     speedmode = 0;
                     //RArm.qd = RArm.qc;
                     RArm.qt = RArm.qc;
@@ -673,7 +673,7 @@ int main(int argc, char* argv[])
                     /*** UR10e moment conversion ***/
                     /** in UR10e Mx must be applied on -pitch & My must be applied Roll **/
                     /* For contact sensor */
-                    Contact_Rot_force(0) = ftS2(0); 
+                    Contact_Rot_force(0) = ftS2(0);
                     Contact_Rot_force(1) = ftS2(1);
                     Contact_Rot_force(2) = ftS2(2);
 
@@ -682,7 +682,7 @@ int main(int argc, char* argv[])
                     Contact_Rot_moment(2) = ftS2(5);
 
                     /* Posture/Power playback control mode initialization */
-                    if(pre_ctrl != ctrl) 
+                    if(pre_ctrl != ctrl)
                     {
                         #if Adm_mode == 1
                         for(int i=0;i<6;i++)
@@ -708,7 +708,7 @@ int main(int argc, char* argv[])
                         int CR_reti = 0;
                         int CR_reti_counter = 0;
                         double CR_LD_histoty[100] = {0,};
-                        
+
 
                         while(CR_reti != -1)
                         {
@@ -744,7 +744,7 @@ int main(int argc, char* argv[])
                             DB_AVA_Xr = Power_PB.PXc_0(2);
 
                             /* Step 0 : Update rate calculation of stiffness variation */
-                            DB_AVA_sigma = 0.5; // it must be handled later 
+                            DB_AVA_sigma = 0.5; // it must be handled later
                         }
                         /* [Fuzzy based adaptive variable stiffness admittance law initalization] */
                         else if(Contact_Fcon_mode == 3)
@@ -757,7 +757,7 @@ int main(int argc, char* argv[])
                             Fuzzy_F_error = 0;
                             Fuzzy_F_Perror = 0;
                             Fuzzy_F_error_dot = 0;
-                            
+
                             /* Step 0 : Update rate calculation of stiffness variation */
                             DB_AVA_sigma = 0.5; // Sigma initialization
                         }
@@ -769,7 +769,7 @@ int main(int argc, char* argv[])
                             DB_AVA_Xc = Power_PB.PXc_0(2);
                             DB_AVA_Xr = Power_PB.PXc_0(2);
                             DB_AVA_X = Power_PB.PXc_0(2);
-                            
+
                             // #if 0
                             // Fuzzy_F_error = 0;
                             // Fuzzy_F_Perror = 0;
@@ -777,7 +777,7 @@ int main(int argc, char* argv[])
 
                             // Fuzzy_md_ratio = Power_PB.PRamD[2]/Power_PB.PRamM[2];
                             // #endif
-                            
+
                             // /* Step 0 : Update rate calculation of stiffness variation */
                             // DB_AVA_sigma = 0.5; // Sigma initialization
 
@@ -785,7 +785,7 @@ int main(int argc, char* argv[])
                         }
 
                     }
-                    
+
                     /* Current actual posture data load */
                     Hadm_pos_act << RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2);
 
@@ -805,14 +805,14 @@ int main(int argc, char* argv[])
                             LD_CFy = 0;
                             LD_CFz = 0;
 
-                            // KdTo0 0ToKd flag initialization 
+                            // KdTo0 0ToKd flag initialization
                             //(Defualt set: KdToZero_flag = true, ZeroToKd_flag = false;)
-                            KdToZero_flag = true; 
+                            KdToZero_flag = true;
                             ZeroToKd_flag = false;
                         }
 
                         /* Tracking the generated trajectory */
-                        else 
+                        else
                         {
                             reti = fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f\n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw,
                             &LD_CFx, &LD_CFy, &LD_CFz);
@@ -825,13 +825,13 @@ int main(int argc, char* argv[])
                             else
                             {
                                 fclose(Hand_G_playback);
-                                PB_starting_path_done_flag = false; 
+                                PB_starting_path_done_flag = false;
                                 path_exe_counter = 0;
                             }
                         }
 
                         if(reti != -1)
-                        {   
+                        {
                             #if Playback_mode == 0 // Position playback mode
 
                             for(int i=0;i<6;i++)
@@ -840,8 +840,8 @@ int main(int argc, char* argv[])
                                 else Desired_RPY(i-3)=Cadmit_playback[i].adm_1D_control((double)Desired_RPY(i-3), (double)0, (double)Contact_Rot_moment(i-3));
                             }
 
-                            #elif Playback_mode == 1 // Power playback mode 
-                            
+                            #elif Playback_mode == 1 // Power playback mode
+
                             /* [Transform the desired RPY to rotation matrix] */
                             // Used in task normal direction and contact force vector direction
                             AKin.EulerAngle2Rotation(Desired_rot,Desired_RPY);
@@ -876,7 +876,7 @@ int main(int argc, char* argv[])
                                 {
                                     KTZ_Z_init = CR_endZP;
                                     KTZ_Z_end = CR_endZP + fabs(Kd_change_dist);
-                                    
+
                                     if(fabs(Desired_XYZ(2)-CR_endZP) < fabs(Kd_change_dist))
                                     {
                                         KTZ_Kd_h = KTZ_Kd_h*exp(-KTZ_update_par*
@@ -887,7 +887,7 @@ int main(int argc, char* argv[])
                                     if(fabs(KTZ_Kd_init-Power_PB.PRamK[2]) <= KTZ_Kd_threshold) // Set the Kd dead-zone
                                     {
                                         Power_PB.PRamK[2] = KTZ_Kd_init; // Saturate to KTZ_Kd_init
-                                        KdToZero_flag = false; 
+                                        KdToZero_flag = false;
                                         ZeroToKd_flag = false; // Terminate 0 -> Kd change
                                         KTZ_Fd_flag = false;
                                     }
@@ -900,7 +900,7 @@ int main(int argc, char* argv[])
                                 if(KdToZero_flag == true)
                                 {
                                     CR_start_dist = RArm.xc-CR_start;
-                                    
+
                                     if(CR_start_dist.norm() <= fabs(Kd_change_dist))
                                     {
                                         Power_PB.PRamK[2] = Power_PB.PRamK[2]*exp(-KTZ_update_par*
@@ -932,7 +932,7 @@ int main(int argc, char* argv[])
                                     if(fabs(KTZ_Kd_init-Power_PB.PRamK[2]) <= KTZ_Kd_threshold) // Set the Kd dead-zone
                                     {
                                         Power_PB.PRamK[2] = KTZ_Kd_init; // Saturate to KTZ_Kd_init
-                                        KdToZero_flag = false; 
+                                        KdToZero_flag = false;
                                         ZeroToKd_flag = false; // Terminate 0 -> Kd change
                                         KTZ_Fd_flag = false;
                                     }
@@ -983,7 +983,7 @@ int main(int argc, char* argv[])
                             else if(Contact_Fcon_mode == 2)
                             {
                                 DB_AVA_Xc = Power_PB.PU3.transpose()*Power_PB.PXc_0; // Xc calculation
-                                DB_AVA_Xr = Power_PB.PU3.transpose()*Desired_XYZ; // Xr calculation 
+                                DB_AVA_Xr = Power_PB.PU3.transpose()*Desired_XYZ; // Xr calculation
 
                                 if((PPB_RTinput.PFd >= 0.01) || (Contact_Rot_force.norm() >= 2.0)) // In the case of over the force threshold
                                 {
@@ -1030,7 +1030,7 @@ int main(int argc, char* argv[])
                                 Fuzzy_F_error = PPB_RTinput.PFd - PPB_surfN_Fext;
                                 Fuzzy_F_error_dot = (Fuzzy_F_error-Fuzzy_F_Perror)/dt;
                                 Fuzzy_F_Perror = Fuzzy_F_error;
-                                
+
                                 if((PPB_RTinput.PFd >= 0.01) || (Contact_Rot_force.norm() >= 2.0)) // In the case of over the force threshold
                                 {
                                     /* Fuzzy DelK, DelSigma update */
@@ -1043,7 +1043,7 @@ int main(int argc, char* argv[])
                                     {DB_AVA_Kd_init = DB_AVA_Ksature[1];}
                                     else if(DB_AVA_Kd_init <= 10.0)
                                     {DB_AVA_Kd_init = 10.0;}
-                                    /* DB_AVA_sigma saturation - 이부분 좀 생각해보자.... */ 
+                                    /* DB_AVA_sigma saturation - 이부분 좀 생각해보자.... */
                                     if(DB_AVA_sigma >= 1.0)
                                     {DB_AVA_sigma = 1.0;}
                                     else if(DB_AVA_sigma <= 0.001)
@@ -1079,7 +1079,7 @@ int main(int argc, char* argv[])
                                 DB_AVA_Xc = Power_PB.PU3.transpose()*Power_PB.PXc_0; // Xc calculation -> Surf. normal direction
                                 DB_AVA_Xr = Power_PB.PU3.transpose()*Desired_XYZ; // Xr calculation -> Surf. normal direction
                                 DB_AVA_X = Power_PB.PU3.transpose()*PPB_RTinput.PX; // X calculation -> Surf. normal direction
-                                
+
                                 // /* Fuzzy MDK update */
                                 // FAMD.FAAC_Kd_variation(PPB_RTinput.PFd, Power_PB.PRamK[2], Power_PB.PXc_0, &Power_PB.PRamK[2]);
                                 // FAMD.FAAC_MD_MainCal(PPB_RTinput.PFd, PPB_surfN_Fext, &Power_PB.PRamM[2], &Power_PB.PRamD[2]);
@@ -1089,7 +1089,7 @@ int main(int argc, char* argv[])
                                 Power_PB.PRamM[2] = TSFAAC_MDK.Mass;
                                 Power_PB.PRamD[2] = TSFAAC_MDK.Damping;
                                 Power_PB.PRamK[2] = TSFAAC_MDK.Stiffness;
-                                
+
                                 if(PPB_RTinput.PFd >= 0.01) // In the case of over the force threshold
                                 {
                                     /* Data recording */
@@ -1147,23 +1147,23 @@ int main(int argc, char* argv[])
                             PPB_RTinput.OX = RArm.thc; // Actual ori
                             PPB_RTinput.OFd = 0; // Desired contact force, But desired moment == 0
                             PPB_RTinput.OFext = Contact_Rot_moment; // Actual contact moment, 0이여야 되는지 확인 필요...
-                            
+
                             /* [Power playback execution] - position only */
                             if(Power_PB.playback_start(PPB_RTinput)) Desired_XYZ = Power_PB.PXc_0;
 
                             #endif
 
-                            // fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n", 
+                            // fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
                             // Power_PB.PX(0),Power_PB.PX(1),Power_PB.PX(2),
                             // Power_PB.PXr(0),Power_PB.PXr(1),Power_PB.PXr(2),Power_PB.PTankE,
                             // Contact_Rot_force(0),Contact_Rot_force(1),Contact_Rot_force(2));
-                            fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n", 
+                            fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
                             PPB_RTinput.PFd,Contact_Rot_force(2),
                             Power_PB.PTankE,Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
 
                             #if 0
                             // Final output monitoring
-                            fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n", 
+                            fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
                             Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),Desired_RPY(0),Desired_RPY(1),Desired_RPY(2));
                             #endif
 
@@ -1180,7 +1180,7 @@ int main(int argc, char* argv[])
                             AKin.Ycontact_InverseK_min(&RArm);
                             #endif
                         }
-                        else 
+                        else
                         {
                             KdToZero_flag = true;
                             ZeroToKd_flag = false;
@@ -1231,13 +1231,13 @@ int main(int argc, char* argv[])
                         maxerr=fabs(err);
                     }
                 }
-            
+
                 // double maxerrmin = 0.001;
 
                 //// rtde_control.waitPeriod(t_start);
             }
             break;
-        
+
         default:
             break;
         }
@@ -1258,5 +1258,5 @@ int main(int argc, char* argv[])
     }
 
     return 0;
- 
+
 }
