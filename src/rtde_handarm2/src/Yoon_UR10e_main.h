@@ -9,6 +9,9 @@
 #include "rclcpp/rclcpp.hpp"  // ROS2 기본 헤더
 #include <time.h> // to get milli-second for thread timer
 
+#include <sensor_msgs/msg/joint_state.hpp>  // Add on 2025.06.23 14:21
+
+
 /* Custom library headers */
 #include "Kinematics.h"
 #include "Armtraj.h"
