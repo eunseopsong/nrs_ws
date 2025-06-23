@@ -127,6 +127,10 @@ int main(int argc, char* argv[])
 
     auto VR_sub = node->create_subscription<geometry_msgs::msg::PoseStamped>(
         "/vive/pos0", 100, VRdataCallback);
+
+    auto joint_state_sub = node->create_subscription<sensor_msgs::msg::JointState>(
+    "/isaac_joint_states", rclcpp::SensorDataQoS(), jointStateCallback);
+
     // ros::Subscriber VR_cal_sub = nh_.subscribe("VRposRtMsg",100,RvizVisul); // VR cal data subscriber
     // ros::Subscriber VR_cal_sub_RPY = nh_.subscribe("VRposRtMsg_RPY",100,RvizVisul_RPY); // VR cal data subscriber
     // ros::Subscriber VR_cal_sub_Qua = nh_.subscribe("VRposRtMsg_Qua",100,RvizVisul_Qua); // VR cal data subscriber
