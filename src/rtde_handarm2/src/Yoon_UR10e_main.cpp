@@ -35,8 +35,13 @@ void getActualQ()
         for (int i = 0; i < 6; i++) {
             RArm.qc(i) = latest_joint_state.position[i];
         }
+        std::cout << "[getActualQ] updated qc: ";
+        for (int i = 0; i < 6; ++i)
+            std::cout << RArm.qc(i) << " ";
+        std::cout << std::endl;
     }
 }
+
 
 
 
