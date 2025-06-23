@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include "Yoon_UR10e_cmd.h"
-#include <rclcpp/rclcpp.hpp> //// #include "ros/ros.h"
+#include <rclcpp/rclcpp.hpp>                      //// #include "ros/ros.h"
 
 // For ROS message
 #include "std_msgs/msg/multi_array_layout.hpp"    //// #include "std_msgs/MultiArrayLayout.h"
@@ -16,12 +16,12 @@
 #include "std_msgs/msg/u_int16.hpp"               //// #include "std_msgs/UInt16.h"
 #include "std_msgs/msg/u_int32.hpp"               //// #include "std_msgs/UInt32.h"
 
-#include "geometry_msgs/msg/point_stamped.hpp"   //// #include "geometry_msgs/PointStamped.h"
-#include "geometry_msgs/msg/pose_stamped.hpp"    //// #include "geometry_msgs/PoseStamped.h"
-// #include "rtde_handarm2/VrPosRtMsgQua.msg"         //// #include "rtde_handarm/VRposRtMsg_Qua.h" // 보류
+#include "geometry_msgs/msg/point_stamped.hpp"    //// #include "geometry_msgs/PointStamped.h"
+#include "geometry_msgs/msg/pose_stamped.hpp"     //// #include "geometry_msgs/PoseStamped.h"
+// #include "rtde_handarm2/VrPosRtMsgQua.msg"     //// #include "rtde_handarm/VRposRtMsg_Qua.h" // 보류
 
 // For ROS service - AIDIN GUI SERVER
-#include "std_srvs/srv/empty.hpp"                //// #include <std_srvs/Empty.h>
+#include "std_srvs/srv/empty.hpp"                 //// #include <std_srvs/Empty.h>
 
 // For trajectory generation
 #include "Text_loader.h"
@@ -153,9 +153,6 @@ NRS_Hbutton_cmd::~NRS_Hbutton_cmd()
 
 
 
-
-
-
 // class NRS_Hbutton_cmd
 // {
 //     public:
@@ -272,7 +269,7 @@ NRS_Hbutton_cmd::~NRS_Hbutton_cmd()
 //     /* Yaml-file */
 //     NRS_recording = YAML::Load(fin1);
 //     NRS_Fcon_desired = YAML::Load(fin2);
-    
+
 //     /* ROS Message */
 //     yoon_mode_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 10);
 //     PbNum_command_pub = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_PbNum_cmd", 10);
@@ -382,7 +379,7 @@ void NRS_Hbutton_cmd::catch_signal(int sig)
 void NRS_Hbutton_cmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
     VRPose_point.x = msg->pose.position.x;
-    VRPose_point.y = msg->pose.position.y; 
+    VRPose_point.y = msg->pose.position.y;
     VRPose_point.z = msg->pose.position.z;
 
     // std::cout << msg->pose.position.x << msg->pose.position.y << msg->pose.position.z << std::endl;
@@ -469,7 +466,7 @@ void NRS_Hbutton_cmd::Mode_chage()
         current_status = mode0;
 
         #if(Handle_OnOff == 1)
-        // Stanby mode message publish 
+        // Stanby mode message publish
         yoon_mode_msg.data = Motion_stop_cmd;
         yoon_mode_pub->publish(yoon_mode_msg); //// yoon_mode_pub.publish(yoon_mode_msg);
         rclcpp::spin_some(node_);              //// ros::spinOnce();
@@ -527,7 +524,7 @@ void NRS_Hbutton_cmd::Trajectory_gen()
     double Desired_Fx = NRS_Fcon_desired["AAC_Des_Force"]["Fx"].as<double>();
     double Desired_Fy = NRS_Fcon_desired["AAC_Des_Force"]["Fy"].as<double>();
     double Desired_Fz = NRS_Fcon_desired["AAC_Des_Force"]["Fz"].as<double>();
-    
+
     /* Desired motion velocity setting */
     double Star2Cont_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Start2Contact"].as<double>();
     double Cont2Term_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Contact2Termin"].as<double>();
@@ -545,20 +542,20 @@ void NRS_Hbutton_cmd::Trajectory_gen()
 
     /*** STEP2 : Path generation ***/
     Yoon_path Descr_RD_blending;
-    /* trajectory planning && recording to text */ 
+    /* trajectory planning && recording to text */
 
     /* Open the text file */
     // FILE* Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
     auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
     FILE* Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
-    
+
     /**** Points to path profile ****/
 
     /* 1) Contact points path profile with force */
     int MPoint_num = Decr_RD_points_tem.rows(); // number of points (actal num : MPoint_num)
 
     /* Desired velocity & force update */
-    if(MPoint_num<4) 
+    if(MPoint_num<4)
     {
         /* # of points is under 3 */
         if(MPoint_num < 3) {catch_signal(0);}
@@ -582,17 +579,17 @@ void NRS_Hbutton_cmd::Trajectory_gen()
     // Desired velocity & force update
     for(int i=0;i<MPoint_num-1;i++) // Point number : MPoint_num
     {
-        if(i == 0) 
+        if(i == 0)
         {
             MTar_vel[i] = Star2Cont_vel;
             PPB_des_force[i] = (double)0.0;
         }
-        else if(i == MPoint_num-2) 
+        else if(i == MPoint_num-2)
         {
             MTar_vel[i] = Cont2Term_vel;
             PPB_des_force[i] = (double)0.0;
         }
-        else 
+        else
         {
             MTar_vel[i] = MMotion_vel;
             PPB_des_force[i] = Desired_Fz;
@@ -651,7 +648,7 @@ void NRS_Hbutton_cmd::Playback_exe()
         }
         else PB_exe_counter = 0;
 
-        
+
     }
     else current_status = modeErr1;
 }
@@ -672,7 +669,7 @@ void NRS_Hbutton_cmd::HButton_main()
         printf("\n============================================================\n");
 
         #if(Handle_OnOff == 1)
-        if(Yuart->YUART_start(buffer)) 
+        if(Yuart->YUART_start(buffer))
         {
             // printf("%s\n",buffer);
 
@@ -712,7 +709,7 @@ void NRS_Hbutton_cmd::HButton_main()
                 Iter_num_set();
             }
             if((Pre_Mode_val == 0) && (Mode_val == 3)) // Playback execution
-            {   
+            {
                 Playback_exe();
             }
 

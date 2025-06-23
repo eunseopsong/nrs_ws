@@ -97,12 +97,12 @@ extern YAML::Node NRS_VR_setting;
 /*---------------------------- System setting ---------------------------------*/
 extern float SwitchS[5];
 extern float SwitchPre[5];
-extern int PointTraj[30]; //Point or Trajectory, 0=none, 1=Path point, 2=Trajectory 
+extern int PointTraj[30]; //Point or Trajectory, 0=none, 1=Path point, 2=Trajectory
 extern char filename[100];
 extern int SEQ_switch,pointnum,SEQ_play,stop_flag,stop_flag2;
 extern int SEQ_record,SEQ_point,SEQ_traj;
 
-/* UR Setup parameters */ 
+/* UR Setup parameters */
 extern std::string robot_ip;
 //// double rtde_frequency = 500.0; // Hz 500
 extern double dt; // 2ms
@@ -204,15 +204,15 @@ extern double admit_FT_in[6];
 extern double admit_vel_in[6];
 
 extern Etank_HG AD_HG_et[6]; // Admittance control hand-guding energy tank instance
-extern Etank_HG et_adap; // energy tank paramter structure for adaptation 
+extern Etank_HG et_adap; // energy tank paramter structure for adaptation
 
-extern double Md_ti[6]; // Mass at the ti 
+extern double Md_ti[6]; // Mass at the ti
 extern double Md_tf[6]; // Mass at the tf
 extern double xm_dot[6]; // Velocity limit(m/s & rad/s)
 extern double M_divi_lim[6]; // Mass diviation limit
 extern double Dd_tf[6]; // Damping at the tf
 extern double deltaT; // update time interval (ms)
-extern double et_wait_counter[6]; // update time counter 
+extern double et_wait_counter[6]; // update time counter
 extern bool par_adap_flag[6];
 extern int par_adap_stCounter;
 extern int et_decre_counter[6];
@@ -313,7 +313,7 @@ extern double Fuzzy_mass_limit[2]; // {0.5, 5}
 // Fuzzy_adaptive_md FAMD("cu");
 extern double FAAC_HPF_cf; // Hz
 extern double FAAC_HPF_threshold; // N
-// extern Fuzzy_adaptive_md FAMD, 
+// extern Fuzzy_adaptive_md FAMD,
 // NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
 // NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, FAAC_HPF_cf, FAAC_HPF_threshold);
 
@@ -329,7 +329,7 @@ extern Nrs3StepFAAC FAAC3step;
 /* VR parameters */
 extern bool VR_yaml_loader; // VR yaml calibration matrix load flag
 extern double VR_pose[7]; // VR pose (Position-3, Orientation-quaternion)
-extern double VR_cal_pose[7]; 
+extern double VR_cal_pose[7];
 
 extern Eigen::MatrixXd VR_Q2Rot;
 extern Eigen::MatrixXd VR_PoseM;

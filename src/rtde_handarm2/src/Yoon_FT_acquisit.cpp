@@ -11,10 +11,10 @@
 #include <iostream>
 #include "NRS_yaml_location.h"
 
-#define H_Mov_OnOff 1 
-#define C_Mov_OnOff 0 
-#define H_LPF_OnOff 1 
-#define C_LPF_OnOff 0 
+#define H_Mov_OnOff 1
+#define C_Mov_OnOff 0
+#define H_LPF_OnOff 1
+#define C_LPF_OnOff 0
 
 class YoonFTAcquisition {
 private:
@@ -155,23 +155,23 @@ public:
 				if (time_counter >= 200) {
 					FT_sensor.Sensor_value_init();
 				}
-				
+
 				/* Handle sensor proccesing */
 				#if H_Mov_OnOff
 				FT_sensor.Force_val[0] = MV_filter_Fx.MovingAvgFilter(FT_sensor.Force_val[0]);
 				FT_sensor.Force_val[1] = MV_filter_Fy.MovingAvgFilter(FT_sensor.Force_val[1]);
 				FT_sensor.Force_val[2] = MV_filter_Fz.MovingAvgFilter(FT_sensor.Force_val[2]);
-		
+
 				FT_sensor.Moment_val[0] = MV_filter_Mx.MovingAvgFilter(FT_sensor.Moment_val[0]);
 				FT_sensor.Moment_val[1] = MV_filter_My.MovingAvgFilter(FT_sensor.Moment_val[1]);
 				FT_sensor.Moment_val[2] = MV_filter_Mz.MovingAvgFilter(FT_sensor.Moment_val[2]);
 				#endif
-		
+
 				#if H_LPF_OnOff
 				FT_sensor.Force_val[0] = LPF_Fx.LowPassFilter(FT_sensor.Force_val[0]);
 				FT_sensor.Force_val[1] = LPF_Fy.LowPassFilter(FT_sensor.Force_val[1]);
 				FT_sensor.Force_val[2] = LPF_Fz.LowPassFilter(FT_sensor.Force_val[2]);
-		
+
 				FT_sensor.Moment_val[0] = LPF_Mx.LowPassFilter(FT_sensor.Moment_val[0]);
 				FT_sensor.Moment_val[1] = LPF_My.LowPassFilter(FT_sensor.Moment_val[1]);
 				FT_sensor.Moment_val[2] = LPF_Mz.LowPassFilter(FT_sensor.Moment_val[2]);
@@ -182,45 +182,45 @@ public:
 				FT_sensor.Contact_Force_val[0] = MV_filter_CFx.MovingAvgFilter(FT_sensor.Contact_Force_val[0]);
 				FT_sensor.Contact_Force_val[1] = MV_filter_CFy.MovingAvgFilter(FT_sensor.Contact_Force_val[1]);
 				FT_sensor.Contact_Force_val[2] = MV_filter_CFz.MovingAvgFilter(FT_sensor.Contact_Force_val[2]);
-		
+
 				FT_sensor.Contact_Moment_val[0] = MV_filter_CMx.MovingAvgFilter(FT_sensor.Contact_Moment_val[0]);
 				FT_sensor.Contact_Moment_val[1] = MV_filter_CMy.MovingAvgFilter(FT_sensor.Contact_Moment_val[1]);
 				FT_sensor.Contact_Moment_val[2] = MV_filter_CMz.MovingAvgFilter(FT_sensor.Contact_Moment_val[2]);
 				#endif
-		
+
 				#if C_LPF_OnOff
 				FT_sensor.Contact_Force_val[0] = LPF_CFx.LowPassFilter(FT_sensor.Contact_Force_val[0]);
 				FT_sensor.Contact_Force_val[1] = LPF_CFy.LowPassFilter(FT_sensor.Contact_Force_val[1]);
 				FT_sensor.Contact_Force_val[2] = LPF_CFz.LowPassFilter(FT_sensor.Contact_Force_val[2]);
-		
+
 				FT_sensor.Contact_Moment_val[0] = LPF_CMx.LowPassFilter(FT_sensor.Contact_Moment_val[0]);
 				FT_sensor.Contact_Moment_val[1] = LPF_CMy.LowPassFilter(FT_sensor.Contact_Moment_val[1]);
 				FT_sensor.Contact_Moment_val[2] = LPF_CMz.LowPassFilter(FT_sensor.Contact_Moment_val[2]);
 				#endif
-		
+
 				if (key_MODE == '1') {
 					printf("Fx: %10f,  Fy: %10f,  Fz: %10f\n", FT_sensor.Force_val[0], FT_sensor.Force_val[1], FT_sensor.Force_val[2]);
 					printf("Mx: %10f,  My: %10f,  Mz: %10f\n", FT_sensor.Moment_val[0], FT_sensor.Moment_val[1], FT_sensor.Moment_val[2]);
 					printf("CFx: %10f, CFy: %10f, CFz: %10f\n", FT_sensor.Contact_Force_val[0], FT_sensor.Contact_Force_val[1], FT_sensor.Contact_Force_val[2]);
 					printf("CMx: %10f, CMy: %10f, CMz: %10f\n", FT_sensor.Contact_Moment_val[0], FT_sensor.Contact_Moment_val[1], FT_sensor.Contact_Moment_val[2]);
 				}
-		
+
 				msg.Fx = FT_sensor.Force_val[0];
 				msg.Fy = FT_sensor.Force_val[1];
 				msg.Fz = FT_sensor.Force_val[2];
-		
+
 				msg.Mx = FT_sensor.Moment_val[0];
 				msg.My = FT_sensor.Moment_val[1];
 				msg.Mz = FT_sensor.Moment_val[2];
-		
+
 				msg.CFx = FT_sensor.Contact_Force_val[0];
 				msg.CFy = FT_sensor.Contact_Force_val[1];
 				msg.CFz = FT_sensor.Contact_Force_val[2];
-		
+
 				msg.CMx = FT_sensor.Contact_Moment_val[0];
 				msg.CMy = FT_sensor.Contact_Moment_val[1];
 				msg.CMz = FT_sensor.Contact_Moment_val[2];
-		
+
 				ft_pub.publish(msg);
 				time_counter += 1.0;
 				ros::spinOnce();

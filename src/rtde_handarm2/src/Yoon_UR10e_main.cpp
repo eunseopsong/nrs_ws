@@ -195,13 +195,13 @@ int main(int argc, char* argv[])
     Hadmit_D << 500,500,500, 50,50,50;
     Hadmit_K << 0,0,0, 0,0,0;
     #endif
-    
+
 
     for(int i=0;i<6;i++) // MDK update
     {
         Hadmit_force[i].adm_1D_MDK((double)Hadmit_M(i),(double)Hadmit_D(i),(double)Hadmit_K(i));
     }
-    
+
     #endif
     // spring mode control parameter
     VectorXd Hspring_mode_init_pos(6);
@@ -212,7 +212,7 @@ int main(int argc, char* argv[])
     printf("1 : For Servoj,  q : Quit    \n");
 
     key_MODE=getchar();
-    
+
     /* Recording file open */
     auto test_path_joint_path = NRS_recording["test_path_joint"].as<std::string>();
     path_recording_joint = fopen(test_path_joint_path.c_str(),"wt");
@@ -298,7 +298,7 @@ int main(int argc, char* argv[])
                     printf("DB_AVA_sigma: %0.3f, DB_AVA_phi: %0.3f\n",DB_AVA_sigma,DB_AVA_phi);
                     printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n", Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2));
                     // printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n", CR_start(0), CR_start(1), CR_start(2));
-                    
+
                     // Surface normal force
                     printf("Surf. normal Fd: %.3f, Fext: %.3f \n",PPB_RTinput.PFd, PPB_surfN_Fext);
 
@@ -315,7 +315,7 @@ int main(int argc, char* argv[])
                     #endif
                     #if 1// [Calibrated value]
                     printf("VR_x: %.4f, VR_y: %.4f, VR_z: %.4f, VR_R: %.4f(%.2f), VR_P: %.4f(%.2f), VR_Y: %.4f(%.2f) \n",
-                    VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2), 
+                    VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
                     VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
                     #endif
 
@@ -331,7 +331,7 @@ int main(int argc, char* argv[])
                 UR10_pose_msg.data.clear();
                 UR10_wrench_msg.data.clear();
 
-                for(int i=0; i<6; i++) 
+                for(int i=0; i<6; i++)
                 {
                     UR10_Jangle_msg.data.push_back(RArm.qc(i));
                     if (i<3) {UR10_pose_msg.data.push_back(RArm.xc(i));}
@@ -414,7 +414,7 @@ int main(int argc, char* argv[])
                         }
                         else
                         {
-                            path_done_flag = false; 
+                            path_done_flag = false;
                             path_exe_counter = 0;
                         }
 
@@ -530,7 +530,7 @@ int main(int argc, char* argv[])
                     }
                     /* Force shaping algorithm --- end */
 
-                    Hadm_FT_data(0) = Shaped_Force(0); 
+                    Hadm_FT_data(0) = Shaped_Force(0);
                     Hadm_FT_data(1) = Shaped_Force(1);
                     Hadm_FT_data(2) = Shaped_Force(2);
 
@@ -708,6 +708,12 @@ int main(int argc, char* argv[])
                         int CR_reti = 0;
                         int CR_reti_counter = 0;
                         double CR_LD_histoty[100] = {0,};
+
+                        // Debugging YAML (2025.06.22 21:57)
+                        // std::cout << "YAML keys:" << std::endl;
+                        // for (const auto& key : NRS_recording) {
+                        //     std::cout << key.first.as<std::string>() << std::endl;
+                        // }
 
 
                         while(CR_reti != -1)
@@ -1096,7 +1102,7 @@ int main(int argc, char* argv[])
                                     if(EXPdata1_switch == 1) // 1: Recording
                                     {
                                         fprintf(EXPdata1,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
-                                        PPB_RTinput.PFd, PPB_surfN_Fext, DB_AVA_Xc_dot, 
+                                        PPB_RTinput.PFd, PPB_surfN_Fext, DB_AVA_Xc_dot,
                                         Power_PB.PRamM[2],Power_PB.PRamD[2],Power_PB.PRamK[2],
                                         Power_PB.PU1(0),Power_PB.PU1(1),Power_PB.PU1(2),
                                         Power_PB.PU3(0),Power_PB.PU3(1),Power_PB.PU3(2),

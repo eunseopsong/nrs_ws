@@ -3,7 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 NRSUR10eControl::NRSUR10eControl(double rtde_frequency, int rt_control_priority, int rt_receive_priority)
-    : rtde_control(nullptr), rtde_receive(nullptr) { 
+    : rtde_control(nullptr), rtde_receive(nullptr) {
     this->dt = 1.0 / rtde_frequency;
     this->velocity = 0.5;
     this->acceleration = 10.0;
@@ -41,16 +41,16 @@ void NRSUR10eControl::loadYamlConfigurations(const std::string& config_file) {
     try {
         // YAML 파일 로드
         YAML::Node config = YAML::LoadFile(config_file);
-        
+
         // VR 설정 파일
         NRS_VR_setting = config["VR_setting"];
-        
+
         // Force control 설정 파일
         NRS_Fcon_setting = config["Force_control"];
-        
+
         // Recording 설정 파일
         NRS_recording = config["Recording"];
-        
+
         // 로봇 IP 로드 (YAML 파일에서 UR10IP 항목을 읽어옴)
         if (config["UR10IP"]) {
             robot_ip = config["UR10IP"].as<std::string>();  // 로봇 IP를 설정
@@ -74,7 +74,7 @@ void NRSUR10eControl::runControlLoop() {
         getActualQ();
         handleForceControl();
         controlRobot();
-        
+
         // RTDE control 주기 맞추기
         rtde_control->waitPeriod(t_start);
 

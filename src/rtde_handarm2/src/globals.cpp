@@ -11,12 +11,12 @@
 /**** Modes selection ****/
 #define Actual_mode 1 // 0: Test mode, 1: Actual_mode
 
-#define Adm_mode 1 // 0: defualt mode, 1: tustin mode, 2: time integral
-#define TCP_standard 1 // 0: End-effector based, 1: TCP based
-#define Hand_spring_mode 0 // 0: guiding mode, 1: Spring mode (절대 "1" 금지 !!)
-#define Playback_mode 1 // 0: Position playback mode, 1: Power(Force + Position) playback mode
+#define Adm_mode 1          // 0: defualt mode, 1: tustin mode, 2: time integral
+#define TCP_standard 1      // 0: End-effector based, 1: TCP based
+#define Hand_spring_mode 0  // 0: guiding mode, 1: Spring mode (절대 "1" 금지 !!)
+#define Playback_mode 1     // 0: Position playback mode, 1: Power(Force + Position) playback mode
 
-#define RT_printing 1 // 0: RT_printing off, 1: RT_printing on
+#define RT_printing 1       // 0: RT_printing off, 1: RT_printing on
 
 /*---------------------------- Namespace setting & instance generation ---------------------------------*/
 // using namespace ur_rtde;
@@ -42,12 +42,12 @@ YAML::Node NRS_VR_setting = YAML::Load(fin4);
 /*---------------------------- System setting ---------------------------------*/
 float SwitchS[5];
 float SwitchPre[5];
-int PointTraj[30]; //Point or Trajectory, 0=none, 1=Path point, 2=Trajectory 
+int PointTraj[30]; //Point or Trajectory, 0=none, 1=Path point, 2=Trajectory
 char filename[100];
 int SEQ_switch=0,pointnum=0,SEQ_play=0,stop_flag=0,stop_flag2=0;
 int SEQ_record=0,SEQ_point=0,SEQ_traj=0;
 
-/* UR Setup parameters */ 
+/* UR Setup parameters */
 std::string robot_ip = NRS_IP["UR10IP"].as<std::string>();
 //// double rtde_frequency = 500.0; // Hz 500
 double dt = 0.002; // 2ms
@@ -75,7 +75,7 @@ double lookahead_time = 0.1;
 double gain = 600;
 
 /* flag */
-int ctrl=0; // control mode status
+int ctrl=0;     // control mode status
 int pre_ctrl=0; // previous control mode status
 char message_status[32] = "Motion stop"; // message status;
 int pause_cnt=0;
@@ -85,9 +85,8 @@ char key_MODE='0';
 int printer_counter = 0;
 int print_period = 20; // counter per print
 
-
-std::vector<double> joint_q; // servoJ cmd angle
-std::vector<double> tcp_pose; // actual tcp pose
+std::vector<double> joint_q;      // servoJ cmd angle
+std::vector<double> tcp_pose;     // actual tcp pose
 steady_clock::time_point t_start; // control rt time setting (Do not change)
 
 /* For cartesian motion command */
@@ -114,7 +113,7 @@ Eigen::VectorXd Hadm_past_vel_act = Eigen::VectorXd::Zero(6);
 Eigen::MatrixXd Shaped_Force = Eigen::MatrixXd::Zero(3,1);
 double shaped_F_criteria, shaped_F_dot;
 double shaped_F_alpha = 0.05; // rad
-double shaped_F_offset = 1; // N
+double shaped_F_offset = 1;   // N
 Eigen::MatrixXd shaped_F_compen = Eigen::MatrixXd::Zero(3,1);
 
 Eigen::Vector3d Handle_Rot_force(3), Handle_Rot_moment(3);
@@ -149,15 +148,15 @@ double admit_FT_in[6] = {0,};
 double admit_vel_in[6] = {0,};
 
 Etank_HG AD_HG_et[6]; // Admittance control hand-guding energy tank instance
-Etank_HG et_adap; // energy tank paramter structure for adaptation 
+Etank_HG et_adap; // energy tank paramter structure for adaptation
 
-double Md_ti[6] = {0,}; // Mass at the ti 
+double Md_ti[6] = {0,}; // Mass at the ti
 double Md_tf[6] = {0,}; // Mass at the tf
 double xm_dot[6] = {1,1,1,0.05,0.05,0.05}; // Velocity limit(m/s & rad/s)
 double M_divi_lim[6] = {3,3,3,0.3,0.3,0.3}; // Mass diviation limit
 double Dd_tf[6] = {0,}; // Damping at the tf
 double deltaT = 0.2; // update time interval (ms)
-double et_wait_counter[6] = {0,}; // update time counter 
+double et_wait_counter[6] = {0,}; // update time counter
 bool par_adap_flag[6] = {false,};
 int par_adap_stCounter = 0;
 int et_decre_counter[6] = {0,};
@@ -178,7 +177,7 @@ Eigen::VectorXd TCP_path_start = Eigen::VectorXd::Zero(6);
 Eigen::VectorXd Joint_path_start = Eigen::VectorXd::Zero(6);
 
 /* Status message start */
-char path_gen_done[32] = "Path generation done";
+char path_gen_done[32]    = "Path generation done";
 char ST_path_gen_done[32] = "Starting path generation done";
 char Hand_guiding_mode[32] = "Hand guiding control mode";
 char Motion_stop_mode[32] = "Motion stop";
@@ -260,7 +259,7 @@ double Fuzzy_mass_limit[2] = {0.5, 5}; // {0.5, 5}
 // Fuzzy_adaptive_md FAMD("cu");
 double FAAC_HPF_cf = 15; // Hz
 double FAAC_HPF_threshold = 1; // N
-Fuzzy_adaptive_md FAMD("cu",NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>(), 
+Fuzzy_adaptive_md FAMD("cu",NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>(),
 NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>(),
 NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>(), dt, FAAC_HPF_cf, FAAC_HPF_threshold);
 
@@ -278,11 +277,10 @@ Nrs3StepFAAC FAAC3step(
 );
 
 
-
 /* VR parameters */
 bool VR_yaml_loader = false; // VR yaml calibration matrix load flag
 double VR_pose[7] = {0,}; // VR pose (Position-3, Orientation-quaternion)
-double VR_cal_pose[7] = {0,}; 
+double VR_cal_pose[7] = {0,};
 
 Eigen::MatrixXd VR_Q2Rot = Eigen::MatrixXd::Zero(3,3);
 Eigen::MatrixXd VR_PoseM = Eigen::MatrixXd::Zero(4,4);
