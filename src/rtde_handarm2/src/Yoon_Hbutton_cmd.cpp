@@ -78,7 +78,7 @@ int main(int argc, char **argv)
 
     /* ROS Message */
     ros::Publisher yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
-    ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20); 
+    ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
 
     std_msgs::UInt16 yoon_mode_msg;
     std_msgs::UInt32 PbNum_command_msg;
@@ -133,7 +133,7 @@ int main(int argc, char **argv)
         printf("\n============================================================\n");
 
 
-        if(Yuart.YUART_start(buffer)) 
+        if(Yuart.YUART_start(buffer))
         {
             // printf("%s\n",buffer);
 
@@ -162,7 +162,7 @@ int main(int argc, char **argv)
                     guiding_mode = false;
                     memcpy(current_status,mode0,sizeof(mode0));
 
-                    // Stanby mode message publish 
+                    // Stanby mode message publish
                     yoon_mode_msg.data = Motion_stop_cmd;
                     yoon_mode_pub.publish(yoon_mode_msg);
                     ros::spinOnce();
@@ -176,7 +176,7 @@ int main(int argc, char **argv)
                     }
 
                 }
-                
+
             }
             if((Pre_Mode_val == 0) && (Mode_val == 2)) // Way point save
             {
@@ -193,7 +193,7 @@ int main(int argc, char **argv)
                 double Desired_Fx = NRS_Fcon_desired["AAC_Des_Force"]["Fx"].as<double>();
                 double Desired_Fy = NRS_Fcon_desired["AAC_Des_Force"]["Fy"].as<double>();
                 double Desired_Fz = NRS_Fcon_desired["AAC_Des_Force"]["Fz"].as<double>();
-                
+
                 /* Desired motion velocity setting */
                 double Star2Cont_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Start2Contact"].as<double>();
                 double Cont2Term_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Contact2Termin"].as<double>();
@@ -215,20 +215,20 @@ int main(int argc, char **argv)
 
                 /*** STEP2 : Path generation ***/
                 Yoon_path Descr_RD_blending;
-                /* trajectory planning && recording to text */ 
+                /* trajectory planning && recording to text */
 
                 /* Open the text file */
                 // FILE* Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
                 auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
                 FILE* Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
-                
+
                 /**** Points to path profile ****/
 
                 /* 1) Contact points path profile with force */
                 int MPoint_num = Decr_RD_points_tem.rows(); // number of points (actal num : MPoint_num)
 
                 /* Desired velocity & force update */
-                if(MPoint_num<4) 
+                if(MPoint_num<4)
                 {
                     /* # of points is under 3 */
                     if(MPoint_num < 3) {catch_signal(0);}
@@ -251,17 +251,17 @@ int main(int argc, char **argv)
 
                 for(int i=0;i<MPoint_num-1;i++) // Point number : MPoint_num
                 {
-                    if(i == 0) 
+                    if(i == 0)
                     {
                         MTar_vel[i] = Star2Cont_vel;
                         PPB_des_force[i] = (double)0.0;
                     }
-                    else if(i == MPoint_num-2) 
+                    else if(i == MPoint_num-2)
                     {
                         MTar_vel[i] = Cont2Term_vel;
                         PPB_des_force[i] = (double)0.0;
                     }
-                    else 
+                    else
                     {
                         MTar_vel[i] = MMotion_vel;
                         PPB_des_force[i] = Desired_Fz;
@@ -295,7 +295,7 @@ int main(int argc, char **argv)
                 }
             }
             if((Pre_Mode_val == 0) && (Mode_val == 3)) // Playback execution
-            {   
+            {
                 if(iter_num > 0 && iter_num < 10)
                 {
                     if(PB_exe_counter == 0)
@@ -319,7 +319,7 @@ int main(int argc, char **argv)
                     }
                     else PB_exe_counter = 0;
 
-                    
+
                 }
                 else memcpy(current_status,modeErr1,sizeof(modeErr1));
 

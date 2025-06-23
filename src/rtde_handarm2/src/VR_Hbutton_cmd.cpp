@@ -55,7 +55,7 @@ int main(int argc, char **argv)
 
     // Publisher instance
     ros::Publisher yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
-    ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20); 
+    ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
 
     // Msg instance
     std_msgs::UInt16 yoon_mode_msg;
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
     /* Phase selcection end */
 
     while(1)
-    {   
+    {
         /* Real time monitoring start */
         printf("\n============================================================\n");
         printf("************************************************************\n");
@@ -138,7 +138,7 @@ int main(int argc, char **argv)
         printf("\n============================================================\n");
         /* Real time monitoring end */
 
-        if(Yuart.YUART_start(buffer)) 
+        if(Yuart.YUART_start(buffer))
         {
             /* Handle button data aqusition start */
             if(strcmp(buffer,Hmode0)==0) Mode_val=0;
@@ -171,7 +171,7 @@ int main(int argc, char **argv)
                         guiding_mode = false;
                         memcpy(current_mode,mode0,sizeof(mode0));
 
-                        // Stanby mode message publish 
+                        // Stanby mode message publish
                         yoon_mode_msg.data = Motion_stop_cmd;
                         yoon_mode_pub.publish(yoon_mode_msg);
                         ros::spinOnce();
@@ -224,7 +224,7 @@ int main(int argc, char **argv)
                 //         }
                 //     }
                 // }
-                
+
             }
             /* If Mode_val: 2 - Nothing(Cali. phase), Way point save(Teac. phase) */
             if((Pre_Mode_val == 0) && (Mode_val == 2))
@@ -233,13 +233,13 @@ int main(int argc, char **argv)
                 if(Phase_selector == 0){}
                 // - Teaching phase -
                 else if(Phase_selector == 1)
-                { 
+                {
                     yoon_mode_msg.data = VRTeac_reording_start;
                     yoon_mode_pub.publish(yoon_mode_msg);
                     ros::spinOnce();
                     point_counter ++;
                 }
-                 
+
 
             }
 
@@ -257,7 +257,7 @@ int main(int argc, char **argv)
                     double Desired_Fx = NRS_Fcon_desired["AAC_Des_Force"]["Fx"].as<double>();
                     double Desired_Fy = NRS_Fcon_desired["AAC_Des_Force"]["Fy"].as<double>();
                     double Desired_Fz = NRS_Fcon_desired["AAC_Des_Force"]["Fz"].as<double>();
-                    
+
                     /* Desired motion velocity setting */
                     double Star2Cont_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Start2Contact"].as<double>();
                     double Cont2Term_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Contact2Termin"].as<double>();
@@ -275,13 +275,13 @@ int main(int argc, char **argv)
 
                     /*** STEP2 : Path generation ***/
                     Yoon_path Descr_RD_blending;
-                    /* trajectory planning && recording to text */ 
+                    /* trajectory planning && recording to text */
 
                     /* Open the text file */
                     // FILE* Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
                     auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
                     FILE* Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
-                    
+
                     /**** Points to path profile ****/
 
                     /* 1) Contact points path profile with force */
@@ -294,17 +294,17 @@ int main(int argc, char **argv)
                     // Desired velocity & force update
                     for(int i=0;i<MPoint_num-1;i++) // Point number : MPoint_num
                     {
-                        if(i == 0) 
+                        if(i == 0)
                         {
                             MTar_vel[i] = Star2Cont_vel;
                             PPB_des_force[i] = (double)0.0;
                         }
-                        else if(i == MPoint_num-2) 
+                        else if(i == MPoint_num-2)
                         {
                             MTar_vel[i] = Cont2Term_vel;
                             PPB_des_force[i] = (double)0.0;
                         }
-                        else 
+                        else
                         {
                             MTar_vel[i] = MMotion_vel;
                             PPB_des_force[i] = Desired_Fz;
@@ -352,7 +352,7 @@ int main(int argc, char **argv)
             }
             /* If Mode_val: 3 - Cali save termination(Cali. phase), Playback execution(Teac. phase) */
             if((Pre_Mode_val == 0) && (Mode_val == 3))
-            {   
+            {
                 // - Calibration phase -
                 if(Phase_selector == 0)
                 {
@@ -393,7 +393,7 @@ int main(int argc, char **argv)
                         }
                         else PB_exe_counter = 0;
 
-                        
+
                     }
                     else memcpy(current_mode,modeErr1,sizeof(modeErr1));
                     }
