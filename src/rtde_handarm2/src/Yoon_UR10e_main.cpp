@@ -19,6 +19,28 @@ bool running = true;
 ////     exit(1);
 //// }
 
+sensor_msgs::msg::JointState latest_joint_state;
+std::mutex joint_state_mutex;
+
+void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(joint_state_mutex);
+    latest_joint_state = *msg;
+}
+
+void getActualQ()
+{
+    std::lock_guard<std::mutex> lock(joint_state_mutex);
+    if (latest_joint_state.position.size() >= 6) {
+        for (int i = 0; i < 6; i++) {
+            RArm.qc(i) = latest_joint_state.position[i];
+        }
+    }
+}
+
+
+
+
 //// void getActualQ()
 //// {
 //// 	std::vector<double> actual_q = rtde_receive.getActualQ();
