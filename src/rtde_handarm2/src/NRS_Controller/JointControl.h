@@ -13,7 +13,7 @@ public:
     JointControl();
 
 private:
-    void CalculateAndPublishTorque();
+    void CalculateAndPublishJoint();
 
     // // Subscriber declarations
     // rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr sub_bodypose;

@@ -73,7 +73,7 @@
 #define RT_printing 1       // 0: RT_printing off, 1: RT_printing on
 
 /*---------------------------- Namespace setting & instance generation ---------------------------------*/
-// using namespace ur_rtde;
+//// using namespace ur_rtde;
 using namespace std::chrono;
 using namespace std;
 using nrs_msgmonitoring2::MsgMonitoring; // Add on 2025.06.10 17:23

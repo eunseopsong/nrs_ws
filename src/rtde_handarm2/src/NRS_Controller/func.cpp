@@ -7,7 +7,7 @@
 #define pi 3.14159265358979323846
 
 /**** Modes selection ****/
-#define Actual_mode 1 // 0: Test mode, 1: Actual_mode
+#define Actual_mode 1       // 0: Test mode, 1: Actual_mode
 
 #define Adm_mode 1          // 0: defualt mode, 1: tustin mode, 2: time integral
 #define TCP_standard 1      // 0: End-effector based, 1: TCP based
