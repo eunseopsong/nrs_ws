@@ -20,7 +20,7 @@
 #include "Yoon_path.h"
 #include "Yoon_force_control.h"
 #include "Yoon_filters.h"
-// #include "Yoon_UR10e_cmd.h"
+#include "Yoon_UR10e_cmd.h"
 #include "nrs_msgmonitoring2/msg_monitoring.hpp"
 
 /* Custom Package headers */
