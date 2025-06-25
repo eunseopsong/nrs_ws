@@ -2,6 +2,7 @@
 #define JOINTCONTROL_H
 
 #include "func.h"
+// #include "ROS_callbacks.cpp"
 
 class JointControl : public rclcpp::Node
 {
@@ -10,6 +11,8 @@ public:
     ~JointControl();
 
 private:
+    int PbIter = 0;
+
     // Subscribers
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr UR10e_mode_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_cmd_sub_;
@@ -29,11 +32,11 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
 
     // Callbacks
-    void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
-    void cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg);
-    void jointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
+    // void cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg);
+    // void jointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
-    void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    // void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    // void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
 
     // Loop
     void CalculateAndPublishJoint();
