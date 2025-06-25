@@ -5,12 +5,6 @@
 JointControl::JointControl()
 : Node("joint_control_node")
 {
-    AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
-        shared_from_this(), "AdaptiveK_msg");
-
-    FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
-        shared_from_this(), "FAAC3step_msg");
-
     // Publishers
     YSurfN_Fext_pub_ = this->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
     UR10e_mode_pub_  = this->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
@@ -577,6 +571,17 @@ void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::Shared
     // std::lock_guard<std::mutex> lock(joint_state_mutex);
     // latest_joint_state = *msg;
 }
+
+
+void JointControl::initializeMonitoring()
+{
+    AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
+        this->shared_from_this<JointControl>(), "AdaptiveK_msg");
+
+    FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
+        this->shared_from_this<JointControl>(), "FAAC3step_msg");
+}
+
 
 void JointControl::CalculateAndPublishJoint()
 {

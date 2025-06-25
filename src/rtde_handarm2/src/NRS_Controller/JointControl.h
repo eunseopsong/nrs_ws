@@ -3,11 +3,12 @@
 
 #include "func.h"
 
-class JointControl : public rclcpp::Node
+class JointControl : public rclcpp::Node, public std::enable_shared_from_this<JointControl>
 {
 public:
     JointControl();
     ~JointControl();
+    void initializeMonitoring();
 
 private:
     //////// parameters ////////
