@@ -207,7 +207,7 @@ int main(int argc, char* argv[])
     // Hadmit_K << 0.0,0.0,0.0, 0.0,0.0,0.0;
 
     /* Middle guiding parameters */
-    // Hadmit_M << 4,4,4, 0.2,0.2,0.2;
+    // Hadmit_M << 4,4,4, 0.2,0.2,
     // Hadmit_D << 40,40,40, 2,2,2;
     // Hadmit_K << 0.0,0.0,0.0, 0.0,0.0,0.0;
 
