@@ -2,7 +2,6 @@
 #define JOINTCONTROL_H
 
 #include "func.h"
-// #include "ROS_callbacks.cpp"
 
 class JointControl : public rclcpp::Node
 {
@@ -17,7 +16,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr PB_iter_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VR_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
-    // rclcpp::Subscription<rtde_handarm::msg::FtsensorMsg>::SharedPtr ft_sub_;
+    //// rclcpp::Subscription<rtde_handarm::msg::FtsensorMsg>::SharedPtr ft_sub_;
 
     // Publishers
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr YSurfN_Fext_pub_;
@@ -30,7 +29,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
 
     // Callbacks
-    // void cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg);
+    void cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
