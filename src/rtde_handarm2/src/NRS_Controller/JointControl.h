@@ -58,6 +58,12 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_wrench_pub_;
 
+    std_msgs::msg::UInt16 UR10e_mode_msg_;
+    std_msgs::msg::Float64MultiArray UR10_Jangle_msg_;
+    std_msgs::msg::Float64MultiArray UR10_pose_msg_;
+    std_msgs::msg::Float64MultiArray UR10_wrench_msg_;
+    std_msgs::msg::Float64 YSurfN_Fext_msg_;
+
     // Timer
     rclcpp::TimerBase::SharedPtr timer_;
 
