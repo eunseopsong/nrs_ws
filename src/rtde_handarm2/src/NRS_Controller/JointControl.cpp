@@ -23,7 +23,7 @@ JointControl::JointControl()
 
     joint_cmd_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
         "/yoon_UR10e_joint_cmd", 100,
-        std::bind(&JointControl::jointCmdCallback, this, std::placeholders::_1));
+        std::bind(&JointControl::JointCmdCallback, this, std::placeholders::_1));
 
     // VR_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
     //     "/vive/pos0", 100,
@@ -47,7 +47,7 @@ void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg)
     PB_iter_cur = 1; // 1 is right
 }
 
-void JointControl::jointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr msg)
+void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
     mjoint_cmd = msg->data;
     printf("\nSelected joint: %1.0f, Target relative joint angle: %4f \n", mjoint_cmd[0],mjoint_cmd[1]);
