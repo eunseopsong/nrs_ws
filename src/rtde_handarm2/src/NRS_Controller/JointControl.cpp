@@ -576,11 +576,12 @@ void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::Shared
 void JointControl::initializeMonitoring()
 {
     AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
-        this->shared_from_this<JointControl>(), "AdaptiveK_msg");
+        std::static_pointer_cast<JointControl>(shared_from_this()), "AdaptiveK_msg");
 
     FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
-        this->shared_from_this<JointControl>(), "FAAC3step_msg");
+        std::static_pointer_cast<JointControl>(shared_from_this()), "FAAC3step_msg");
 }
+
 
 
 void JointControl::CalculateAndPublishJoint()
