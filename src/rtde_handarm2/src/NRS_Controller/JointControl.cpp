@@ -486,6 +486,8 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     VR_Q2Rot = AKin.Qua2Rot(VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6]);
     VR_PoseM.block(0,0,3,3) = VR_Q2Rot;
     VR_PoseM.block(0,3,3,1) << VR_pose[0], VR_pose[1], VR_pose[2];
+
+    /* Transfrom from rotation matrix to Euler angles */
     VR_PoseM.block(3,0,1,4) << 0.0, 0.0, 0.0, 1.0;
 
     /* VR adjustment matrix - Heuristic method */
@@ -564,17 +566,122 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     // pos_cal_stamped_RPY.yaw = VR_CalPoseRPY(5);
 }
 
-
 void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
     // std::lock_guard<std::mutex> lock(joint_state_mutex);
     // latest_joint_state = *msg;
 }
 
-
-
 void JointControl::CalculateAndPublishJoint()
 {
-    // 작업 수행에 따라 ctrl 값을 기준으로 제어 분기 가능
-    // ex) if(ctrl == 1) { ... }
+    /* Set application realtime priority */
+    int priority = 80;
+    //// if (RTDEUtility::setRealtimePriority(priority)) {
+    ////     std::cout << "Realtime priority was set to " << priority << std::endl;
+    //// } else {
+    ////     std::cerr << "실시간 우선순위 설정에 실패했습니다. 관리자 권한이 필요할 수 있습니다." << std::endl;
+    //// }
+
+    /* rtde 연결 확인 로그 */
+    //// if (!rtde_control.isProgramRunning()) {
+    ////     std::cerr << "RTDE 프로그램이 실행되지 않았습니다." << std::endl;
+    ////     return -1;
+    //// }
+    //// if (!rtde_control.isConnected() || !rtde_receive.isConnected()) {
+    //// std::cerr << "RTDE connection failed!" << std::endl;
+    //// return -1;
+    //// }
+
+    //////signal(SIGINT, raiseFlag); // Active
+	////// signal(SIGTERM, raiseFlag); // Termination (ctrl + c)
+
+    std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
+    std::chrono::duration<double>pre_now = start-start;
+
+    //joint
+	for(int i=0;i<6;i++){
+		RArm.ddqd(i) = 0;
+		RArm.dqd(i) = 0;
+		RArm.dqc(i) = 0;
+	}
+	////// getActualQ();
+
+	RArm.qd = RArm.qc;
+	RArm.qt = RArm.qc;
+    #if TCP_standard == 0
+    AKin.ForwardK_T(&RArm); // qc -> Tc, xc (current X,Y,Z)
+    #elif TCP_standard == 1
+    AKin.Ycontact_ForwardK_T(&RArm);
+    #endif
+	RArm.Td=RArm.Tc;
+    VectorXd Init_qc = RArm.qc;
+    VectorXd qd_pre(6), qc_pre(6), dqd_pre(6);
+
+    int path_exe_counter = 0;
+
+    // Hand-guding parameter setting
+    #if Adm_mode == 0 // defualt mode
+    Hadmit_M << 0.1,0.1,0.1, 0.005,0.005,0.005;
+    Hadmit_D << 0.4,0.4,0.4, 0.02,0.02,0.02;
+    Hadmit_K << 5,5,5,1,1,1;
+
+
+    #elif Adm_mode == 1 // tustin method
+
+    #if Hand_spring_mode == 0 // Hand-guding mode
+    /* Light guiding parameters */
+    // Hadmit_M << 2,2,2, 0.1,0.1,0.1;
+    // Hadmit_D << 30,30,30, 1,1,1;
+    // Hadmit_K << 0.0,0.0,0.0, 0.0,0.0,0.0;
+
+    /* Middle guiding parameters */
+    // Hadmit_M << 4,4,4, 0.2,0.2,0.2;
+    // Hadmit_D << 40,40,40, 2,2,2;
+    // Hadmit_K << 0.0,0.0,0.0, 0.0,0.0,0.0;
+
+    /* Massive guiding parameters */
+    Hadmit_M << 6,6,6, 0.4,0.4,0.4;
+    Hadmit_D << 50,50,50, 4,4,4;
+    Hadmit_K << 0.0,0.0,0.0, 0.0,0.0,0.0;
+
+    /* Very Massive guiding parameters */
+    // Hadmit_M << 10,10,10, 1,1,1;
+    // Hadmit_D << 80,80,80, 8,8,8;
+    // Hadmit_K << 0.0,0.0,0.0, 0.0,0.0,0.0;
+
+    #elif Hand_spring_mode == 1 // Spring mode
+    Hadmit_M << 1,1,1, 0.1,0.1,0.1;
+    Hadmit_D << 500,500,500, 50,50,50;
+    Hadmit_K << 0,0,0, 0,0,0;
+    #endif
+
+
+    for(int i=0;i<6;i++) // MDK update
+    {
+        Hadmit_force[i].adm_1D_MDK((double)Hadmit_M(i),(double)Hadmit_D(i),(double)Hadmit_K(i));
+    }
+
+    #endif
+    // spring mode control parameter
+    VectorXd Hspring_mode_init_pos(6);
+
+    printf("While loop start\n");
+
+    printf("MODE SELECT: Select Your Task\n");
+    printf("1 : For Servoj,  q : Quit    \n");
+
+    key_MODE=getchar();
+
+    /* Recording file open */
+    auto test_path_joint_path = NRS_recording["test_path_joint"].as<std::string>();
+    path_recording_joint = fopen(test_path_joint_path.c_str(),"wt");
+
+    auto EXPdata1_path = NRS_recording["EXPdata1_path"].as<std::string>();
+    EXPdata1 = fopen(EXPdata1_path.c_str(),"wt");
+
+
+
+
+
+
 }

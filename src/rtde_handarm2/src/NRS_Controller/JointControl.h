@@ -10,8 +10,39 @@ public:
     ~JointControl();
 
 private:
+    //////// parameters ////////
     bool running = true;
 
+    // 실시간 우선순위 설정 관련
+    int priority;
+
+    // 시간 측정용
+    std::chrono::system_clock::time_point start;
+    std::chrono::duration<double> pre_now;
+
+    // 로봇 팔 상태
+    VectorXd Init_qc;
+    VectorXd qd_pre;
+    VectorXd qc_pre;
+    VectorXd dqd_pre;
+
+    int path_exe_counter = 0;
+
+    // admittance 제어 관련
+    Eigen::Matrix<double, 6, 1> Hadmit_M;
+    Eigen::Matrix<double, 6, 1> Hadmit_D;
+    Eigen::Matrix<double, 6, 1> Hadmit_K;
+
+    VectorXd Hspring_mode_init_pos;
+
+    // key 입력 (MODE 선택)
+    int key_MODE;
+
+    // 데이터 저장용
+    FILE* path_recording_joint;
+    FILE* EXPdata1;
+
+    //////// Node Declaration ////////
     // Subscribers
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_cmd_sub_;
