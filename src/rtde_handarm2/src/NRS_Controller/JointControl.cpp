@@ -33,10 +33,10 @@ JointControl::JointControl()
         "/isaac_joint_states", rclcpp::SensorDataQoS(),
         std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
 
-    // // Timer
-    // timer_ = this->create_wall_timer(
-    //     std::chrono::milliseconds(2),
-    //     std::bind(&JointControl::CalculateAndPublishJoint, this));
+    // Timer
+    timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(2),
+        std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
 
