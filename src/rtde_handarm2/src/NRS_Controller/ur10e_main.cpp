@@ -1,17 +1,18 @@
 #include "JointControl.h"
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
     rclcpp::init(argc, argv);
 
-    auto joint_control_node = std::make_shared<JointControl>();
-    joint_control_node->initializeMonitoring();  // 이제 OK
+    auto node = std::make_shared<JointControl>();
+    rclcpp::executors::SingleThreadedExecutor exec;
+    exec.add_node(node);
 
-    rclcpp::spin(joint_control_node);
+    node->initializeMonitoring();  // 꼭 make_shared 이후에
+
+    exec.spin();
     rclcpp::shutdown();
-
-    return 0;
 }
+
 
 
 
