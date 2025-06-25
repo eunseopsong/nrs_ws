@@ -78,7 +78,7 @@ ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 
 install(TARGETS nrs_ctrl DESTINATION lib/${PROJECT_NAME})
 
-install(DIRECTORY include/ DESTINATION include/)
-install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
+# install(DIRECTORY include/ DESTINATION include/)
+# install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
