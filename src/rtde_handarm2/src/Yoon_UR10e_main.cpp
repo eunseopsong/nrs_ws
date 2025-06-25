@@ -75,12 +75,12 @@ int main(int argc, char* argv[])
     auto node = std::make_shared<rclcpp::Node>("Yoon_UR10e_main");
 
     /* Adaptive K publishing & recording */
-    std::string AdaptiveK_msgName = "AdaptiveK_msg";        //// std::string AdaptiveK_msgName = "AdaptiveK_msg";
-    MsgMonitoring AdaptiveK_msg(node, AdaptiveK_msgName);   //// MsgMonitoring AdaptiveK_msg(nh_, AdaptiveK_msgName);
+    std::string AdaptiveK_msgName = "AdaptiveK_msg";
+    MsgMonitoring AdaptiveK_msg(node, AdaptiveK_msgName);
 
     /* 3step FAAC publishing & recording */
-    std::string FAAC3step_msgName = "FAAC3step_msg";        //// std::string FAAC3step_msgName = "FAAC3step_msg";
-    MsgMonitoring FAAC3step_msg(node, FAAC3step_msgName);   //// MsgMonitoring FAAC3step_msg(nh_, FAAC3step_msgName);
+    std::string FAAC3step_msgName = "FAAC3step_msg";
+    MsgMonitoring FAAC3step_msg(node, FAAC3step_msgName);
 
     /* Publisher instance generation */
     //// ros::Publisher YSurfN_Fext_pub = nh_.advertise<std_msgs::Float64>("YSurfN_Fext",20);
