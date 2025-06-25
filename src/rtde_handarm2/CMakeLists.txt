@@ -134,6 +134,12 @@ set(COMMON_DEPENDENCIES
 ######################################
 #### Yoon_UR10e_main Dependencies ####
 ######################################
+# add_executable(nrs_ctrl src/ur10e_main.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
+# target_include_directories(nrs_ctrl $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>) # — 헤더 검색 경로 추가
+# target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen) ## target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
+
+
 add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
 target_include_directories(Yoon_UR10e_main PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>) # — 헤더 검색 경로 추가
 target_link_libraries(Yoon_UR10e_main yaml-cpp Eigen3::Eigen) ## target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
@@ -195,4 +201,9 @@ install(DIRECTORY launch/
 # Interface and package setup
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 # target_link_libraries(rtde_test ${cpp_typesupport_target})
+
+
+# include the sub directory
+add_subdirectory(src)
+
 ament_package()
