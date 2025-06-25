@@ -14,6 +14,8 @@ private:
     //////// parameters ////////
     bool running = true;
 
+    using std::enable_shared_from_this<JointControl>::shared_from_this;
+
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> AdaptiveK_msg_;
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> FAAC3step_msg_;
 
