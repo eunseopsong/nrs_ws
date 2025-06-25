@@ -13,6 +13,9 @@ private:
     //////// parameters ////////
     bool running = true;
 
+    std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> AdaptiveK_msg_;
+    std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> FAAC3step_msg_;
+
     // 실시간 우선순위 설정 관련
     int priority;
 

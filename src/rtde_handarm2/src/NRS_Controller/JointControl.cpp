@@ -5,6 +5,12 @@
 JointControl::JointControl()
 : Node("joint_control_node")
 {
+    AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
+        shared_from_this(), "AdaptiveK_msg");
+
+    FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(
+        shared_from_this(), "FAAC3step_msg");
+
     // Publishers
     YSurfN_Fext_pub_ = this->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
     UR10e_mode_pub_  = this->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
@@ -1481,8 +1487,8 @@ void JointControl::CalculateAndPublishJoint()
                                 std::string Mon1_description = "Mass, Damping, Stiffness";
                                 std::string Mon2_description = "Contact force, Surface normal force";
 
-                                AdaptiveK_msg_.Mon1_publish(Mon1_input_data,Mon1_description,true);
-                                AdaptiveK_msg_.Mon2_publish(Mon2_input_data,Mon2_description,true);
+                                AdaptiveK_msg_->Mon1_publish(Mon1_input_data,Mon1_description,true);
+                                AdaptiveK_msg_->Mon2_publish(Mon2_input_data,Mon2_description,true);
 
                             }
                             /* The case of force control mode 3 - Fuzzy variable stiffness */
@@ -1577,9 +1583,9 @@ void JointControl::CalculateAndPublishJoint()
                                 std::string Mon2_description = "Force error, Force error dot, Epsilon, XeSTD";
                                 std::string Mon3_description = "Contact force, Surface normal force";
 
-                                FAAC3step_msg_.Mon1_publish(Mon1_input_data,Mon1_description,true);
-                                FAAC3step_msg_.Mon2_publish(Mon2_input_data,Mon2_description,true);
-                                FAAC3step_msg_.Mon3_publish(Mon3_input_data,Mon3_description,true);
+                                FAAC3step_msg_->Mon1_publish(Mon1_input_data,Mon1_description,true);
+                                FAAC3step_msg_->Mon2_publish(Mon2_input_data,Mon2_description,true);
+                                FAAC3step_msg_->Mon3_publish(Mon3_input_data,Mon3_description,true);
                             }
                             else
                             {
