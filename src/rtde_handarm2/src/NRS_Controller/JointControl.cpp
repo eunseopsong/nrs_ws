@@ -1,7 +1,6 @@
 #include "JointControl.h"
 // #include "Controllers/convexMPC/RobotState.h"
 
-
 JointControl::JointControl()
     : Node("nrs_control_node") // , _count(0), previous_command{0, 0, 0}
 {
@@ -59,7 +58,7 @@ JointControl::JointControl()
     // timer_ = this->create_wall_timer(1ms, std::bind(&JointControl::CalculateAndPublishTorque, this));
 }
 
-void JointControl::CalculateAndPublishTorque()
+void JointControl::CalculateAndPublishJoint()
 {
     // // Check if the command array contains valid values
     // if (std::any_of(command.begin(), command.end(), [](double c) { return c != 0; })) {
