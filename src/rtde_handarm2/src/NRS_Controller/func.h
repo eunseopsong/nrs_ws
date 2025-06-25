@@ -17,7 +17,7 @@
 // #include <vector>
 // #include <eigen3/Eigen/Dense>
 
-// #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/rclcpp.hpp"
 // #include "std_msgs/msg/string.hpp"
 
 // #include "std_msgs/msg/float64.hpp"

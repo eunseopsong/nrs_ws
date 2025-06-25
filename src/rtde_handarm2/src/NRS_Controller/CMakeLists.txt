@@ -22,7 +22,7 @@ find_package(geometry_msgs    REQUIRED)
 find_package(sensor_msgs      REQUIRED)
 find_package(tf2              REQUIRED)
 find_package(tf2_ros          REQUIRED)
-find_package(yaml-cpp         REQUIRED)      # yaml-cpp (non-namespaced)
+find_package(yaml-cpp         REQUIRED)
 find_package(Eigen3           REQUIRED)
 find_package(nrs_forcecon2    REQUIRED)
 find_package(nrs_msgmonitoring2 REQUIRED)
@@ -48,7 +48,6 @@ set(COMMON_DEPENDENCIES
   nrs_forcecon2
   nrs_msgmonitoring2
 )
-
 
 add_executable(nrs_ctrl ${sources} ur10e_main.cpp)
 target_include_directories(nrs_ctrl PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>) # — 헤더 검색 경로 추가
