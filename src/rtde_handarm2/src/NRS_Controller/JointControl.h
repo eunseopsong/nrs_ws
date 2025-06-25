@@ -10,17 +10,19 @@ public:
     ~JointControl();
 
 private:
+    bool running = true;
+
     // Subscribers
-    rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr UR10e_mode_sub_;
+    rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_cmd_sub_;
-    rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr PB_iter_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VR_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+    rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr  VR_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_state_sub_;
     //// rclcpp::Subscription<rtde_handarm::msg::FtsensorMsg>::SharedPtr ft_sub_;
 
     // Publishers
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr YSurfN_Fext_pub_;
-    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr UR10e_mode_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           YSurfN_Fext_pub_;
+    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_Jangle_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_wrench_pub_;
