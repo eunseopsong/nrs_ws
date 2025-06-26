@@ -15,8 +15,9 @@ public:
 private:
     //////// ROS2 Node 및 동기화 자료 ////////
     rclcpp::Node::SharedPtr node_;
-    sensor_msgs::msg::JointState latest_joint_state_;
-    std::mutex joint_state_mutex_;
+
+    std::array<double, 6> joint_pos;
+
 
     //////// Subscribers ////////
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_sub_;
@@ -24,7 +25,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr  VR_sub_;
 
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_state_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_state_sub_; // rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_state_sub_;
     //// rclcpp::Subscription<rtde_handarm::msg::FtsensorMsg>::SharedPtr ft_sub_;
 
     //////// Publishers ////////
@@ -48,7 +49,7 @@ private:
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-    void JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);  // <-- Isaac Sim에서 /isaac_joint_states
+    // void JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);  // <-- Isaac Sim에서 /isaac_joint_states
 
     //////// 상태 변수 및 제어 파라미터 ////////
     bool running = true;

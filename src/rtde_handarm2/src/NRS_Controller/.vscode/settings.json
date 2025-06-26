@@ -79,7 +79,9 @@
         "queue": "cpp",
         "stack": "cpp",
         "__node_handle": "cpp",
-        "__mutex_base": "cpp"
+        "__mutex_base": "cpp",
+        "__bit_reference": "cpp",
+        "filesystem": "cpp"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

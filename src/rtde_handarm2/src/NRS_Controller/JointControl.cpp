@@ -33,9 +33,19 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         "/vive/pos0", 100,
         std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
 
-    joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-        "/isaac_joint_states", 10,
-        std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
+    // joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+    //     "/isaac_joint_states", 10,
+    //     std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
+
+    joint_state_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
+    "/isaac_joint_states", rclcpp::QoS(10),
+    [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+        if (msg->data.size() < 6) {
+            RCLCPP_WARN(node_->get_logger(), "Received joint state array is too short!");
+            return;
+        }
+        std::copy(msg->data.begin(), msg->data.begin() + 6, joint_pos.begin());
+    });
 
 
     // Timer
@@ -571,25 +581,23 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     // pos_cal_stamped_RPY.yaw = VR_CalPoseRPY(5);
 }
 
-void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
-{
-    std::lock_guard<std::mutex> lock(joint_state_mutex_);
-    latest_joint_state_ = *msg;
-}
+
+// void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+// {
+//     std::lock_guard<std::mutex> lock(joint_state_mutex_);
+//     latest_joint_state_ = *msg;
+// }
 
 
 
 void JointControl::getActualQ()
 {
-    std::lock_guard<std::mutex> lock(joint_state_mutex_);
-    if (latest_joint_state_.position.size() >= 6)
-    {
-        for (int i = 0; i < 6; i++)
-        {
-            RArm.qc(i) = latest_joint_state_.position[i];
-        }
+    for (int i = 0; i < 6; ++i) {
+        RArm.qc(i) = joint_pos[i];
     }
 }
+
+
 
 
 void JointControl::CalculateAndPublishJoint()
