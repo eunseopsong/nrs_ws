@@ -18,7 +18,6 @@ private:
 
     std::array<double, 6> joint_pos;
 
-
     //////// Subscribers ////////
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_cmd_sub_;

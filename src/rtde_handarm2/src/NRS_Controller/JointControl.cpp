@@ -33,21 +33,16 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         "/vive/pos0", 100,
         std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
 
-    // joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-    //     "/isaac_joint_states", 10,
-    //     std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
-
     joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
     "/isaac_joint_states", rclcpp::QoS(10),
     [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
         if (msg->position.size() < 6) {
-            RCLCPP_WARN(node_->get_logger(), "Received joint state message has too few positions!");
+            RCLCPP_WARN(node_->get_logger(), "Received joint state has less than 6 elements.");
             return;
         }
         std::copy(msg->position.begin(), msg->position.begin() + 6, joint_pos.begin());
+        // RCLCPP_INFO(node_->get_logger(), "JointState received. joint_pos[0]=%.3f", joint_pos[0]);
     });
-
-
 
     // Timer
     timer_ = node_->create_wall_timer(
@@ -582,24 +577,13 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     // pos_cal_stamped_RPY.yaw = VR_CalPoseRPY(5);
 }
 
-
-// void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
-// {
-//     std::lock_guard<std::mutex> lock(joint_state_mutex_);
-//     latest_joint_state_ = *msg;
-// }
-
-
-
 void JointControl::getActualQ()
 {
     for (int i = 0; i < 6; ++i) {
         RArm.qc(i) = joint_pos[i];
+        // RCLCPP_INFO(node_->get_logger(), "RArm.qc(%d) = %.3f", i, RArm.qc(i));
     }
 }
-
-
-
 
 void JointControl::CalculateAndPublishJoint()
 {
@@ -691,6 +675,18 @@ void JointControl::CalculateAndPublishJoint()
     }
 
     #endif
+
+    /////
+    // joint_pos 디버깅 출력
+    printf("Current joint_pos values: ");
+    for (int i = 0; i < 6; ++i) {
+        printf("%.4f ", joint_pos[i]);
+    }
+    printf("\n");
+    /////
+
+
+
     // spring mode control parameter
     VectorXd Hspring_mode_init_pos(6);
 
