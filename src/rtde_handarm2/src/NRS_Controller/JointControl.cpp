@@ -38,7 +38,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     //     std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
 
     joint_state_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
-    "/isaac_joint_states", rclcpp::QoS(10),
+    "/isaac_joint_sub", rclcpp::QoS(10),
     [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
         if (msg->data.size() < 6) {
             RCLCPP_WARN(node_->get_logger(), "Received joint state array is too short!");
