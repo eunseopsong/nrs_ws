@@ -78,7 +78,8 @@
         "__tree": "cpp",
         "queue": "cpp",
         "stack": "cpp",
-        "__node_handle": "cpp"
+        "__node_handle": "cpp",
+        "__mutex_base": "cpp"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
