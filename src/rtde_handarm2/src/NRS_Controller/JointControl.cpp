@@ -676,16 +676,14 @@ void JointControl::CalculateAndPublishJoint()
 
     #endif
 
-    /////
+    ///// Add on 2025.06.26 /////
     // joint_pos 디버깅 출력
     printf("Current joint_pos values: ");
     for (int i = 0; i < 6; ++i) {
         printf("%.4f ", joint_pos[i]);
     }
     printf("\n");
-    /////
-
-
+    /////////////////////////////
 
     // spring mode control parameter
     VectorXd Hspring_mode_init_pos(6);
