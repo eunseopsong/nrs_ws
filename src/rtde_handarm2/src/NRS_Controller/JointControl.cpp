@@ -37,15 +37,16 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     //     "/isaac_joint_states", 10,
     //     std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
 
-    joint_state_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
-    "/isaac_joint_sub", rclcpp::QoS(10),
-    [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
-        if (msg->data.size() < 6) {
-            RCLCPP_WARN(node_->get_logger(), "Received joint state array is too short!");
+    joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+    "/isaac_joint_states", rclcpp::QoS(10),
+    [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
+        if (msg->position.size() < 6) {
+            RCLCPP_WARN(node_->get_logger(), "Received joint state message has too few positions!");
             return;
         }
-        std::copy(msg->data.begin(), msg->data.begin() + 6, joint_pos.begin());
+        std::copy(msg->position.begin(), msg->position.begin() + 6, joint_pos.begin());
     });
+
 
 
     // Timer
