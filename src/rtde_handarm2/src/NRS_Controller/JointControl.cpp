@@ -34,8 +34,9 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
 
     joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-        "/isaac_joint_sub", rclcpp::SensorDataQoS(),
+        "/isaac_joint_states", 10,
         std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
+
 
     // Timer
     timer_ = node_->create_wall_timer(
@@ -577,20 +578,19 @@ void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::Shared
 }
 
 
+
 void JointControl::getActualQ()
 {
     std::lock_guard<std::mutex> lock(joint_state_mutex_);
-    if (latest_joint_state_.position.size() >= 6) {
-        for (int i = 0; i < 6; ++i) {
+    if (latest_joint_state_.position.size() >= 6)
+    {
+        for (int i = 0; i < 6; i++)
+        {
             RArm.qc(i) = latest_joint_state_.position[i];
         }
-
-        std::cout << "[getActualQ] updated qc: ";
-        for (int i = 0; i < 6; ++i)
-            std::cout << RArm.qc(i) << " ";
-        std::cout << std::endl;
     }
 }
+
 
 void JointControl::CalculateAndPublishJoint()
 {
