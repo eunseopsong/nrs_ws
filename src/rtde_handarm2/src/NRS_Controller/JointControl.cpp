@@ -576,6 +576,20 @@ void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::Shared
     // latest_joint_state = *msg;
 }
 
+void JointControl::getActualQ()
+{
+    std::lock_guard<std::mutex> lock(joint_state_mutex_);
+    if (latest_joint_state_.position.size() >= 6) {
+        for (int i = 0; i < 6; i++) {
+            RArm.qc(i) = latest_joint_state_.position[i];
+        }
+        std::cout << "[getActualQ] updated qc: ";
+        for (int i = 0; i < 6; ++i)
+            std::cout << RArm.qc(i) << " ";
+        std::cout << std::endl;
+    }
+}
+
 void JointControl::CalculateAndPublishJoint()
 {
     /* Set application realtime priority */

@@ -10,8 +10,12 @@ public:
     ~JointControl();
 
     void CalculateAndPublishJoint();
+    void getActualQ(); // Get the joint data of UR10e
 
 private:
+    sensor_msgs::msg::JointState latest_joint_state_;
+    std::mutex joint_state_mutex_;
+
     //////// parameters ////////
     bool running = true;
 
