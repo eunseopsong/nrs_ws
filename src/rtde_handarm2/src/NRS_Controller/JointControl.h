@@ -3,7 +3,6 @@
 
 #include "func.h"
 
-// class JointControl : public rclcpp::Node, public std::enable_shared_from_this<JointControl>
 class JointControl : public std::enable_shared_from_this<JointControl>
 {
 public:

@@ -19,28 +19,28 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     // Subscribers
     UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
         "/Yoon_UR10e_mode", 20,
-        std::bind(&JointControl::cmdModeCallback, node_, std::placeholders::_1));
+        std::bind(&JointControl::cmdModeCallback, this, std::placeholders::_1));
 
-    PB_iter_sub_ = this->create_subscription<std_msgs::msg::UInt16>(
+    PB_iter_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
         "/Yoon_PbNum_cmd", 100,
-        std::bind(&JointControl::PbIterCallback, node_, std::placeholders::_1));
+        std::bind(&JointControl::PbIterCallback, this, std::placeholders::_1));
 
     joint_cmd_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
         "/yoon_UR10e_joint_cmd", 100,
-        std::bind(&JointControl::JointCmdCallback, node_, std::placeholders::_1));
+        std::bind(&JointControl::JointCmdCallback, this, std::placeholders::_1));
 
     VR_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
         "/vive/pos0", 100,
-        std::bind(&JointControl::VRdataCallback, node_, std::placeholders::_1));
+        std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
 
     joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
         "/isaac_joint_states", rclcpp::SensorDataQoS(),
-        std::bind(&JointControl::JointStateCallback, node_, std::placeholders::_1));
+        std::bind(&JointControl::JointStateCallback, this, std::placeholders::_1));
 
     // Timer
     timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(2),
-        std::bind(&JointControl::CalculateAndPublishJoint, node_));
+        std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
 
@@ -575,17 +575,6 @@ void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::Shared
     // std::lock_guard<std::mutex> lock(joint_state_mutex);
     // latest_joint_state = *msg;
 }
-
-
-// void JointControl::initializeMonitoring()
-// {
-//     auto self = shared_from_this();  // 👈 여기 OK
-//     AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(self, "AdaptiveK_msg");
-//     FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(self, "FAAC3step_msg");
-// }
-
-
-
 
 void JointControl::CalculateAndPublishJoint()
 {
