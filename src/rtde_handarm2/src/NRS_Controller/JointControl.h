@@ -6,15 +6,16 @@
 class JointControl : public rclcpp::Node, public std::enable_shared_from_this<JointControl>
 {
 public:
-    JointControl();
+    JointControl(const rclcpp::Node::SharedPtr& node);  // 생성자 인자로 node 받기
     ~JointControl();
-    void initializeMonitoring();
+
+    void CalculateAndPublishJoint();
 
 private:
     //////// parameters ////////
     bool running = true;
 
-    using std::enable_shared_from_this<JointControl>::shared_from_this;
+    rclcpp::Node::SharedPtr node_;  // 노드를 멤버로 보관
 
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> AdaptiveK_msg_;
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> FAAC3step_msg_;
@@ -81,7 +82,7 @@ private:
     void JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
 
     // Loop
-    void CalculateAndPublishJoint();
+    // void CalculateAndPublishJoint();
 };
 
 #endif // JOINTCONTROL_H

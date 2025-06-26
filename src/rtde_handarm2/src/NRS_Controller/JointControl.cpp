@@ -2,9 +2,13 @@
 #include <iostream>
 #include <memory>
 
-JointControl::JointControl()
-: Node("joint_control_node")
+JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
+: rclcpp::Node("JointControlNode"),  // 부모 생성자 호출 필요
+  node_(node)
 {
+    AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "AdaptiveK_msg");
+    FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "FAAC3step_msg");
+
     // Publishers
     YSurfN_Fext_pub_ = this->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
     UR10e_mode_pub_  = this->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
@@ -573,12 +577,12 @@ void JointControl::JointStateCallback(const sensor_msgs::msg::JointState::Shared
 }
 
 
-void JointControl::initializeMonitoring()
-{
-    auto self = shared_from_this();  // 👈 여기 OK
-    AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(self, "AdaptiveK_msg");
-    FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(self, "FAAC3step_msg");
-}
+// void JointControl::initializeMonitoring()
+// {
+//     auto self = shared_from_this();  // 👈 여기 OK
+//     AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(self, "AdaptiveK_msg");
+//     FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(self, "FAAC3step_msg");
+// }
 
 
 
