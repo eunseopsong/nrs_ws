@@ -3,7 +3,8 @@
 
 #include "func.h"
 
-class JointControl : public rclcpp::Node, public std::enable_shared_from_this<JointControl>
+// class JointControl : public rclcpp::Node, public std::enable_shared_from_this<JointControl>
+class JointControl : public std::enable_shared_from_this<JointControl>
 {
 public:
     JointControl(const rclcpp::Node::SharedPtr& node);  // 생성자 인자로 node 받기
