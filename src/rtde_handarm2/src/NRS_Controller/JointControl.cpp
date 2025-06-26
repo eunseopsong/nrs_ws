@@ -3,7 +3,7 @@
 #include <memory>
 
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
-: rclcpp::Node("JointControlNode"),  // 부모 생성자 호출 필요
+: rclcpp::Node("nrs_control_node"),  // 부모 생성자 호출 필요
   node_(node)
 {
     AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "AdaptiveK_msg");
