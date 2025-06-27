@@ -86,6 +86,7 @@ HbuttonCmd::~HbuttonCmd()
 #endif
 }
 
+
 void HbuttonCmd::catch_signal(int sig)
 {
     if (sig == 0) {
@@ -103,33 +104,53 @@ void HbuttonCmd::catch_signal(int sig)
     exit(1);
 }
 
-
-
+/* ROS_MSG functions */
 void HbuttonCmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
-    // 아직 미구현
+    VRPose_point.x = msg->pose.position.x;
+    VRPose_point.y = msg->pose.position.y;
+    VRPose_point.z = msg->pose.position.z;
+
+    // RCLCPP_INFO(this->get_logger(), "Received VR Pose: (%.3f, %.3f, %.3f)", VRPose_point.x, VRPose_point.y, VRPose_point.z);
 }
 
-void HbuttonCmd::SRV1_Handle(
-    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+/* Service functions */
+void HbuttonCmd::SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                             std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    // 아직 미구현
+    (void)req; (void)res;  // 사용하지 않음
+
+    #if(TEACHING_MODE == 0)
+        Mode_chage();
+    #elif(TEACHING_MODE == 1)
+        VR_mode_change();
+    #endif
 }
 
-void HbuttonCmd::SRV3_Handle(
-    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+void HbuttonCmd::SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                             std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    // 아직 미구현
+    // (void)req; (void)res;
+
+    // #if(TEACHING_MODE == 0)
+    //     Way_point_save();
+    // #elif(TEACHING_MODE == 1)
+    //     VR_point_save();
+    // #endif
 }
 
-void HbuttonCmd::SRV4_Handle(
-    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+void HbuttonCmd::SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                             std::shared_ptr<std_srvs::srv::Empty::Response> res)
 {
-    // 아직 미구현
+    // (void)req; (void)res;
+
+    // #if(TEACHING_MODE == 0)
+    //     Trajectory_gen();
+    // #endif
 }
+
+
+
 
 void HbuttonCmd::SRV11_Handle(
     const std::shared_ptr<std_srvs::srv::Empty::Request> req,
@@ -144,4 +165,63 @@ void HbuttonCmd::SRV12_Handle(
 {
     // 아직 미구현
 }
+
+
+
+
+
+void HbuttonCmd::Mode_chage()
+{
+    if (!guiding_mode) // change to guiding mode
+    {
+        guiding_mode = true;
+        current_status = mode1;
+
+        #if(Handle_OnOff == 1)
+        yoon_mode_msg.data = Hand_guiding_mode_cmd;
+        yoon_mode_pub->publish(yoon_mode_msg);
+        rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
+        #endif
+    }
+    else // change to standby mode
+    {
+        guiding_mode = false;
+        current_status = mode0;
+
+        #if(Handle_OnOff == 1)
+        yoon_mode_msg.data = Motion_stop_cmd;
+        yoon_mode_pub->publish(yoon_mode_msg);
+        rclcpp::spin_some(this->get_node_base_interface());
+        #endif
+
+        if (point_counter != 0)
+        {
+            yoon_mode_msg.data = Descrete_recording_save;
+            yoon_mode_pub->publish(yoon_mode_msg);
+            rclcpp::spin_some(this->get_node_base_interface());
+        }
+    }
+}
+void HbuttonCmd::VR_mode_change()  // to solve error: there is no definition of guide_mode (2025.06.27 23:32)
+{
+    // if (guide_mode == 1)
+    // {
+    //     guide_mode = 0;
+    //     RCLCPP_INFO(this->get_logger(), "VR mode OFF");
+    // }
+    // else
+    // {
+    //     guide_mode = 1;
+    //     RCLCPP_INFO(this->get_logger(), "VR mode ON");
+    // }
+}
+
+
+
+
+
+
+
+
+
 
