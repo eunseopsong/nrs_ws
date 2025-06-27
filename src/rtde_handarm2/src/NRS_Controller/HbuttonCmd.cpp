@@ -86,6 +86,24 @@ HbuttonCmd::~HbuttonCmd()
 #endif
 }
 
+void HbuttonCmd::catch_signal(int sig)
+{
+    if (sig == 0) {
+        RCLCPP_WARN(this->get_logger(), "Desired posture is under 4");
+    }
+
+    #if (Handle_OnOff == 1)
+    if (Yuart) {
+        Yuart->YUART_terminate();
+    }
+    #endif
+
+    RCLCPP_INFO(this->get_logger(), "Program was terminated!!");
+    rclcpp::shutdown();  // ROS2 종료
+    exit(1);
+}
+
+
 
 void HbuttonCmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
