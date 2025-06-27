@@ -1,5 +1,5 @@
-#ifndef FUNC_H
-#define FUNC_H
+#ifndef MAIN_VARIABLE_H
+#define MAIN_VARIABLE_H
 
 /*---------------------------- Header files ---------------------------------*/
 #include <stdio.h>
@@ -345,4 +345,4 @@ extern Eigen::MatrixXd VR_Cali_TCE;
 extern Eigen::MatrixXd VR_Cali_RAdj;
 extern Eigen::MatrixXd VR_Cali_TAdj;
 
-#endif // FUNC_H
+#endif // MAIN_VARIABLE_H

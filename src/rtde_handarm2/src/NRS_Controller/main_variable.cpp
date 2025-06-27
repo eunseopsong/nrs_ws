@@ -1,4 +1,4 @@
-#include "func.h"  // extern 선언만 남긴 헤더
+#include "main_variable.h"  // extern 선언만 남긴 헤더
 
 /* ---------------------------- Macro setting ---------------------------------*/
 #ifndef M_PI
