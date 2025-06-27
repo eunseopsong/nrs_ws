@@ -1,7 +1,7 @@
 #ifndef JOINTCONTROL_H
 #define JOINTCONTROL_H
 
-#include "func.h"
+#include "main_variable.h"
 
 class JointControl : public std::enable_shared_from_this<JointControl>
 {
