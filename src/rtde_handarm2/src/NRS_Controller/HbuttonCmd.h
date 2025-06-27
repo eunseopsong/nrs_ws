@@ -39,31 +39,99 @@
 #define DOF 6
 #define PI 3.141592
 #define TEACHING_MODE 0 // Direct Teaching: 0, VR-Vision Teaching: 1 (Danang Demo)
-#define Handle_OnOff 1 // Handle on : 1, Handle off : 0
+#define Handle_OnOff 1  // Handle on : 1, Handle off : 0
 
+////class NRS_Hbutton_cmd : public std::enable_shared_from_this<NRS_Hbutton_cmd>
 class HbuttonCmd : public rclcpp::Node
 {
 public:
-    HbuttonCmd();
+    HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate_);
+    ~HbuttonCmd();
+
+    /*** Functions definition ***/
+
+    /* ROS_MSG Callback functions */
+    // void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+
+    // /* Service handles */
+    // void SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    //                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    // void SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    //                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    // void SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    //                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    // void SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    //                   std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    // void SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    //                   std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
+    // /* Main function */
+    // void HButton_main();
+
+    // /* Mode functions */
+    // void Mode_chage();
+    // void VR_mode_change();
+    // void Way_point_save();
+    // void VR_point_save();
+    // void Trajectory_gen();
+    // void Iter_num_set();
+    // void Playback_exe();
+    // void catch_signal(int sig);
 
 private:
-    //////// ROS2 Node 및 동기화 자료 ////////
+    //////// ROS2 Node ////////
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Clock::SharedPtr clock_;
+    rclcpp::Rate loop_rate;
 
+    /*** Parameters setting ***/
+    /* UART instance */
+    Yoon_UART* Yuart;
 
-    //////// Subscribers ////////
+    /* Yaml-file instance */
+    std::ifstream fin1;
+    std::ifstream fin2;
 
+    YAML::Node NRS_recording;
+    YAML::Node NRS_Fcon_desired;
 
-    //////// Publishers ////////
+    /* ROS Message instance */
+    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr              yoon_mode_pub;
+    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr              PbNum_command_pub;
+    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr   Clicked_pub;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub;
 
+    geometry_msgs::msg::PointStamped Clicked_msg;
+    std_msgs::msg::UInt16            yoon_mode_msg;
+    std_msgs::msg::UInt32            PbNum_command_msg;
 
-    //////// Timer ////////
-    // rclcpp::TimerBase::SharedPtr timer_;
+    /* ROS Service instance */
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv3;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv4;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv11;
+    rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv12;
 
-    //////// 콜백 함수 ////////
+    /* Normal parameters */
+    geometry_msgs::msg::Point VRPose_point;
+    char buffer[1024] = {0};
+    bool pre_button_val = false;
+    bool button_val = false;
 
+    int Mode_val = 0;
+    int Pre_Mode_val = 0;
 
-    //////// 상태 변수 및 제어 파라미터 ////////
+    bool guiding_mode = false; // false: standby mode, true: guiding mode
+    int point_counter = 0;     // Saved way points
+    int iter_num = 0;          // Iteration number
+    int PB_exe_counter = 0;    // 1: ready status, 2: execution
 
+    /* State & mode */
+    std::string current_status;
+    std::string mode0, mode1, mode2, mode3, mode4;
+    std::string modeErr1;
+
+    std::string Hmode0, Hmode1, Hmode2, Hmode3, Hmode4, Hmode5;
 };
 
 #endif // HBUTTONCMD_H
