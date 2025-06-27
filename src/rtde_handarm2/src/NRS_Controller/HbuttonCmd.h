@@ -45,38 +45,39 @@
 class HbuttonCmd : public rclcpp::Node
 {
 public:
-    HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate_);
-    ~HbuttonCmd();
+    HbuttonCmd();
+    //// HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate_);
+    //// ~HbuttonCmd();
 
     /*** Functions definition ***/
 
     /* ROS_MSG Callback functions */
-    // void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 
-    // /* Service handles */
-    // void SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    //                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    // void SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    //                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    // void SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    //                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    // void SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    //                   std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    // void SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    //                   std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    /* Service handles */
+    void SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                     std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    void SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                     std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    void SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                     std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    void SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                      std::shared_ptr<std_srvs::srv::Empty::Response> res);
+    void SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                      std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
-    // /* Main function */
-    // void HButton_main();
+    /* Main function */
+    void HButton_main();
 
-    // /* Mode functions */
-    // void Mode_chage();
-    // void VR_mode_change();
-    // void Way_point_save();
-    // void VR_point_save();
-    // void Trajectory_gen();
-    // void Iter_num_set();
-    // void Playback_exe();
-    // void catch_signal(int sig);
+    /* Mode functions */
+    void Mode_chage();
+    void VR_mode_change();
+    void Way_point_save();
+    void VR_point_save();
+    void Trajectory_gen();
+    void Iter_num_set();
+    void Playback_exe();
+    void catch_signal(int sig);
 
 private:
     //////// ROS2 Node ////////

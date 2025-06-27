@@ -1,7 +1,9 @@
 #include "HbuttonCmd.h"
 
+//// HbuttonCmd::HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate)
+//// : Node("hbutton_node"), node_(node), loop_rate(loop_rate)
 HbuttonCmd::HbuttonCmd()
-: Node("hbutton_node"), loop_rate_(100.0)  // 기본 루프 주기 설정 (예: 100Hz)
+: Node("hbutton_node"), loop_rate(100.0), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
 {
     ///////////////// 1. ROS Publisher 초기화 //////////////////
     yoon_mode_pub = this->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 10);
@@ -34,3 +36,45 @@ HbuttonCmd::HbuttonCmd()
         "Aidin_gui_srv12",
         std::bind(&HbuttonCmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2));
 }
+
+
+void HbuttonCmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+{
+    // 아직 미구현
+}
+
+void HbuttonCmd::SRV1_Handle(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+{
+    // 아직 미구현
+}
+
+void HbuttonCmd::SRV3_Handle(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+{
+    // 아직 미구현
+}
+
+void HbuttonCmd::SRV4_Handle(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+{
+    // 아직 미구현
+}
+
+void HbuttonCmd::SRV11_Handle(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+{
+    // 아직 미구현
+}
+
+void HbuttonCmd::SRV12_Handle(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res)
+{
+    // 아직 미구현
+}
+
