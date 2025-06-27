@@ -41,7 +41,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
             return;
         }
         std::copy(msg->position.begin(), msg->position.begin() + 6, joint_pos.begin());
-        // RCLCPP_INFO(node_->get_logger(), "JointState received. joint_pos[0]=%.3f", joint_pos[0]);
+        //// RCLCPP_INFO(node_->get_logger(), "JointState received. joint_pos[0]=%.3f", joint_pos[0]);
     });
 
     // Timer
@@ -581,7 +581,7 @@ void JointControl::getActualQ()
 {
     for (int i = 0; i < 6; ++i) {
         RArm.qc(i) = joint_pos[i];
-        // RCLCPP_INFO(node_->get_logger(), "RArm.qc(%d) = %.3f", i, RArm.qc(i));
+        //// RCLCPP_INFO(node_->get_logger(), "RArm.qc(%d) = %.3f", i, RArm.qc(i));
     }
 }
 
@@ -1190,13 +1190,6 @@ void JointControl::CalculateAndPublishJoint()
                         int CR_reti = 0;
                         int CR_reti_counter = 0;
                         double CR_LD_histoty[100] = {0,};
-
-                        // Debugging YAML (2025.06.22 21:57)
-                        // std::cout << "YAML keys:" << std::endl;
-                        // for (const auto& key : NRS_recording) {
-                        //     std::cout << key.first.as<std::string>() << std::endl;
-                        // }
-
 
                         while(CR_reti != -1)
                         {
