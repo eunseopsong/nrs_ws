@@ -73,8 +73,12 @@ target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen)
 ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 install(TARGETS nrs_ctrl DESTINATION lib/${PROJECT_NAME})
 
-# ------- ur10e_main node dependencies -------- #
-
+# -------- Hbutton node dependencies --------- #
+add_executable(button node_Hbutton.cpp ${sources} ${EXTERNAL_CPP_SRCS} ${SUBSCRIBER_SRCS})
+target_include_directories(button PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(button yaml-cpp Eigen3::Eigen)
+ament_target_dependencies(button ${COMMON_DEPENDENCIES})
+install(TARGETS button DESTINATION lib/${PROJECT_NAME})
 
 
 
