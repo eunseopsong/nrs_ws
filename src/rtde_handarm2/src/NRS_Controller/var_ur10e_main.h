@@ -1,5 +1,5 @@
-#ifndef MAIN_VARIABLE_H
-#define MAIN_VARIABLE_H
+#ifndef VAR_UR10E_MAIN_H
+#define VAR_UR10E_MAIN_H
 
 /*---------------------------- Header files ---------------------------------*/
 #include <stdio.h>
@@ -345,4 +345,4 @@ extern Eigen::MatrixXd VR_Cali_TCE;
 extern Eigen::MatrixXd VR_Cali_RAdj;
 extern Eigen::MatrixXd VR_Cali_TAdj;
 
-#endif // MAIN_VARIABLE_H
+#endif // VAR_UR10E_MAIN_H

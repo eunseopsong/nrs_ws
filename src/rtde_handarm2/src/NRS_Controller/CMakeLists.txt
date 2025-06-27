@@ -67,7 +67,7 @@ set(COMMON_DEPENDENCIES
 )
 
 # ------- ur10e_main node dependencies -------- #
-add_executable(nrs_ctrl ur10e_main.cpp ${sources} ${EXTERNAL_CPP_SRCS} ${SUBSCRIBER_SRCS})
+add_executable(nrs_ctrl node_ur10e_main.cpp ${sources} ${EXTERNAL_CPP_SRCS} ${SUBSCRIBER_SRCS})
 target_include_directories(nrs_ctrl PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen)
 ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
