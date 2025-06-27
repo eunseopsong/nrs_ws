@@ -45,9 +45,8 @@
 class HbuttonCmd : public rclcpp::Node
 {
 public:
-    HbuttonCmd();
-    //// HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate_);
-    //// ~HbuttonCmd();
+    HbuttonCmd(); //// HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate_);
+    ~HbuttonCmd();
 
     /*** Functions definition ***/
 
