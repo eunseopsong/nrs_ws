@@ -1,4 +1,4 @@
-#include "var_ur10e_main.h"  // extern 선언만 남긴 헤더
+#include "var_ur10e_main.h"
 
 /* ---------------------------- Macro setting ---------------------------------*/
 #ifndef M_PI
