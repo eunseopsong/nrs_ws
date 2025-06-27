@@ -75,6 +75,17 @@ HbuttonCmd::HbuttonCmd()
     Hmode5 = "MODE 5";  // Trajectory generation
 }
 
+HbuttonCmd::~HbuttonCmd()
+{
+#if (Handle_OnOff == 1)
+    if (Yuart != nullptr) {
+        Yuart->YUART_terminate();
+        delete Yuart;
+        Yuart = nullptr;  // 안전을 위해 포인터 초기화
+    }
+#endif
+}
+
 
 void HbuttonCmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
