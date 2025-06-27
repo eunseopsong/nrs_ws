@@ -54,15 +54,15 @@ public:
     void VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 
     /* Service handles */
-    void SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    bool SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
                      std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    void SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    bool SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
                      std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    void SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    bool SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
                      std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    void SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    bool SRV11_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
                       std::shared_ptr<std_srvs::srv::Empty::Response> res);
-    void SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    bool SRV12_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
                       std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
     /* Main function */
