@@ -204,16 +204,29 @@ void HbuttonCmd::Mode_chage()
 }
 void HbuttonCmd::VR_mode_change()  // to solve error: there is no definition of guide_mode (2025.06.27 23:32)
 {
-    // if (guide_mode == 1)
+    // if (guiding_mode == 1)
     // {
-    //     guide_mode = 0;
+    //     guiding_mode = 0;
     //     RCLCPP_INFO(this->get_logger(), "VR mode OFF");
     // }
     // else
     // {
-    //     guide_mode = 1;
+    //     guiding_mode = 1;
     //     RCLCPP_INFO(this->get_logger(), "VR mode ON");
     // }
+
+    if(guiding_mode == false) // change to guiding mode
+    {
+        guiding_mode = true;
+        current_status = mode1;
+    }
+    else // change to stanby mode
+    {
+        guiding_mode = false;
+        current_status = mode0;
+        point_counter = 0;
+    }
+
 }
 void HbuttonCmd::Way_point_save()
 {
