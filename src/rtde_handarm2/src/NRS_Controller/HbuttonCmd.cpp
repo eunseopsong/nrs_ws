@@ -215,6 +215,23 @@ void HbuttonCmd::VR_mode_change()  // to solve error: there is no definition of 
     //     RCLCPP_INFO(this->get_logger(), "VR mode ON");
     // }
 }
+void HbuttonCmd::Way_point_save()
+{
+    // yoon_mode = 3;
+    // RCLCPP_INFO(this->get_logger(), "=== Waypoint Saved ===");
+
+    // yoon_path.header.stamp = this->get_clock()->now();
+    // yoon_path.header.frame_id = "base_link";
+    // yoon_path.poses.push_back(pose_msg);
+
+
+
+    //// yoon_mode_msg.data = Descrete_reording_start;
+    //// yoon_mode_pub.publish(yoon_mode_msg);
+    //// ros::spinOnce();
+    //// point_counter ++;
+
+}
 
 
 
