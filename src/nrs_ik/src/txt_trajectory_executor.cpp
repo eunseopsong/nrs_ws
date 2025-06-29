@@ -149,7 +149,9 @@ private:
     // === Wrist rotation matrix ===
     Matrix3d R36 = R03.transpose() * R_ee;
 
-    double q4 = atan2(R36(2,1), R36(2,2));
+    // double q4 = atan2(R36(2,1), R36(2,2));
+    double q4 = atan2(R36(2,1), R36(2,2)) - M_PI / 3.0;  // 45도 추가 회전
+
     double q5 = atan2(sqrt(R36(2,1)*R36(2,1) + R36(2,2)*R36(2,2)), R36(2,0));
     double q6 = atan2(R36(1,0), R36(0,0));
 
