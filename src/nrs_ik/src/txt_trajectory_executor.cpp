@@ -15,14 +15,11 @@ using Eigen::Matrix3d;
 using Eigen::Matrix4d;
 using Eigen::Vector3d;
 
-// try fix 2025.06.29
-
 class TxtTrajectoryExecutor : public rclcpp::Node
 {
 public:
   TxtTrajectoryExecutor() : Node("txt_trajectory_executor")
   {
-    // QoS 수정: reliable()로 설정 (Isaac Sim 호환)
     pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
       "/isaac_joint_commands", rclcpp::QoS(10).reliable());
 
@@ -40,7 +37,6 @@ public:
 
     start_time_ = last_time_ = std::chrono::high_resolution_clock::now();
 
-    // 500Hz → 2ms 주기
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(2),
       std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
@@ -52,7 +48,9 @@ private:
   const double a3 = -0.5723;
   const double d4 = 0.1639;
   const double d5 = 0.1157;
-  const double d6 = 0.0922;
+
+  // EE offset = wrist_3_link → tool0 (0.0922) + spindle (0.18)
+  const double d6 = 0.0922 + 0.18;  // = 0.2722
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -74,7 +72,6 @@ private:
         raw_points.push_back({values[0], values[1], values[2]});
     }
 
-    // 5배 선형 보간
     for (size_t i = 0; i + 1 < raw_points.size(); ++i) {
       Vector3d p1(raw_points[i][0], raw_points[i][1], raw_points[i][2]);
       Vector3d p2(raw_points[i+1][0], raw_points[i+1][1], raw_points[i+1][2]);
@@ -112,7 +109,7 @@ private:
     Vector3d p(x, y, z);
     Matrix3d R = Matrix3d::Identity();
 
-    Vector3d pwc = p - d6 * R.col(2);
+    Vector3d pwc = p - d6 * R.col(2);  // ← spindle 길이 포함해서 EE 보정
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
     double q1 = atan2(yc, xc);
     double r = sqrt(xc*xc + yc*yc), s = zc - d1;
