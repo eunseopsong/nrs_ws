@@ -12,8 +12,8 @@
 #include <sched.h>
 
 using Eigen::Matrix3d;
-using Eigen::Matrix4d;
 using Eigen::Vector3d;
+using Eigen::Matrix4d;
 
 class TxtTrajectoryExecutor : public rclcpp::Node
 {
@@ -24,12 +24,8 @@ public:
       "/isaac_joint_commands", rclcpp::QoS(10).reliable());
 
     joint_state_.name = {
-      "shoulder_pan_joint",
-      "shoulder_lift_joint",
-      "elbow_joint",
-      "wrist_1_joint",
-      "wrist_2_joint",
-      "wrist_3_joint"
+      "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+      "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"
     };
     joint_state_.position.resize(6, 0.0);
 
@@ -48,9 +44,7 @@ private:
   const double a3 = -0.5723;
   const double d4 = 0.1639;
   const double d5 = 0.1157;
-
-  // EE offset = wrist_3_link → tool0 (0.0922) + spindle (0.18)
-  const double d6 = 0.0922 + 0.18;  // = 0.2722
+  const double d6 = 0.0922 + 0.186;  // spindle 길이 반영 (92.2mm + 186mm)
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -82,19 +76,16 @@ private:
       }
     }
 
-    if (!raw_points.empty()) {
+    if (!raw_points.empty())
       waypoints_.push_back(raw_points.back());
-    }
 
-    RCLCPP_INFO(this->get_logger(),
-      "Loaded %zu original waypoints, interpolated to %zu points.",
-      raw_points.size(), waypoints_.size());
+    RCLCPP_INFO(this->get_logger(), "Loaded %zu waypoints.", waypoints_.size());
   }
 
   void publish_next_point()
   {
     if (current_idx_ >= waypoints_.size()) {
-      RCLCPP_INFO(this->get_logger(), "All waypoints executed.");
+      RCLCPP_INFO(this->get_logger(), "All waypoints done.");
       timer_->cancel();
       return;
     }
@@ -105,12 +96,19 @@ private:
     last_time_ = t_now;
 
     auto& wp = waypoints_[current_idx_++];
-    double x = wp[0], y = wp[1], z = wp[2] + 0.2;
+    double x = wp[0], y = wp[1], z = wp[2];  // z 보정 제거
     Vector3d p(x, y, z);
-    Matrix3d R = Matrix3d::Identity();
 
-    Vector3d pwc = p - d6 * R.col(2);  // ← spindle 길이 포함해서 EE 보정
+    // EE 방향: Z축이 월드 Z- (spindle이 아래로)
+    Matrix3d R;
+    R.col(0) = Vector3d(1, 0, 0);   // X
+    R.col(1) = Vector3d(0, 1, 0);   // Y
+    R.col(2) = Vector3d(0, 0, -1);  // Z (아래)
+
+    // wrist center 위치 계산
+    Vector3d pwc = p - d6 * R.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
+
     double q1 = atan2(yc, xc);
     double r = sqrt(xc*xc + yc*yc), s = zc - d1;
     double D = (r*r + s*s - a2*a2 - a3*a3) / (2*a2*a3);
@@ -122,41 +120,29 @@ private:
 
     double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
-    double q4 = -M_PI / 2, q5 = M_PI / 2, q6 = 0.0;
+
+    double q4 = -M_PI / 2;  // EE R = Identity x (Z-)
+    double q5 = M_PI / 2;
+    double q6 = 0.0;
 
     joint_state_.position = {q1, q2, q3, q4, q5, q6};
     joint_state_.header.stamp = this->now();
     pub_->publish(joint_state_);
 
-    RCLCPP_INFO(this->get_logger(),
-      "step %zu: elapsed %.3f ms, delta %.3f ms",
-      current_idx_, elapsed_ms, delta_ms);
-  }
-
-  Matrix4d dh_transform(double a, double d, double alpha, double theta)
-  {
-    Matrix4d T;
-    T << cos(theta), -sin(theta), 0, a,
-         sin(theta)*cos(alpha), cos(theta)*cos(alpha), -sin(alpha), -sin(alpha)*d,
-         sin(theta)*sin(alpha), cos(theta)*sin(alpha), cos(alpha), cos(alpha)*d,
-         0, 0, 0, 1;
-    return T;
+    RCLCPP_INFO(this->get_logger(), "step %zu: elapsed %.3f ms, delta %.3f ms", current_idx_, elapsed_ms, delta_ms);
   }
 };
 
 int main(int argc, char* argv[])
 {
-  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-    RCLCPP_WARN(rclcpp::get_logger("main"),
-      "mlockall failed: insufficient privileges or limits. Page faults may occur.");
-  } else {
-    RCLCPP_INFO(rclcpp::get_logger("main"), "Memory locked: no page faults.");
-  }
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
+    RCLCPP_WARN(rclcpp::get_logger("main"), "mlockall failed");
+  else
+    RCLCPP_INFO(rclcpp::get_logger("main"), "Memory locked.");
 
   struct sched_param schedp{.sched_priority = 80};
-  if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedp) != 0) {
-    RCLCPP_WARN(rclcpp::get_logger("main"), "Failed to set real-time scheduling: %m");
-  }
+  if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedp) != 0)
+    RCLCPP_WARN(rclcpp::get_logger("main"), "Failed to set real-time scheduling");
 
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<TxtTrajectoryExecutor>());
