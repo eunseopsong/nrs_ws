@@ -13,6 +13,8 @@
 
 using Eigen::Matrix3d;
 using Eigen::Vector3d;
+using Eigen::Matrix4d;
+using std::sin, std::cos;
 
 class TxtTrajectoryExecutor : public rclcpp::Node
 {
@@ -43,7 +45,7 @@ private:
   const double a3 = -0.5723;
   const double d4 = 0.1639;
   const double d5 = 0.1157;
-  const double d6 = 0.0922 + 0.186;  // spindle 길이 반영
+  const double d6 = 0.0922 + 0.186;  // spindle 길이 포함
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -98,62 +100,58 @@ private:
     double x = wp[0], y = wp[1], z = wp[2];
     Vector3d p(x, y, z);
 
-    // 방향 설정
-    Vector3d z_axis(0, 0, -1);  // spindle 방향
-
-    Vector3d x_axis;
-    if (current_idx_ < waypoints_.size()) {
-      auto& wp_next = waypoints_[current_idx_];
-      Vector3d p_next(wp_next[0], wp_next[1], wp_next[2]);
-      x_axis = (p_next - p).normalized();
-    } else {
-      auto& wp_prev = waypoints_[current_idx_ - 2];
-      Vector3d p_prev(wp_prev[0], wp_prev[1], wp_prev[2]);
-      x_axis = (p - p_prev).normalized();
-    }
-
+    // EE 방향: Z축이 항상 world -Z 방향
+    Vector3d z_axis(0, 0, -1);
+    Vector3d x_axis(1, 0, 0);
     Vector3d y_axis = z_axis.cross(x_axis).normalized();
-    x_axis = y_axis.cross(z_axis).normalized();  // 재정의하여 직교성 보장
+    x_axis = y_axis.cross(z_axis).normalized();
 
-    Matrix3d R;
-    R.col(0) = x_axis;
-    R.col(1) = y_axis;
-    R.col(2) = z_axis;
+    Matrix3d R_ee;
+    R_ee.col(0) = x_axis;
+    R_ee.col(1) = y_axis;
+    R_ee.col(2) = z_axis;
 
-    // EE 방향이 뒤집혀 있다면, Z축 기준 yaw로 180도 회전 추가
-    Matrix3d yaw180;
-    yaw180 = Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitZ());
-
-    R = R * yaw180;  // 기존 방향 행렬에 추가 회전 적용
-
-
-
-    // wrist center
-    Vector3d pwc = p - d6 * R.col(2);
+    // wrist center 위치 계산
+    Vector3d pwc = p - d6 * R_ee.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
 
     double q1 = atan2(yc, xc);
-    double r = sqrt(xc*xc + yc*yc), s = zc - d1;
-    double D = (r*r + s*s - a2*a2 - a3*a3) / (2*a2*a3);
+    double r = sqrt(xc * xc + yc * yc), s = zc - d1;
+    double D = (r * r + s * s - a2 * a2 - a3 * a3) / (2 * a2 * a3);
 
     if (D < -1 || D > 1) {
       RCLCPP_WARN(this->get_logger(), "Unreachable point at idx %zu", current_idx_ - 1);
       return;
     }
 
-    double q3 = atan2(-sqrt(1 - D*D), D);
-    double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
+    double q3 = atan2(-sqrt(1 - D * D), D);
+    double q2 = atan2(s, r) - atan2(a3 * sin(q3), a2 + a3 * cos(q3));
 
-    // q4~q6 계산
-    Matrix3d R03;
-    R03 = Eigen::AngleAxisd(q1, Vector3d::UnitZ()) *
-          Eigen::AngleAxisd(q2, Vector3d::UnitY()) *
-          Eigen::AngleAxisd(q3, Vector3d::UnitY());
-    Matrix3d R36 = R03.transpose() * R;
+    // === Forward Kinematics to get R_03 ===
+    Matrix3d R01, R12, R23;
+    R01 <<
+      cos(q1), 0, sin(q1),
+      sin(q1), 0, -cos(q1),
+      0, 1, 0;
 
-    double q5 = atan2(sqrt(R36(0,2)*R36(0,2) + R36(1,2)*R36(1,2)), R36(2,2));
-    double q4 = atan2(R36(1,2), R36(0,2));
-    double q6 = atan2(R36(2,1), -R36(2,0));
+    R12 <<
+      cos(q2), -sin(q2), 0,
+      0, 0, -1,
+      sin(q2), cos(q2), 0;
+
+    R23 <<
+      cos(q3), -sin(q3), 0,
+      sin(q3), cos(q3), 0,
+      0, 0, 1;
+
+    Matrix3d R03 = R01 * R12 * R23;
+
+    // === Wrist rotation matrix ===
+    Matrix3d R36 = R03.transpose() * R_ee;
+
+    double q4 = atan2(R36(2,1), R36(2,2));
+    double q5 = atan2(sqrt(R36(2,1)*R36(2,1) + R36(2,2)*R36(2,2)), R36(2,0));
+    double q6 = atan2(R36(1,0), R36(0,0));
 
     joint_state_.position = {q1, q2, q3, q4, q5, q6};
     joint_state_.header.stamp = this->now();
