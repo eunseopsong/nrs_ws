@@ -10,6 +10,8 @@
 #include <sys/resource.h>
 #include <pthread.h>
 #include <sched.h>
+#include <iterator>
+#include <cmath>
 
 using Eigen::Matrix3d;
 using Eigen::Vector3d;
@@ -42,13 +44,7 @@ private:
   const double d1 = 0.1273;
   const double a2 = -0.612;
   const double a3 = -0.5723;
-  const double d4 = 0.1639;
-  const double d5 = 0.1157;
-  const double d6 = 0.0922 + 0.186;  // spindle 포함
-
-  const double roll = 0.0;
-  const double pitch = M_PI;
-  const double yaw = 0.0;
+  const double d6 = 0.0922 + 0.186;
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -73,15 +69,10 @@ private:
     for (size_t i = 0; i + 1 < raw_points.size(); ++i) {
       Vector3d p1(raw_points[i][0], raw_points[i][1], raw_points[i][2]);
       Vector3d p2(raw_points[i+1][0], raw_points[i+1][1], raw_points[i+1][2]);
-      // for (int j = 0; j < 5; ++j) {
-      //   double t = static_cast<double>(j) / 5.0;
-      //   Vector3d p = (1 - t) * p1 + t * p2;
-      //   waypoints_.push_back({p[0], p[1], p[2]});
-      // }
       for (int j = 0; j < 10; ++j) {
-      double t = static_cast<double>(j) / 10.0;
-      Vector3d p = (1 - t) * p1 + t * p2;
-      waypoints_.push_back({p[0], p[1], p[2]});
+        double t = static_cast<double>(j) / 10.0;
+        Vector3d p = (1 - t) * p1 + t * p2;
+        waypoints_.push_back({p[0], p[1], p[2]});
       }
     }
 
@@ -89,21 +80,6 @@ private:
       waypoints_.push_back(raw_points.back());
 
     RCLCPP_INFO(this->get_logger(), "Loaded %zu waypoints.", waypoints_.size());
-  }
-
-  Matrix3d rpyToRotationMatrix(double roll, double pitch, double yaw)
-  {
-    Matrix3d Rx, Ry, Rz;
-    Rx << 1, 0, 0,
-          0, cos(roll), -sin(roll),
-          0, sin(roll), cos(roll);
-    Ry << cos(pitch), 0, sin(pitch),
-          0, 1, 0,
-          -sin(pitch), 0, cos(pitch);
-    Rz << cos(yaw), -sin(yaw), 0,
-          sin(yaw), cos(yaw), 0,
-          0, 0, 1;
-    return Rz * Ry * Rx;
   }
 
   void publish_next_point()
@@ -123,8 +99,17 @@ private:
     double x = wp[0], y = wp[1], z = wp[2];
     Vector3d p(x, y, z);
 
-    Matrix3d R_ee = rpyToRotationMatrix(roll, pitch, yaw);
+    // 고정된 EE Orientation (RPY)
+    double roll = 0.0;
+    double pitch = M_PI / 2.0;
+    double yaw = 0.0;
 
+    Matrix3d R_ee;
+    R_ee = Eigen::AngleAxisd(yaw, Vector3d::UnitZ()) *
+           Eigen::AngleAxisd(pitch, Vector3d::UnitY()) *
+           Eigen::AngleAxisd(roll, Vector3d::UnitX());
+
+    // wrist center 위치 계산
     Vector3d pwc = p - d6 * R_ee.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
 
@@ -140,20 +125,26 @@ private:
     double q3 = atan2(-sqrt(1 - D * D), D);
     double q2 = atan2(s, r) - atan2(a3 * sin(q3), a2 + a3 * cos(q3));
 
+    // R_03 계산
     Matrix3d R01, R12, R23;
-    R01 << cos(q1), 0, sin(q1),
-           sin(q1), 0, -cos(q1),
-           0, 1, 0;
+    R01 <<
+      cos(q1), 0, sin(q1),
+      sin(q1), 0, -cos(q1),
+      0, 1, 0;
 
-    R12 << cos(q2), -sin(q2), 0,
-           0, 0, -1,
-           sin(q2), cos(q2), 0;
+    R12 <<
+      cos(q2), -sin(q2), 0,
+      0, 0, -1,
+      sin(q2), cos(q2), 0;
 
-    R23 << cos(q3), -sin(q3), 0,
-           sin(q3), cos(q3), 0,
-           0, 0, 1;
+    R23 <<
+      cos(q3), -sin(q3), 0,
+      sin(q3), cos(q3), 0,
+      0, 0, 1;
 
     Matrix3d R03 = R01 * R12 * R23;
+
+    // R_36 계산
     Matrix3d R36 = R03.transpose() * R_ee;
 
     double q4 = atan2(R36(2,1), R36(2,2));
@@ -164,7 +155,9 @@ private:
     joint_state_.header.stamp = this->now();
     pub_->publish(joint_state_);
 
-    RCLCPP_INFO(this->get_logger(), "step %zu: elapsed %.3f ms, delta %.3f ms", current_idx_, elapsed_ms, delta_ms);
+    RCLCPP_INFO(this->get_logger(),
+      "step %zu: elapsed %.3f ms, delta %.3f ms | x=%.4f y=%.4f z=%.4f r=%.4f p=%.4f y=%.4f",
+      current_idx_, elapsed_ms, delta_ms, x, y, z, roll, pitch, yaw);
   }
 };
 
