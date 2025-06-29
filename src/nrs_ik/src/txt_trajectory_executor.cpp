@@ -73,10 +73,15 @@ private:
     for (size_t i = 0; i + 1 < raw_points.size(); ++i) {
       Vector3d p1(raw_points[i][0], raw_points[i][1], raw_points[i][2]);
       Vector3d p2(raw_points[i+1][0], raw_points[i+1][1], raw_points[i+1][2]);
-      for (int j = 0; j < 5; ++j) {
-        double t = static_cast<double>(j) / 5.0;
-        Vector3d p = (1 - t) * p1 + t * p2;
-        waypoints_.push_back({p[0], p[1], p[2]});
+      // for (int j = 0; j < 5; ++j) {
+      //   double t = static_cast<double>(j) / 5.0;
+      //   Vector3d p = (1 - t) * p1 + t * p2;
+      //   waypoints_.push_back({p[0], p[1], p[2]});
+      // }
+      for (int j = 0; j < 10; ++j) {
+      double t = static_cast<double>(j) / 10.0;
+      Vector3d p = (1 - t) * p1 + t * p2;
+      waypoints_.push_back({p[0], p[1], p[2]});
       }
     }
 
