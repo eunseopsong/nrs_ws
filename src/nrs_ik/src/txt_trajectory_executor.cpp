@@ -13,7 +13,6 @@
 
 using Eigen::Matrix3d;
 using Eigen::Vector3d;
-using Eigen::Matrix4d;
 using std::sin, std::cos;
 
 class TxtTrajectoryExecutor : public rclcpp::Node
@@ -35,7 +34,7 @@ public:
     start_time_ = last_time_ = std::chrono::high_resolution_clock::now();
 
     timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(2),
+      std::chrono::milliseconds(300),
       std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
   }
 
@@ -45,7 +44,11 @@ private:
   const double a3 = -0.5723;
   const double d4 = 0.1639;
   const double d5 = 0.1157;
-  const double d6 = 0.0922 + 0.186;  // spindle 길이 포함
+  const double d6 = 0.0922 + 0.186;  // spindle 포함
+
+  const double roll = 0.0;
+  const double pitch = M_PI;
+  const double yaw = 0.0;
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -83,6 +86,21 @@ private:
     RCLCPP_INFO(this->get_logger(), "Loaded %zu waypoints.", waypoints_.size());
   }
 
+  Matrix3d rpyToRotationMatrix(double roll, double pitch, double yaw)
+  {
+    Matrix3d Rx, Ry, Rz;
+    Rx << 1, 0, 0,
+          0, cos(roll), -sin(roll),
+          0, sin(roll), cos(roll);
+    Ry << cos(pitch), 0, sin(pitch),
+          0, 1, 0,
+          -sin(pitch), 0, cos(pitch);
+    Rz << cos(yaw), -sin(yaw), 0,
+          sin(yaw), cos(yaw), 0,
+          0, 0, 1;
+    return Rz * Ry * Rx;
+  }
+
   void publish_next_point()
   {
     if (current_idx_ >= waypoints_.size()) {
@@ -100,18 +118,8 @@ private:
     double x = wp[0], y = wp[1], z = wp[2];
     Vector3d p(x, y, z);
 
-    // EE 방향: Z축이 항상 world -Z 방향
-    Vector3d z_axis(0, 0, -1);
-    Vector3d x_axis(1, 0, 0);
-    Vector3d y_axis = z_axis.cross(x_axis).normalized();
-    x_axis = y_axis.cross(z_axis).normalized();
+    Matrix3d R_ee = rpyToRotationMatrix(roll, pitch, yaw);
 
-    Matrix3d R_ee;
-    R_ee.col(0) = x_axis;
-    R_ee.col(1) = y_axis;
-    R_ee.col(2) = z_axis;
-
-    // wrist center 위치 계산
     Vector3d pwc = p - d6 * R_ee.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
 
@@ -127,31 +135,23 @@ private:
     double q3 = atan2(-sqrt(1 - D * D), D);
     double q2 = atan2(s, r) - atan2(a3 * sin(q3), a2 + a3 * cos(q3));
 
-    // === Forward Kinematics to get R_03 ===
     Matrix3d R01, R12, R23;
-    R01 <<
-      cos(q1), 0, sin(q1),
-      sin(q1), 0, -cos(q1),
-      0, 1, 0;
+    R01 << cos(q1), 0, sin(q1),
+           sin(q1), 0, -cos(q1),
+           0, 1, 0;
 
-    R12 <<
-      cos(q2), -sin(q2), 0,
-      0, 0, -1,
-      sin(q2), cos(q2), 0;
+    R12 << cos(q2), -sin(q2), 0,
+           0, 0, -1,
+           sin(q2), cos(q2), 0;
 
-    R23 <<
-      cos(q3), -sin(q3), 0,
-      sin(q3), cos(q3), 0,
-      0, 0, 1;
+    R23 << cos(q3), -sin(q3), 0,
+           sin(q3), cos(q3), 0,
+           0, 0, 1;
 
     Matrix3d R03 = R01 * R12 * R23;
-
-    // === Wrist rotation matrix ===
     Matrix3d R36 = R03.transpose() * R_ee;
 
-    // double q4 = atan2(R36(2,1), R36(2,2));
-    double q4 = atan2(R36(2,1), R36(2,2)) - M_PI / 3.0;  // 45도 추가 회전
-
+    double q4 = atan2(R36(2,1), R36(2,2));
     double q5 = atan2(sqrt(R36(2,1)*R36(2,1) + R36(2,2)*R36(2,2)), R36(2,0));
     double q6 = atan2(R36(1,0), R36(0,0));
 
