@@ -13,7 +13,6 @@
 
 using Eigen::Matrix3d;
 using Eigen::Vector3d;
-using Eigen::Matrix4d;
 
 class TxtTrajectoryExecutor : public rclcpp::Node
 {
@@ -44,7 +43,7 @@ private:
   const double a3 = -0.5723;
   const double d4 = 0.1639;
   const double d5 = 0.1157;
-  const double d6 = 0.0922 + 0.186;  // spindle 길이 반영 (92.2mm + 186mm)
+  const double d6 = 0.0922 + 0.186;  // spindle 길이 반영
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -96,16 +95,40 @@ private:
     last_time_ = t_now;
 
     auto& wp = waypoints_[current_idx_++];
-    double x = wp[0], y = wp[1], z = wp[2];  // z 보정 제거
+    double x = wp[0], y = wp[1], z = wp[2];
     Vector3d p(x, y, z);
 
-    // EE 방향: Z축이 월드 Z- (spindle이 아래로)
-    Matrix3d R;
-    R.col(0) = Vector3d(1, 0, 0);   // X
-    R.col(1) = Vector3d(0, 1, 0);   // Y
-    R.col(2) = Vector3d(0, 0, -1);  // Z (아래)
+    // 방향 설정
+    Vector3d z_axis(0, 0, -1);  // spindle 방향
 
-    // wrist center 위치 계산
+    Vector3d x_axis;
+    if (current_idx_ < waypoints_.size()) {
+      auto& wp_next = waypoints_[current_idx_];
+      Vector3d p_next(wp_next[0], wp_next[1], wp_next[2]);
+      x_axis = (p_next - p).normalized();
+    } else {
+      auto& wp_prev = waypoints_[current_idx_ - 2];
+      Vector3d p_prev(wp_prev[0], wp_prev[1], wp_prev[2]);
+      x_axis = (p - p_prev).normalized();
+    }
+
+    Vector3d y_axis = z_axis.cross(x_axis).normalized();
+    x_axis = y_axis.cross(z_axis).normalized();  // 재정의하여 직교성 보장
+
+    Matrix3d R;
+    R.col(0) = x_axis;
+    R.col(1) = y_axis;
+    R.col(2) = z_axis;
+
+    // EE 방향이 뒤집혀 있다면, Z축 기준 yaw로 180도 회전 추가
+    Matrix3d yaw180;
+    yaw180 = Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitZ());
+
+    R = R * yaw180;  // 기존 방향 행렬에 추가 회전 적용
+
+
+
+    // wrist center
     Vector3d pwc = p - d6 * R.col(2);
     double xc = pwc(0), yc = pwc(1), zc = pwc(2);
 
@@ -121,9 +144,16 @@ private:
     double q3 = atan2(-sqrt(1 - D*D), D);
     double q2 = atan2(s, r) - atan2(a3*sin(q3), a2 + a3*cos(q3));
 
-    double q4 = -M_PI / 2;  // EE R = Identity x (Z-)
-    double q5 = M_PI / 2;
-    double q6 = 0.0;
+    // q4~q6 계산
+    Matrix3d R03;
+    R03 = Eigen::AngleAxisd(q1, Vector3d::UnitZ()) *
+          Eigen::AngleAxisd(q2, Vector3d::UnitY()) *
+          Eigen::AngleAxisd(q3, Vector3d::UnitY());
+    Matrix3d R36 = R03.transpose() * R;
+
+    double q5 = atan2(sqrt(R36(0,2)*R36(0,2) + R36(1,2)*R36(1,2)), R36(2,2));
+    double q4 = atan2(R36(1,2), R36(0,2));
+    double q6 = atan2(R36(2,1), -R36(2,0));
 
     joint_state_.position = {q1, q2, q3, q4, q5, q6};
     joint_state_.header.stamp = this->now();
