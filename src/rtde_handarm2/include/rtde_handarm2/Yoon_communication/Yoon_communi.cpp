@@ -1,6 +1,6 @@
 #include "Yoon_communi.h"
 
-Yoon_UART::Yoon_UART(char *ttyname,int Baudrate)
+Yoon_UART::Yoon_UART(const char *ttyname,int Baudrate)
 {
 
  	// char *ttyname = "/dev/ttyUSB0";

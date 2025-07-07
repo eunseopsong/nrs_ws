@@ -494,17 +494,3 @@ void catch_signal(int sig)
     printf("Program was terminated \n");
     exit(1);
 }
-
-// int main(int argc, char **argv)
-// {
-//     ros::init(argc,argv,"NRS_Hbutton_cmd");
-//     ros::NodeHandle _nh;
-//     NRS_Hbutton_cmd NRS_HB_cmd(_nh,100);
-
-//     signal(SIGTERM, catch_signal);// Termination
-// 	signal(SIGINT, catch_signal);// Active
-
-//     NRS_HB_cmd.HButton_main();
-
-//     return 0;
-// }
