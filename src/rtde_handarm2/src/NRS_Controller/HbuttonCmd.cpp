@@ -257,12 +257,11 @@ void HbuttonCmd::Way_point_save()  // to solve error: (2025.06.27 23:35)
     // yoon_path.header.frame_id = "base_link";
     // yoon_path.poses.push_back(pose_msg);
 
-
-
-    //// yoon_mode_msg.data = Descrete_reording_start;
-    //// yoon_mode_pub.publish(yoon_mode_msg);
+    yoon_mode_msg.data = Descrete_reording_start;
+    yoon_mode_pub->publish(yoon_mode_msg);
     //// ros::spinOnce();
-    //// point_counter ++;
+    rclcpp::spin_some(this->get_node_base_interface());
+    point_counter ++;
 
 }
 
@@ -272,8 +271,8 @@ void HbuttonCmd::VR_point_save()
     Clicked_msg.point.y = VRPose_point.y;
     Clicked_msg.point.z = VRPose_point.z;
     Clicked_pub->publish(Clicked_msg);
-    //// Clicked_pub.publish(Clicked_msg);
     //// ros::spinOnce();
+    rclcpp::spin_some(this->get_node_base_interface());
     point_counter ++;
 }
 
@@ -405,6 +404,7 @@ void HbuttonCmd::Playback_exe()
             yoon_mode_pub->publish(yoon_mode_msg);
             //// yoon_mode_pub.publish(yoon_mode_msg);
             //// ros::spinOnce();
+            rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
             current_status = mode3;
             iter_num = 0;
             PB_exe_counter = 0;
@@ -481,6 +481,7 @@ void HbuttonCmd::HButton_main()
         }
         #endif
         // ros::spinOnce(); // For service callback
+        rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
     }
     exit(0);
     #if(Handle_OnOff == 1)
