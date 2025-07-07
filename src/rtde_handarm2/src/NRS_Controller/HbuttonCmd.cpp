@@ -145,6 +145,7 @@ bool HbuttonCmd::SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request
     #elif(TEACHING_MODE == 1)
         VR_point_save();
     #endif
+    return true;
 }
 
 bool HbuttonCmd::SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
@@ -155,6 +156,7 @@ bool HbuttonCmd::SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request
     #if(TEACHING_MODE == 0)
         Trajectory_gen();
     #endif
+    return true;
 }
 
 
@@ -191,6 +193,8 @@ void HbuttonCmd::Mode_chage()
         #if(Handle_OnOff == 1)
         yoon_mode_msg.data = Hand_guiding_mode_cmd;
         yoon_mode_pub->publish(yoon_mode_msg);
+
+        //// ros::spinOnce();
         rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
         #endif
     }
@@ -200,15 +204,19 @@ void HbuttonCmd::Mode_chage()
         current_status = mode0;
 
         #if(Handle_OnOff == 1)
+        // Stanby mode message publish 
         yoon_mode_msg.data = Motion_stop_cmd;
         yoon_mode_pub->publish(yoon_mode_msg);
+        //// ros::spinOnce();
         rclcpp::spin_some(this->get_node_base_interface());
         #endif
 
         if (point_counter != 0)
         {
+            // Way point save termination message publish
             yoon_mode_msg.data = Descrete_recording_save;
             yoon_mode_pub->publish(yoon_mode_msg);
+            //// ros::spinOnce();
             rclcpp::spin_some(this->get_node_base_interface());
         }
     }
