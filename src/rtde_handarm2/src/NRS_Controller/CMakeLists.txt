@@ -74,6 +74,7 @@ file(GLOB_RECURSE sources
 set(EXCLUDE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/node_ur10e_main.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/node_Hbutton.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Yoon_UR10e_cmd.cpp" # Add on 2025.07.07
 )
 
 # 3. 리스트에서 제외
