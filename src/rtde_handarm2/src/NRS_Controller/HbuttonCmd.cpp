@@ -46,21 +46,21 @@ HbuttonCmd::HbuttonCmd()
         std::bind(&HbuttonCmd::SRV12_Handle, this, std::placeholders::_1, std::placeholders::_2));
 
     ////// 6. State & Mode Initialization ///////
-#if (TEACHING_MODE == 0)
-    #if (Handle_OnOff == 0)
-        current_status = "Stanby mode - No Handle";
-        mode0 = "Stanby mode - No Handle";
-        mode1 = "Teaching mode - No Handle";
-    #elif (Handle_OnOff == 1)
-        current_status = "Handle stanby mode";
-        mode0 = "Handle stanby mode";
-        mode1 = "Handle-guiding mode";
+    #if (TEACHING_MODE == 0)
+        #if (Handle_OnOff == 0)
+            current_status = "Stanby mode - No Handle";
+            mode0 = "Stanby mode - No Handle";
+            mode1 = "Teaching mode - No Handle";
+        #elif (Handle_OnOff == 1)
+            current_status = "Handle stanby mode";
+            mode0 = "Handle stanby mode";
+            mode1 = "Handle-guiding mode";
+        #endif
+    #elif (TEACHING_MODE == 1)
+        current_status = "VR stanby mode";
+        mode0 = "VR stanby mode";
+        mode1 = "VR-teaching mode";
     #endif
-#elif (TEACHING_MODE == 1)
-    current_status = "VR stanby mode";
-    mode0 = "VR stanby mode";
-    mode1 = "VR-teaching mode";
-#endif
 
     mode2 = "Playback ready";
     mode3 = "Playback execution";
@@ -77,18 +77,25 @@ HbuttonCmd::HbuttonCmd()
 
 HbuttonCmd::~HbuttonCmd()
 {
-#if (Handle_OnOff == 1)
-    if (Yuart != nullptr) {
-        Yuart->YUART_terminate();
-        delete Yuart;
-        Yuart = nullptr;  // 안전을 위해 포인터 초기화
-    }
-#endif
+    #if (Handle_OnOff == 1)
+        if (Yuart != nullptr) {
+            Yuart->YUART_terminate();
+            delete Yuart;
+            Yuart = nullptr;  // 안전을 위해 포인터 초기화
+        }
+    #endif
 }
 
 
 void HbuttonCmd::catch_signal(int sig)
 {
+    //// if(sig == 0){printf("Desired posture is under 4 \n");}
+    //// #if(Handle_OnOff == 1)
+    //// Yuart->YUART_terminate();
+    //// #endif
+    //// printf("Program was terminated !! \n");
+    //// exit(1);
+
     if (sig == 0) {
         RCLCPP_WARN(this->get_logger(), "Desired posture is under 4");
     }
@@ -125,6 +132,7 @@ bool HbuttonCmd::SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request
     #elif(TEACHING_MODE == 1)
         VR_mode_change();
     #endif
+    return true;
 }
 
 bool HbuttonCmd::SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
