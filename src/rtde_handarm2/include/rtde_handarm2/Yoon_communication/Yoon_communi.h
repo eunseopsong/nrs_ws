@@ -17,7 +17,8 @@ class Yoon_UART
 
     public:
 
-        Yoon_UART(char *ttyname,int Baudrate);
+        //// Yoon_UART(char *ttyname,int Baudrate);
+        Yoon_UART(const char *ttyname,int Baudrate);
         // bool YUART_start(unsigned char* buffer_out);
         bool YUART_start(char* buffer_out);
         void YUART_terminate();
