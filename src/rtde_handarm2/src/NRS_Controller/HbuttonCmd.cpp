@@ -489,8 +489,8 @@ void HbuttonCmd::HButton_main()
     #endif
 }
 
-void catch_signal(int sig)
-{
-    printf("Program was terminated \n");
-    exit(1);
-}
+// void catch_signal(int sig)
+// {
+//     printf("Program was terminated \n");
+//     exit(1);
+// }
