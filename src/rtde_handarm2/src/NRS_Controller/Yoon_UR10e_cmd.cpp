@@ -1,10 +1,17 @@
-// #include <iostream>
-// #include <stdio.h>
-// #include <string.h>
-// #include <stdlib.h>
-// #include <signal.h>
-// #include "Yoon_UR10e_cmd.h"
-// #include "ros/ros.h"
+#include <iostream>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <signal.h>
+#include "Yoon_UR10e_cmd.h"
+#include "rclcpp/rclcpp.hpp" //// #include "ros/ros.h"
+
+#include "std_msgs/msg/multi_array_layout.hpp"
+#include "std_msgs/msg/multi_array_dimension.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
+#include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/u_int16.hpp"
+#include "std_msgs/msg/u_int32.hpp"
 // #include "std_msgs/MultiArrayLayout.h"
 // #include "std_msgs/MultiArrayDimension.h"
 // #include "std_msgs/Float64MultiArray.h"
@@ -12,18 +19,18 @@
 // #include "std_msgs/UInt16.h"
 // #include "std_msgs/UInt32.h"
 
-// // For trajectory generation
-// #include "Text_loader.h"
-// #include "Yoon_path.h"
+// For trajectory generation
+#include "Text_loader.h"
+#include "Yoon_path.h"
 
-// // Yaml file headers
-// #include <fstream>
-// #include <yaml-cpp/yaml.h>
+// Yaml file headers
+#include <fstream>
+#include <yaml-cpp/yaml.h>
 
-// #define DOF 6
-// #define PI 3.141592
+#define DOF 6
+#define PI 3.141592
 
-// /* Yaml file load start */
+/* Yaml file load start */
 // std::ifstream fin2("/home/nrsur10/catkin_ws/src/rtde_handarm/NRS_yaml/NRS_Record_Printing.yaml");
 // YAML::Node NRS_recording = YAML::Load(fin2);
 // /* Yaml file load end */
