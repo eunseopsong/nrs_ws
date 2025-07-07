@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
         else if(control_mode==6) memcpy(current_status,mode6,sizeof(mode6));
         else if(control_mode==7) memcpy(current_status,mode7,sizeof(mode7));
         else memcpy(current_status,mode0,sizeof(mode0));
-        
+
         std::cout << "\n Last command for control mode : " << current_status <<std::endl;
         std::cout << "\n [--- Choose the mode ---]"<<std::endl;
         std::cout << " Mode1: ----------------------  , Mode2: Joint control(cmd1)"<<std::endl;
