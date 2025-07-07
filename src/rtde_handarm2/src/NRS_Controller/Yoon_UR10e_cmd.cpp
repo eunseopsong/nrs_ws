@@ -25,7 +25,9 @@
 #define PI 3.141592
 
 /* Yaml file load start */
-std::ifstream fin2("/home/nrsur10/catkin_ws/src/rtde_handarm/NRS_yaml/NRS_Record_Printing.yaml");
+//// std::ifstream fin2("/home/nrsur10/catkin_ws/src/rtde_handarm/NRS_yaml/NRS_Record_Printing.yaml");
+std::ifstream fin2("/home/eunseop/nrs_ws/src/rtde_handarm2/NRS_yaml/NRS_Record_Printing.yaml");
+
 YAML::Node NRS_recording = YAML::Load(fin2);
 /* Yaml file load end */
 
@@ -226,7 +228,7 @@ int main(int argc, char *argv[])
                         break;
                     }
 
-                    
+
                 }
 
             }
@@ -253,7 +255,7 @@ int main(int argc, char *argv[])
             // FILE* Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
             auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
             FILE* Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
-            
+
             /**** Points to path profile ****/
 
             /* 1) Start to Contact path profile */
@@ -357,7 +359,7 @@ int main(int argc, char *argv[])
             rclcpp::spin_some(node); //// ros::spinOnce();
         }
 
-        
+
 
     }
     exit(0);
