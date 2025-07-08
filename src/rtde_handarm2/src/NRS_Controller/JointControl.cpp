@@ -685,6 +685,14 @@ void JointControl::CalculateAndPublishJoint()
     printf("\n");
     /////////////////////////////
 
+    //// ctrl debugger ////
+    printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
+    ///////////////////////
+
+
+
+
+
     // spring mode control parameter
     VectorXd Hspring_mode_init_pos(6);
 
