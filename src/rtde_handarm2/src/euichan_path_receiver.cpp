@@ -1,11 +1,12 @@
-#include <ros/ros.h>
-#include <std_msgs/String.h>
+#include <rclcpp/rclcpp.hpp>        //// #include <ros/ros.h>
+#include <std_msgs/msg/string.hpp>  //// #include <std_msgs/String.h>
 #include <fstream>
 #include <iostream>
 
 void fileCallback(const std_msgs::String::ConstPtr& msg)
 {
     // 수신된 데이터를 저장할 파일 경로
+    //// std::string output_file_path = "/home/nrsur10/catkin_ws/src/rtde_handarm/src/Control_data/Hand_G_recording.txt";
     std::string output_file_path = "/home/nrsur10/catkin_ws/src/rtde_handarm/src/Control_data/Hand_G_recording.txt";
 
     // 파일 열기

@@ -74,7 +74,8 @@ file(GLOB_RECURSE sources
 set(EXCLUDE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/node_ur10e_main.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/node_Hbutton.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Yoon_UR10e_cmd.cpp" # Add on 2025.07.07
+  "${CMAKE_CURRENT_SOURCE_DIR}/Yoon_UR10e_cmd.cpp"      # Add on 2025.07.07
+  "${CMAKE_CURRENT_SOURCE_DIR}/node_path_receiver.cpp"  # Add on 2025.07.08
 )
 
 # 3. 리스트에서 제외
@@ -94,6 +95,11 @@ target_include_directories(hbutton PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOUR
 target_link_libraries(hbutton yaml-cpp Eigen3::Eigen)
 ament_target_dependencies(hbutton ${COMMON_DEPENDENCIES})
 install(TARGETS hbutton DESTINATION lib/${PROJECT_NAME})
+
+# -------- path_receiver node dependencies --------- #
+add_executable(path_receiver node_path_receiver.cpp)
+ament_target_dependencies(path_receiver rclcpp std_msgs)
+install(TARGETS path_receiver DESTINATION lib/${PROJECT_NAME})
 
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
