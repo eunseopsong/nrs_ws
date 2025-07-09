@@ -32,7 +32,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Subscribers
     UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
-        "/Yoon_UR10e_mode", 20,
+        "Yoon_UR10e_mode", 20,
         std::bind(&JointControl::cmdModeCallback, this, std::placeholders::_1));
 
     PB_iter_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
@@ -50,10 +50,10 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
     "/isaac_joint_states", rclcpp::QoS(10),
     [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        if (msg->position.size() < 6) {
-            RCLCPP_WARN(node_->get_logger(), "Received joint state has less than 6 elements.");
-            return;
-        }
+        //// if (msg->position.size() < 6) {
+        ////     RCLCPP_WARN(node_->get_logger(), "Received joint state has less than 6 elements.");
+        ////     return;
+        //// }
         std::copy(msg->position.begin(), msg->position.begin() + 6, joint_pos.begin());
         //// RCLCPP_INFO(node_->get_logger(), "JointState received. joint_pos[0]=%.3f", joint_pos[0]);
     });
@@ -68,6 +68,8 @@ JointControl::~JointControl() {}
 void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     mode_cmd = msg->data;
+
+    printf("mode_cmd: %d \n", mode_cmd);
 
     if(mode_cmd == Joint_control_mode_cmd) {} // Joint angle control mode (wit0.0016,0.0016,0.0016
 
@@ -699,8 +701,15 @@ void JointControl::CalculateAndPublishJoint()
     printf("\n");
     /////////////////////////////
 
+    // cmdModeCallback();
+    ctrl = 3;
     //// ctrl debugger ////
+<<<<<<< Updated upstream
     // printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
+=======
+    printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
+    // printf("mode_cmd: %d \n", mode_cmd);
+>>>>>>> Stashed changes
     ///////////////////////
 
 
@@ -709,6 +718,7 @@ void JointControl::CalculateAndPublishJoint()
 
     // spring mode control parameter
     VectorXd Hspring_mode_init_pos(6);
+
 
     printf("While loop start\n");
 
@@ -1708,6 +1718,7 @@ void JointControl::CalculateAndPublishJoint()
                     #if Actual_mode == 0 // test mode
                     joint_q = {Init_qc(0), Init_qc(1), Init_qc(2), Init_qc(3), Init_qc(4), Init_qc(5)};
                     #elif Actual_mode == 1 // actual control mode
+<<<<<<< Updated upstream
                     printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
                     // joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
 
@@ -1723,6 +1734,10 @@ void JointControl::CalculateAndPublishJoint()
                     joint_commands_pub_->publish(joint_state_);
                     //////////////////////////////////////////////////////
 
+=======
+                    joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
+                    
+>>>>>>> Stashed changes
                     #endif
 
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);

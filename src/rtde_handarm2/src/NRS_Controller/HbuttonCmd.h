@@ -19,7 +19,7 @@
 
 #include "geometry_msgs/msg/point_stamped.hpp"   //// #include "geometry_msgs/PointStamped.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"    //// #include "geometry_msgs/PoseStamped.h"
-// #include "rtde_handarm2/VrPosRtMsgQua.msg"         //// #include "rtde_handarm/VRposRtMsg_Qua.h" // 보류
+// #include "rtde_handarm2/VrPosRtMsgQua.msg"    //// #include "rtde_handarm/VRposRtMsg_Qua.h" // 보류
 
 // For ROS service - AIDIN GUI SERVER
 #include "std_srvs/srv/empty.hpp"                //// #include <std_srvs/Empty.h>
