@@ -33,6 +33,8 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_wrench_pub_;
 
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr     joint_commands_pub_;
+
     std_msgs::msg::UInt16 UR10e_mode_msg_;
     std_msgs::msg::Float64MultiArray UR10_Jangle_msg_;
     std_msgs::msg::Float64MultiArray UR10_pose_msg_;
