@@ -176,7 +176,7 @@ int main(int argc, char* argv[])
 		RArm.dqd(i) = 0;
 		RArm.dqc(i) = 0;
 	}
-	////// getActualQ();
+	getActualQ();
 
 	RArm.qd = RArm.qc;
 	RArm.qt = RArm.qc;
@@ -262,7 +262,7 @@ int main(int argc, char* argv[])
             while (running)
             {
                 // t_start = rtde_control.initPeriod();
-                // getActualQ(); // Get the joint data of UR10e
+                getActualQ(); // Get the joint data of UR10e
 
                 // tcp_pose = rtde_receive.getActualTCPPose(); // Get the TCP data of UR10e
                 // ros::spinOnce(); // Get the ROS message data
