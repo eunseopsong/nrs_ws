@@ -5,12 +5,12 @@
 HbuttonCmd::HbuttonCmd()
 : Node("hbutton_node"), loop_rate(100.0), fin1(NRS_Record_Printing_loc), fin2(NRS_Fcon_desired_loc)
 {
-    executor_.add_node(shared_from_this());  // 핵심: 단 한 번만 등록
+    // executor_.add_node(shared_from_this());  // 핵심: 단 한 번만 등록
 
     ////// 1. UART init ///////
-#if (Handle_OnOff == 1)
-    Yuart = new Yoon_UART("/dev/ttyACM0", 115200);
-#endif
+    #if (Handle_OnOff == 1)
+        Yuart = new Yoon_UART("/dev/ttyACM0", 115200);
+    #endif
 
     ////// 2. YAML file load ///////
     NRS_recording = YAML::Load(fin1);
