@@ -12,16 +12,6 @@ public:
     void CalculateAndPublishJoint();
     void getActualQ();  // Isaac Sim에서 받은 joint 값을 RArm.qc로 저장
 
-    // joint_state_.name = {
-    //   "shoulder_pan_joint",
-    //   "shoulder_lift_joint",
-    //   "elbow_joint",
-    //   "wrist_1_joint",
-    //   "wrist_2_joint",
-    //   "wrist_3_joint"
-    // };
-    // joint_state_.position.resize(6, 0.0);
-
 private:
     //////// ROS2 Node 및 동기화 자료 ////////
     rclcpp::Node::SharedPtr node_;
