@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
     //// ros::Publisher yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
     //// ros::Publisher joint_command_pub = nh.advertise<std_msgs::Float64MultiArray>("yoon_UR10e_joint_cmd",20);
     //// ros::Publisher posture_command_pub = nh.advertise<std_msgs::Float64MultiArray>("yoon_UR10e_EEposture_cmd",20);
-    //// ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20); 
+    //// ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
     auto yoon_mode_pub = node->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
     auto joint_command_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("yoon_UR10e_joint_cmd", 20);
     auto posture_command_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("yoon_UR10e_EEposture_cmd", 20);
@@ -58,6 +58,8 @@ int main(int argc, char *argv[])
     std_msgs::msg::UInt32 PbNum_command_msg;
 
     uint16_t control_mode = 0;
+    // uint16_t control_mode = 7;
+
     double joint_command[2]={0,}; // which joint(1~6), cmd angle(relative, unit: rad)
     double posture_command[6+1]={0,};
 
@@ -130,7 +132,7 @@ int main(int argc, char *argv[])
             // printf("Time -> %f second",posture_command[6]);
 
         }
-        else if(control_mode == 2) // joint control mode 
+        else if(control_mode == 2) // joint control mode
         {
             std::cout << "Select the joint to move(1~6) :";
             std::cin >> joint_command[0];

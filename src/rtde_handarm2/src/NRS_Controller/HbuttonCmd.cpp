@@ -206,7 +206,7 @@ void HbuttonCmd::Mode_chage()
         current_status = mode0;
 
         #if(Handle_OnOff == 1)
-        // Stanby mode message publish 
+        // Stanby mode message publish
         yoon_mode_msg.data = Motion_stop_cmd;
         yoon_mode_pub->publish(yoon_mode_msg);
         //// ros::spinOnce();
@@ -286,7 +286,7 @@ void HbuttonCmd::Trajectory_gen()
     double Desired_Fx = NRS_Fcon_desired["AAC_Des_Force"]["Fx"].as<double>();
     double Desired_Fy = NRS_Fcon_desired["AAC_Des_Force"]["Fy"].as<double>();
     double Desired_Fz = NRS_Fcon_desired["AAC_Des_Force"]["Fz"].as<double>();
-    
+
     /* Desired motion velocity setting */
     double Star2Cont_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Start2Contact"].as<double>();
     double Cont2Term_vel = NRS_Fcon_desired["AAC_Des_velocity"]["Contact2Termin"].as<double>();
@@ -310,7 +310,7 @@ void HbuttonCmd::Trajectory_gen()
     // FILE* Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
     auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
     FILE* Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
-    
+
     /**** Points to path profile ****/
 
     /* 1) Contact points path profile with force */
@@ -372,7 +372,7 @@ void HbuttonCmd::Trajectory_gen()
 
     fclose(Hand_G_recording);
 
-    point_counter = 0; // selected way point num init
+    point_counter = 0; // selected way pYoon_UR10e_modeoint num init
     current_status = mode4;
 }
 
@@ -482,7 +482,7 @@ void HbuttonCmd::HButton_main()
 
         }
         #endif
-        // ros::spinOnce(); // For service callback
+        //// ros::spinOnce(); // For service callback
         rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
     }
     exit(0);
@@ -491,8 +491,8 @@ void HbuttonCmd::HButton_main()
     #endif
 }
 
-// void catch_signal(int sig)
-// {
-//     printf("Program was terminated \n");
-//     exit(1);
-// }
+//// void catch_signal(int sig)
+//// {
+////     printf("Program was terminated \n");
+////     exit(1);
+//// }
