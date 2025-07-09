@@ -15,6 +15,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
     UR10_pose_pub_   = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
     UR10_wrench_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
+    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("isaac_joint_commands" , 20);
 
     // Subscribers
     UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
