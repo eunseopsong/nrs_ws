@@ -15,7 +15,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
     UR10_pose_pub_   = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
     UR10_wrench_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
-    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("isaac_joint_commands" , 20);
+    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20); // Add on 2025.07.09
 
     // Subscribers
     UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
@@ -1697,7 +1697,7 @@ void JointControl::CalculateAndPublishJoint()
                     #elif Actual_mode == 1 // actual control mode
                     printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
                     // joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
-                    joint_commands_pub_->publish(RArm.qd); // Add on 2025.07.09
+                    // joint_commands_pub_->publish(RArm.qd); // Add on 2025.07.09
                     #endif
 
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);

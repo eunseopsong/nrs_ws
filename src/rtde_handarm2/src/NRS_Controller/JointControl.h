@@ -12,6 +12,16 @@ public:
     void CalculateAndPublishJoint();
     void getActualQ();  // Isaac Sim에서 받은 joint 값을 RArm.qc로 저장
 
+    // joint_state_.name = {
+    //   "shoulder_pan_joint",
+    //   "shoulder_lift_joint",
+    //   "elbow_joint",
+    //   "wrist_1_joint",
+    //   "wrist_2_joint",
+    //   "wrist_3_joint"
+    // };
+    // joint_state_.position.resize(6, 0.0);
+
 private:
     //////// ROS2 Node 및 동기화 자료 ////////
     rclcpp::Node::SharedPtr node_;
@@ -33,7 +43,11 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_wrench_pub_;
 
+
+    // for isaac_joint_commands
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr     joint_commands_pub_;
+    sensor_msgs::msg::JointState joint_state_;
+
 
     std_msgs::msg::UInt16 UR10e_mode_msg_;
     std_msgs::msg::Float64MultiArray UR10_Jangle_msg_;
