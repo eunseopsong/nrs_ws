@@ -1,5 +1,6 @@
 #include "HbuttonCmd.h"
 #include <signal.h>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 
 void catch_signal(int sig) {
     printf("Program was terminated \n");
@@ -10,15 +11,15 @@ void catch_signal(int sig) {
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
+
     auto node = std::make_shared<HbuttonCmd>();
 
-    // 시그널 핸들러 등록
     signal(SIGTERM, catch_signal);
     signal(SIGINT, catch_signal);
 
     rclcpp::executors::SingleThreadedExecutor executor;
-    executor.add_node(node);
-    executor.spin();  // 서비스 요청이 여러 번 가능함
+    executor.add_node(node);  // ✅ 올바른 사용 방식
+    executor.spin();
 
     rclcpp::shutdown();
     return 0;
