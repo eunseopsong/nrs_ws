@@ -17,6 +17,18 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     UR10_wrench_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
     joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20); // Add on 2025.07.09
 
+
+    joint_state_.name = {
+      "shoulder_pan_joint",
+      "shoulder_lift_joint",
+      "elbow_joint",
+      "wrist_1_joint",
+      "wrist_2_joint",
+      "wrist_3_joint"
+    };
+    joint_state_.position.resize(6, 0.0);
+
+
     // Subscribers
     UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
         "/Yoon_UR10e_mode", 20,
