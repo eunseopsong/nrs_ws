@@ -36,6 +36,10 @@
 #include <yaml-cpp/yaml.h>
 #include "NRS_yaml_location.h"
 
+
+#include "rclcpp/executors/single_threaded_executor.hpp"
+
+
 #define DOF 6
 #define PI 3.141592
 #define TEACHING_MODE 0 // Direct Teaching: 0, VR-Vision Teaching: 1 (Danang Demo)
@@ -44,7 +48,8 @@
 #define Handle_OnOff 0  // Handle on : 1, Handle off : 0
 
 ////class NRS_Hbutton_cmd : public std::enable_shared_from_this<NRS_Hbutton_cmd>
-class HbuttonCmd : public rclcpp::Node
+// class HbuttonCmd : public rclcpp::Node
+class HbuttonCmd : public rclcpp::Node, public std::enable_shared_from_this<HbuttonCmd>
 {
 public:
     HbuttonCmd(); //// HbuttonCmd(const rclcpp::Node::SharedPtr& node, int loop_rate_);
@@ -81,6 +86,9 @@ public:
     void catch_signal(int sig);
 
 private:
+    rclcpp::executors::SingleThreadedExecutor executor_;
+
+
     //////// ROS2 Node ////////
     rclcpp::Node::SharedPtr node_;
     rclcpp::Clock::SharedPtr clock_;
