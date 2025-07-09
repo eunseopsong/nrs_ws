@@ -10,19 +10,37 @@ void catch_signal(int sig) {
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-
     auto node = std::make_shared<HbuttonCmd>();
 
     // 시그널 핸들러 등록
     signal(SIGTERM, catch_signal);
     signal(SIGINT, catch_signal);
 
-    // 사용자 정의 main loop 실행 (while 루프)
-    node->HButton_main();
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(node);
+    executor.spin();  // 서비스 요청이 여러 번 가능함
 
     rclcpp::shutdown();
     return 0;
 }
+
+
+// int main(int argc, char **argv)
+// {
+//     rclcpp::init(argc, argv);
+
+//     auto node = std::make_shared<HbuttonCmd>();
+
+//     // 시그널 핸들러 등록
+//     signal(SIGTERM, catch_signal);
+//     signal(SIGINT, catch_signal);
+
+//     // 사용자 정의 main loop 실행 (while 루프)
+//     node->HButton_main();
+
+//     rclcpp::shutdown();
+//     return 0;
+// }
 
 //// int main(int argc, char **argv)
 //// {
