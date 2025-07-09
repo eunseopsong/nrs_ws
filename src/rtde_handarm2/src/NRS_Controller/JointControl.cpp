@@ -1696,7 +1696,8 @@ void JointControl::CalculateAndPublishJoint()
                     joint_q = {Init_qc(0), Init_qc(1), Init_qc(2), Init_qc(3), Init_qc(4), Init_qc(5)};
                     #elif Actual_mode == 1 // actual control mode
                     printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
-                    joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
+                    // joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
+                    joint_commands_pub_->publish(RArm.qd); // Add on 2025.07.09
                     #endif
 
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
