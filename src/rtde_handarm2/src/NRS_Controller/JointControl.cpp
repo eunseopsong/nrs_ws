@@ -33,7 +33,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         "/vive/pos0", 100,
         std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
 
-    joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+    joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
     "/isaac_joint_states", rclcpp::QoS(10),
     [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
         if (msg->position.size() < 6) {
