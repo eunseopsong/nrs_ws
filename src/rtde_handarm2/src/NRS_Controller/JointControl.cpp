@@ -18,6 +18,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20); // Add on 2025.07.09
 
 
+    //// Add on 2025.07.09
     joint_state_.name = {
       "shoulder_pan_joint",
       "shoulder_lift_joint",
@@ -1709,7 +1710,19 @@ void JointControl::CalculateAndPublishJoint()
                     #elif Actual_mode == 1 // actual control mode
                     printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
                     // joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
+
+                    /////////////////////////////////////////////////////
                     // joint_commands_pub_->publish(RArm.qd); // Add on 2025.07.09
+                    // RArm.qd를 JointState 메시지로 변환하여 publish
+                    joint_state_.header.stamp = node_->now();  // timestamp 갱신
+
+                    for (int i = 0; i < 6; ++i) {
+                        joint_state_.position[i] = RArm.qd(i);
+                    }
+
+                    joint_commands_pub_->publish(joint_state_);
+                    //////////////////////////////////////////////////////
+
                     #endif
 
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
