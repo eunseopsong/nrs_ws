@@ -197,7 +197,7 @@ void HbuttonCmd::Mode_chage()
         yoon_mode_pub->publish(yoon_mode_msg);
 
         //// ros::spinOnce();
-        rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
+        // rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
         #endif
     }
     else // change to standby mode
@@ -210,7 +210,7 @@ void HbuttonCmd::Mode_chage()
         yoon_mode_msg.data = Motion_stop_cmd;
         yoon_mode_pub->publish(yoon_mode_msg);
         //// ros::spinOnce();
-        rclcpp::spin_some(this->get_node_base_interface());
+        // rclcpp::spin_some(this->get_node_base_interface());
         #endif
 
         if (point_counter != 0)
@@ -219,7 +219,7 @@ void HbuttonCmd::Mode_chage()
             yoon_mode_msg.data = Descrete_recording_save;
             yoon_mode_pub->publish(yoon_mode_msg);
             //// ros::spinOnce();
-            rclcpp::spin_some(this->get_node_base_interface());
+            // rclcpp::spin_some(this->get_node_base_interface());
         }
     }
 }
@@ -262,7 +262,7 @@ void HbuttonCmd::Way_point_save()  // to solve error: (2025.06.27 23:35)
     yoon_mode_msg.data = Descrete_reording_start;
     yoon_mode_pub->publish(yoon_mode_msg);
     //// ros::spinOnce();
-    rclcpp::spin_some(this->get_node_base_interface());
+    // rclcpp::spin_some(this->get_node_base_interface());
     point_counter ++;
 
 }
@@ -274,7 +274,7 @@ void HbuttonCmd::VR_point_save()
     Clicked_msg.point.z = VRPose_point.z;
     Clicked_pub->publish(Clicked_msg);
     //// ros::spinOnce();
-    rclcpp::spin_some(this->get_node_base_interface());
+    // rclcpp::spin_some(this->get_node_base_interface());
     point_counter ++;
 }
 
@@ -406,7 +406,7 @@ void HbuttonCmd::Playback_exe()
             yoon_mode_pub->publish(yoon_mode_msg);
             //// yoon_mode_pub.publish(yoon_mode_msg);
             //// ros::spinOnce();
-            rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
+            // rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
             current_status = mode3;
             iter_num = 0;
             PB_exe_counter = 0;
@@ -483,7 +483,7 @@ void HbuttonCmd::HButton_main()
         }
         #endif
         //// ros::spinOnce(); // For service callback
-        rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
+        // rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
     }
     exit(0);
     #if(Handle_OnOff == 1)
