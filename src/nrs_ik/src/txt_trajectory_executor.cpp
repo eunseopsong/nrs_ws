@@ -19,7 +19,7 @@ using std::sin, std::cos;
 class TxtTrajectoryExecutor : public rclcpp::Node
 {
 public:
-  TxtTrajectoryExecutor() : Node("eunseop")
+  TxtTrajectoryExecutor() : Node("txt_executor")
   {
     pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
       "/isaac_joint_commands", rclcpp::QoS(10).reliable());
