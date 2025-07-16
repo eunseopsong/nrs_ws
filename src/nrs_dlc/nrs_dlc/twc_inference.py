@@ -7,22 +7,23 @@ def load_and_preprocess_data(data_num=2, base_folder="data/training"):
     current_dir = os.path.dirname(__file__)
     data_path = os.path.join(current_dir, '..', base_folder, str(data_num))
 
-    file_rot = os.path.join(data_path, 'Ori_rot.txt')
     file_ft = os.path.join(data_path, 'Ori_ft.txt')
+    file_rot = os.path.join(data_path, 'Ori_rot.txt')
 
     # 파일 불러오기
     try:
-        raw_rot = np.loadtxt(file_rot)
         raw_ft = np.loadtxt(file_ft)
+        raw_rot = np.loadtxt(file_rot)
     except Exception as e:
         print(f"❌ 파일 읽기 실패: {e}")
         return None, None, None, None
 
-    # 첫 번째 행 제거
-    raw_rot = raw_rot[1:, :]
+    # remove the first row (line 15 in matlab)
     raw_ft = raw_ft[1:, :]
+    raw_rot = raw_rot[1:, :]
 
     # %% Data Preprocessing
+    # % Extract RPY directly and force/moment data
     # 입력: 회전행렬 9개 요소
     input_data = raw_rot[:, 0:9]  # Nx9
 
