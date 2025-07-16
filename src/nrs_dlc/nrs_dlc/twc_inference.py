@@ -40,10 +40,35 @@ def load_and_preprocess_data(data_num=2, base_folder="data/training"):
 
     return input_data, force_data, moment_data, target_data
 
+# %% Normalize Utility
+def normalize_data(input_data, target_data):
+    input_min = np.min(input_data, axis=0)
+    input_max = np.max(input_data, axis=0)
+    input_data_saturated = np.clip(input_data, input_min, input_max)
+
+    target_min = np.min(target_data, axis=0)
+    target_max = np.max(target_data, axis=0)
+    target_data_saturated = np.clip(target_data, target_min, target_max)
+
+    def normalize(val, min_val, max_val):
+        return 2 * (val - min_val) / (max_val - min_val) - 1
+
+    def denormalize(val, min_val, max_val):
+        return (val + 1) / 2 * (max_val - min_val) + min_val
+
+    input_norm = normalize(input_data_saturated, input_min, input_max)
+    target_norm = normalize(target_data_saturated, target_min, target_max)
+
+    return input_norm, target_norm, input_min, input_max, target_min, target_max, denormalize
 # %% Main Entry Point for ROS 2
 def main():
     print("✅ TWC Inference Node 시작")
-    input_data, force_data, moment_data, target_data = load_and_preprocess_data(data_num=2)
+    input_data, _, _, target_data = load_and_preprocess_data(data_num=2)
+    input_norm, target_norm, _, _, _, _, _ = normalize_data(input_data, target_data)
+
+    print(" - input_data_norm shape:", input_norm.shape)
+    print(" - target_data_norm shape:", target_norm.shape)
+
 
 if __name__ == '__main__':
     main()
