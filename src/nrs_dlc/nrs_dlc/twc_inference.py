@@ -1,6 +1,9 @@
 import os
 import numpy as np
 from sklearn.model_selection import StratifiedKFold, train_test_split
+import collections
+from collections import Counter
+import numpy as np
 
 # %% Helper Functions
 
@@ -60,31 +63,60 @@ def load_and_preprocess_data(data_num=2, base_folder="data/training"):
     print(f" - target_data_norm shape: {target_data_norm.shape}")
 
     return input_data_norm, target_data_norm, input_min, input_max, target_min, target_max, input_data, target_data
+# %% Run Stratified K-Fold Cross Validation
+def run_kfold_validation(input_data_norm, target_data_norm, n_bins=8, k_folds=8, min_samples=8):
+    print("\n🔍 Running Stratified K-Fold Cross Validation")
 
-# %% Stratified K-Fold Cross Validation
+    # === 자동 bin 생성 및 유효성 검증 ===
+    y = target_data_norm[:, 2]  # Fz 성분
+    bins = np.histogram_bin_edges(y, bins=n_bins)
+    bin_idx = np.digitize(y, bins[:-1])
 
-def run_kfold_validation(input_data_norm, target_data_norm, k_folds=8, n_bins=8):
-    bin_edges = np.histogram_bin_edges(target_data_norm[:, 2], bins=n_bins)
-    bin_idx = np.digitize(target_data_norm[:, 2], bins=bin_edges)
+    bin_counts = Counter(bin_idx)
+    valid_bins = [b for b, count in bin_counts.items() if count >= min_samples]
+    valid_idx = np.isin(bin_idx, valid_bins)
 
-    skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
+    # 유효 데이터만 필터링
+    input_data_norm = input_data_norm[valid_idx]
+    target_data_norm = target_data_norm[valid_idx]
+    bin_idx = bin_idx[valid_idx]
 
-    for fold, (train_idx, test_idx) in enumerate(skf.split(input_data_norm, bin_idx), 1):
-        print(f"\n📂 Processing Fold {fold}/{k_folds}...")
+    print(f"✅ Total filtered samples: {input_data_norm.shape[0]}")
+    print(f"✅ Valid bin counts: {len(valid_bins)} / {n_bins}")
 
-        # Stratified validation split inside training set
+    # Stratified K-Fold
+    strat_kfold = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
+
+    for fold, (train_idx, test_idx) in enumerate(strat_kfold.split(input_data_norm, bin_idx)):
+        print(f"\n📂 Processing Fold {fold + 1}/{k_folds}...")
+
+        X = input_data_norm
+        Y = target_data_norm
+
+        # Stratified validation split from train
         bin_train_idx = bin_idx[train_idx]
-        train_sub_idx, val_sub_idx = train_test_split(
-            train_idx, test_size=0.2, stratify=bin_train_idx, random_state=42)
+        try:
+            train_sub_idx, val_sub_idx = train_test_split(
+                train_idx,
+                test_size=0.2,
+                stratify=bin_train_idx,
+                random_state=fold
+            )
+        except ValueError:
+            print("⚠️ Warning: Some classes too small, using random split instead.")
+            train_sub_idx, val_sub_idx = train_test_split(
+                train_idx,
+                test_size=0.2,
+                random_state=fold
+            )
 
-        X_train = input_data_norm[train_sub_idx].T
-        Y_train = target_data_norm[train_sub_idx].T
-
-        X_val = input_data_norm[val_sub_idx].T
-        Y_val = target_data_norm[val_sub_idx].T
-
-        X_test = input_data_norm[test_idx].T
-        Y_test = target_data_norm[test_idx].T
+        # Train / Val / Test 데이터 생성
+        X_train = X[train_sub_idx].T
+        Y_train = Y[train_sub_idx].T
+        X_val = X[val_sub_idx].T
+        Y_val = Y[val_sub_idx].T
+        X_test = X[test_idx].T
+        Y_test = Y[test_idx].T
 
         print(f" - X_train shape: {X_train.shape}")
         print(f" - Y_train shape: {Y_train.shape}")
