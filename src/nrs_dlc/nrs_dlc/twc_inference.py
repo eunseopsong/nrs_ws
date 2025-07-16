@@ -24,15 +24,13 @@ def load_and_preprocess_data(data_num=2, base_folder="data/training"):
 
     # %% Data Preprocessing
     # % Extract RPY directly and force/moment data
-    # 입력: 회전행렬 9개 요소
-    input_data = raw_rot[:, 0:9]  # Nx9
+    input_data = raw_rot[:, 0:9] # Rot elements (1*9 matrix))
+    force_data = raw_ft[:, 0:3]  # Fx, Fy, Fz (Nx3 matrix)
+    moment_data = raw_ft[:, 3:6] # Mx, My, Mz (Nx3 matrix)
 
-    # 출력: 힘 (Fx, Fy, Fz) 및 모멘트 (Mx, My, Mz)
-    force_data = raw_ft[:, 0:3]    # Nx3
-    moment_data = raw_ft[:, 3:6]   # Nx3
-
-    # 출력 통합 (Fx, Fy, Fz, Mx, My, Mz)
-    target_data = np.hstack([force_data, moment_data])  # Nx6
+    # Combine force and moment data as target
+    # Fx, Fy, Fz, Mx, My, Mz (N*6 matrix)
+    target_data = np.hstack([force_data, moment_data])
 
     print("✅ 데이터 로드 및 전처리 완료")
     print(f" - input_data shape: {input_data.shape}")
