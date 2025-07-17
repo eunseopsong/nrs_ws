@@ -53,9 +53,7 @@ def load_and_preprocess_data(data_num=2, base_folder="data/training"):
     return input_data_norm, target_data_norm, input_min, input_max, target_min, target_max, input_data, target_data
 
 # %% K-Fold Cross Validation
-def run_kfold_validation(input_data_norm, target_data_norm,
-                         input_min, input_max, target_min, target_max,
-                         n_bins=8, k_folds=8):
+def run_kfold_validation(input_data_norm, target_data_norm, n_bins=8, k_folds=8):
     print("\n🔍 Running Stratified K-Fold Cross Validation")
 
     target_fz = target_data_norm[:, 2]
@@ -73,9 +71,6 @@ def run_kfold_validation(input_data_norm, target_data_norm,
     print(f"✅ Valid bin counts: {np.sum(valid_mask)} / {n_bins}")
 
     skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
-
-    mse_scores = []
-    Y_pred_norm_all = np.zeros_like(target_data_filtered)
 
     for fold, (trainval_idx, test_idx) in enumerate(skf.split(input_data_filtered, bin_idx_filtered), start=1):
         print(f"\n📂 Processing Fold {fold}/{k_folds}...")
@@ -100,38 +95,6 @@ def run_kfold_validation(input_data_norm, target_data_norm,
         print(f" - Y_val shape: {Y_val.shape}")
         print(f" - X_test shape: {X_test.shape}")
         print(f" - Y_test shape: {Y_test.shape}")
-
-        # === 모델 학습 및 예측 ===
-        model = train_ann(X_train, Y_train, X_val, Y_val)
-
-        model.eval()
-        with torch.no_grad():
-            X_test_tensor = torch.FloatTensor(X_test.T)
-            pred_output_norm = model(X_test_tensor).numpy()
-
-        # 전체 예측 저장
-        Y_pred_norm_all[test_idx, :] = pred_output_norm
-
-        # 역정규화
-        pred_output = denormalize(pred_output_norm, target_min, target_max)
-        Y_test_denorm = denormalize(Y_test.T, target_min, target_max)
-
-        # Fold MSE 계산 및 저장
-        mse = np.mean((pred_output - Y_test_denorm) ** 2)
-        mse_scores.append(mse)
-        print(f"📉 Fold {fold} MSE: {mse:.6f}")
-
-    # === 전체 Fold 결과 요약 ===
-    pred_output_all = denormalize(Y_pred_norm_all, target_min, target_max)
-    pred_force = pred_output_all[:, :3]
-    pred_moment = pred_output_all[:, 3:]
-    comp_force = target_data_filtered[:, :3] - pred_force
-    comp_moment = target_data_filtered[:, 3:] - pred_moment
-
-    print("\n📊 MSE Scores per Fold:")
-    print(np.round(mse_scores, 6))
-    print(f"📈 Average MSE: {np.mean(mse_scores):.6f}")
-
 
 # %% ANN Definition
 class TWCNet(nn.Module):
@@ -182,17 +145,13 @@ def train_ann(X_train, Y_train, X_val, Y_val, epochs=6000, goal=1e-8):
 def main(run_kfold=True, run_ann_training=True):
     print("✅ TWC Inference Node 시작")
 
-    input_data_norm, target_data_norm, input_min, input_max, target_min, target_max, *_ = \
-        load_and_preprocess_data(data_num=2)
+    input_data_norm, target_data_norm, *_ = load_and_preprocess_data(data_num=2)
 
     if input_data_norm is None or target_data_norm is None:
         return
 
     if run_kfold:
-        run_kfold_validation(
-            input_data_norm, target_data_norm,
-            input_min, input_max, target_min, target_max
-        )
+        run_kfold_validation(input_data_norm, target_data_norm)
 
     if run_ann_training:
         split_idx = int(0.8 * len(input_data_norm))
