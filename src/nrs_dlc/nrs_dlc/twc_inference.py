@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import StratifiedKFold, train_test_split
+import json
 # 2025.07.17
 
 # %% Normalize Functions
@@ -132,6 +133,10 @@ def run_kfold_validation(input_data_norm, target_data_norm,
     print(np.round(mse_scores, 6))
     print(f"📈 Average MSE: {np.mean(mse_scores):.6f}")
 
+    # 마지막 fold 기준 모델 저장
+    save_model_to_json(model, input_min, input_max, target_min, target_max)
+
+
 
 # %% ANN Definition
 class TWCNet(nn.Module):
@@ -177,6 +182,50 @@ def train_ann(X_train, Y_train, X_val, Y_val, epochs=6000, goal=1e-8):
 
     print("✅ ANN Training Finished")
     return model
+
+def save_model_to_json(model, input_min, input_max, target_min, target_max):
+    import os
+    import json
+
+    # 저장 경로 설정
+    json_dir = os.path.expanduser("~/nrs_ws/src/nrs_dlc/json")
+    os.makedirs(json_dir, exist_ok=True)
+    filename = os.path.join(json_dir, "ann_weights_biases.json")
+
+    # state_dict에서 가중치 추출
+    state_dict = model.state_dict()
+    weights_biases = {
+        'weights1': state_dict['model.0.weight'].cpu().numpy().tolist(),
+        'bias1': state_dict['model.0.bias'].cpu().numpy().tolist(),
+        'weights2': state_dict['model.2.weight'].cpu().numpy().tolist(),
+        'bias2': state_dict['model.2.bias'].cpu().numpy().tolist(),
+        'weightsOut': state_dict['model.4.weight'].cpu().numpy().tolist(),
+        'biasOut': state_dict['model.4.bias'].cpu().numpy().tolist(),
+        'input_min': input_min.tolist(),
+        'input_max': input_max.tolist(),
+        'target_min': target_min.tolist(),
+        'target_max': target_max.tolist()
+    }
+
+    # JSON 저장
+    with open(filename, 'w') as f:
+        json.dump(weights_biases, f, indent=4)
+    print(f"✅ Weights and biases saved to: {filename}")
+
+    # 저장된 JSON과 현재 모델 비교
+    with open(filename, 'r') as f:
+        loaded = json.load(f)
+
+    def max_diff(a, b):
+        return np.max(np.abs(np.array(a) - np.array(b)))
+
+    print("📏 Difference check between model and saved JSON:")
+    print(f" - weights1 diff:   {max_diff(loaded['weights1'], weights_biases['weights1']):.6e}")
+    print(f" - bias1 diff:      {max_diff(loaded['bias1'], weights_biases['bias1']):.6e}")
+    print(f" - weightsOut diff: {max_diff(loaded['weightsOut'], weights_biases['weightsOut']):.6e}")
+    print(f" - biasOut diff:    {max_diff(loaded['biasOut'], weights_biases['biasOut']):.6e}")
+
+
 
 # %% Main Entry Point
 def main(run_kfold=True, run_ann_training=True):
