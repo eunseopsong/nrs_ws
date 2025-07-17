@@ -21,7 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'twc_inference = nrs_dlc.twc_inference:main',
-            'tic_inference = nrs_dlc.tic_inference:main',
+            'tic_emkm = nrs_dlc.tic_emkm_tuning_ft:main',
         ],
     },
 )
