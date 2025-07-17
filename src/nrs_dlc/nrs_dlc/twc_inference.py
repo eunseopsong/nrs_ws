@@ -99,7 +99,7 @@ def train_ann(X_train, Y_train, X_val, Y_val, epochs=6000, goal=1e-8):
 
 # %% Save to JSON
 def save_model_to_json(model, input_min, input_max, target_min, target_max):
-    json_dir = os.path.expanduser("~/nrs_ws/src/nrs_dlc/TWC/json")
+    json_dir = os.path.expanduser("~/nrs_ws/src/nrs_dlc/json/TWC")
     os.makedirs(json_dir, exist_ok=True)
     filename = os.path.join(json_dir, "ann_weights_biases.json")
 
