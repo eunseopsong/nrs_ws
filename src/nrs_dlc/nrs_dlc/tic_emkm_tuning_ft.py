@@ -76,13 +76,106 @@ def run_kalman_em_filter(force_data, moment_data, dt=0.01):
 
     return force_em_result, moment_em_result
 
-def kalman_em_diff_estimate(data, dt, json_filename, max_iter=20):
+def kalman_em_diff_estimate(ft_data, dt, json_filename, max_iter=20):
     """
-    EM 기반 Kalman 필터를 이용하여 미분값 추정.
-    Q, R은 json_filename으로부터 불러오거나 새로 학습하여 저장함.
+    EM 기반 Kalman 필터를 이용해 1차 미분값(가속도 등)을 추정한다.
+    Q, R을 지정된 경로에서 불러오거나 EM 알고리즘으로 학습하여 저장함.
+    최종적으로 필터링된 acc_out (Nx3)을 반환한다.
     """
-    # ⏳ 다음 단계에서 구현
-    pass
+    import os
+    import json
+    import numpy as np
+
+    A = np.eye(3)
+    H = np.eye(3)
+    n = ft_data.shape[0]
+    acc_out = np.zeros((n, 3))
+
+    # ✅ 사용자 지정 저장 디렉토리
+    home_dir = os.path.expanduser("~")
+    save_dir = os.path.join(home_dir, "nrs_ws", "src", "nrs_dlc", "json", "TIC")
+    os.makedirs(save_dir, exist_ok=True)
+
+    # 파일 이름만 유지한 채 경로 붙이기
+    base_filename = os.path.basename(json_filename)
+    json_path = os.path.join(save_dir, base_filename)
+
+    # 📂 기존 json이 있으면 불러오기
+    if os.path.exists(json_path):
+        with open(json_path, 'r') as f:
+            gain = json.load(f)
+            Q = np.array(gain['Q'])
+            R = np.array(gain['R'])
+        print(f"[Kalman EM] Loaded Q, R from {json_path} (Load complete.)")
+    else:
+        print("[Kalman EM] No gain found. Start tuning...")
+
+        Q = np.eye(3) * 1e-4
+        R = np.eye(3) * 1e-3
+        x = np.zeros((3, 1))
+        P = np.eye(3)
+
+        for _ in range(max_iter):
+            xs = np.zeros((3, n))
+            Ps = np.zeros((3, 3, n))
+            Pcs = np.zeros((3, 3, n - 1))
+            xf = np.zeros((3, n))
+            Pf = np.zeros((3, 3, n))
+
+            x_pred = x.copy()
+            P_pred = P.copy()
+
+            # Forward filtering
+            for k in range(1, n):
+                z = (ft_data[k] - ft_data[k - 1]).reshape(3, 1) / dt
+                K = P_pred @ H.T @ np.linalg.inv(H @ P_pred @ H.T + R)
+                x = x_pred + K @ (z - H @ x_pred)
+                P = (np.eye(3) - K @ H) @ P_pred
+                xf[:, k] = x.flatten()
+                Pf[:, :, k] = P
+                x_pred = A @ x
+                P_pred = A @ P @ A.T + Q
+
+            # Backward smoothing
+            xs[:, -1] = xf[:, -1]
+            Ps[:, :, -1] = Pf[:, :, -1]
+            for k in range(n - 2, -1, -1):
+                Ck = Pf[:, :, k] @ A.T @ np.linalg.inv(A @ Pf[:, :, k] @ A.T + Q)
+                xs[:, k] = xf[:, k] + Ck @ (xs[:, k + 1] - A @ xf[:, k])
+                Ps[:, :, k] = Pf[:, :, k] + Ck @ (Ps[:, :, k + 1] - A @ Pf[:, :, k] @ A.T - Q) @ Ck.T
+                Pcs[:, :, k] = Ck @ Ps[:, :, k + 1]
+
+            Q_sum = np.zeros((3, 3))
+            R_sum = np.zeros((3, 3))
+            for k in range(1, n):
+                dz = (ft_data[k] - ft_data[k - 1]).reshape(3, 1) / dt - H @ xs[:, k].reshape(3, 1)
+                dx = xs[:, k].reshape(3, 1) - A @ xs[:, k - 1].reshape(3, 1)
+                Q_sum += dx @ dx.T + Ps[:, :, k] + A @ Ps[:, :, k - 1] @ A.T - A @ Pcs[:, :, k - 1].T - Pcs[:, :, k - 1] @ A.T
+                R_sum += dz @ dz.T + H @ Ps[:, :, k] @ H.T
+
+            Q = Q_sum / (n - 1)
+            R = R_sum / (n - 1)
+
+        # 🔽 Q, R 저장
+        with open(json_path, 'w') as f:
+            json.dump({'Q': Q.tolist(), 'R': R.tolist()}, f, indent=4)
+        print(f"[Kalman EM] Tuning complete. Gains saved to {json_path}")
+
+    # Final Kalman filtering
+    x = np.zeros((3, 1))
+    P = np.eye(3)
+    for k in range(1, n):
+        z = (ft_data[k] - ft_data[k - 1]).reshape(3, 1) / dt
+        K = P @ H.T @ np.linalg.inv(H @ P @ H.T + R)
+        x = x + K @ (z - H @ x)
+        P = (np.eye(3) - K @ H) @ P
+        acc_out[k] = x.flatten()
+        x = A @ x
+        P = A @ P @ A.T + Q
+
+    return acc_out
+
+
 
 
 def main():
