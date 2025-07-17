@@ -1,7 +1,8 @@
 import os
 import numpy as np
 import json
-
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 
 def load_and_preprocess_tic_data(data_num=1, base_folder="data/TIC/training"):
     """
@@ -175,8 +176,48 @@ def kalman_em_diff_estimate(ft_data, dt, json_filename, max_iter=20):
 
     return acc_out
 
+def validate_and_plot_derivatives(original_data, kalman_data, dt, title='Force', unit='N/s'):
+    """
+    Kalman 필터 결과와 직접 미분, Gaussian smoothing 결과를 비교 시각화합니다.
+    Args:
+        original_data: Nx3 원본 입력값 (ex. 보정된 힘/모멘트)
+        kalman_data:   Nx3 Kalman 필터 결과
+        dt:            샘플링 간격 (초)
+        title:         제목 (Force / Moment 등)
+        unit:          y축 단위 (예: N/s, Nm/s)
+    """
 
+    time_profile = np.arange(original_data.shape[0]) * dt
+    deri = np.zeros_like(original_data)
+    smooth = np.zeros_like(original_data)
 
+    # 직접 미분
+    prev = np.zeros(3)
+    for i in range(original_data.shape[0]):
+        deri[i] = (original_data[i] - prev) / dt
+        prev = original_data[i]
+
+    # Gaussian smoothing
+    for i in range(3):
+        smooth[:, i] = gaussian_filter1d(deri[:, i], sigma=5)
+
+    # Plot
+    component_names = ['x', 'y', 'z']
+    plt.figure(figsize=(8, 6))
+    plt.suptitle(f'{title} Derivative Comparison', fontsize=14)
+
+    for i in range(3):
+        plt.subplot(3, 1, i + 1)
+        plt.plot(time_profile, kalman_data[:, i], 'r-', linewidth=2, label='Kalman Filter')
+        plt.plot(time_profile, deri[:, i], 'k-', linewidth=0.8, label='Direct Derivative')
+        plt.plot(time_profile, smooth[:, i], 'b-', linewidth=2, label='Smoothed')
+        plt.xlabel('Time (s)')
+        plt.ylabel(f'{title[0]}{component_names[i]} ({unit})')
+        plt.grid(True)
+        plt.legend()
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
 
 def main():
     print("✅ TIC KalmanEM Node 시작")
@@ -192,10 +233,9 @@ def main():
 
     # 🧠 칼만 필터 적용 (force, moment 모두)
     force_EM_data, moment_EM_data = run_kalman_em_filter(TWC_force_data, TWC_moment_data)
-
-
-
-
+    # ✅ 시각화: Kalman vs 미분 vs smoothing
+    validate_and_plot_derivatives(TWC_force_data, force_EM_data, dt=0.01, title='Force', unit='N/s')
+    validate_and_plot_derivatives(TWC_moment_data, moment_EM_data, dt=0.01, title='Moment', unit='Nm/s')
 
 if __name__ == '__main__':
     main()
