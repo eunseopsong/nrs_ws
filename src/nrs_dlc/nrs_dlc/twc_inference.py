@@ -14,7 +14,7 @@ def denormalize(value, min_val, max_val):
     return ((value + 1) / 2) * (max_val - min_val) + min_val
 
 # %% Data Loading & Preprocessing
-def load_and_preprocess_data(data_num=2, base_folder="data/training"):
+def load_and_preprocess_data(data_num=2, base_folder="data/TWC/training"):
     current_dir = os.path.dirname(__file__)
     data_path = os.path.join(current_dir, '..', base_folder, str(data_num))
 
@@ -99,7 +99,7 @@ def train_ann(X_train, Y_train, X_val, Y_val, epochs=6000, goal=1e-8):
 
 # %% Save to JSON
 def save_model_to_json(model, input_min, input_max, target_min, target_max):
-    json_dir = os.path.expanduser("~/nrs_ws/src/nrs_dlc/json")
+    json_dir = os.path.expanduser("~/nrs_ws/src/nrs_dlc/TWC/json")
     os.makedirs(json_dir, exist_ok=True)
     filename = os.path.join(json_dir, "ann_weights_biases.json")
 
