@@ -3,6 +3,12 @@ import numpy as np
 import json
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.preprocessing import KBinsDiscretizer
+
 
 def rowwise_cross(a, b):
     return np.cross(a, b)
@@ -243,6 +249,137 @@ def normalize_input_target_data(input_data, target_data):
     return input_data_norm, target_data_norm, input_min, input_max, target_min, target_max
 
 
+# -------------------- Normalize & Denormalize --------------------
+def denormalize(value, min_val, max_val):
+    return ((value + 1) / 2) * (max_val - min_val)
+
+# -------------------- MLP Model --------------------
+class ForcePredictorNet(nn.Module):
+    def __init__(self, input_dim=9, hidden_sizes=[6, 6], output_dim=6):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_sizes[0]),
+            nn.Tanh(),
+            nn.Linear(hidden_sizes[0], hidden_sizes[1]),
+            nn.Tanh(),
+            nn.Linear(hidden_sizes[1], output_dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+# -------------------- K-Fold Training Function --------------------
+def train_ann_kfold(input_data_norm, target_data_norm, converted_acc, target_data,
+                    input_min, input_max, target_min, target_max,
+                    n_bins=5, k_folds=5):
+
+    bin_data = converted_acc[:, 1].reshape(-1, 1)
+    est = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
+    bin_idx = est.fit_transform(bin_data).astype(int).flatten()
+
+    skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
+
+    mse_scores = []
+    Y_pred_norm_all = np.zeros_like(target_data_norm)
+
+    for fold, (train_val_idx, test_idx) in enumerate(skf.split(input_data_norm, bin_idx)):
+        print(f"Processing Fold {fold+1}/{k_folds}...")
+
+        train_idx, val_idx = train_test_split(
+            train_val_idx, test_size=0.2, stratify=bin_idx[train_val_idx], random_state=42
+        )
+
+        # Convert to torch
+        X_train = torch.tensor(input_data_norm[train_idx], dtype=torch.float32)
+        Y_train = torch.tensor(target_data_norm[train_idx], dtype=torch.float32)
+        X_val = torch.tensor(input_data_norm[val_idx], dtype=torch.float32)
+        Y_val = torch.tensor(target_data_norm[val_idx], dtype=torch.float32)
+        X_test = torch.tensor(input_data_norm[test_idx], dtype=torch.float32)
+        Y_test = torch.tensor(target_data_norm[test_idx], dtype=torch.float32)
+
+        model = ForcePredictorNet()
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        criterion = nn.MSELoss()
+
+        # Early stopping
+        best_loss = np.inf
+        patience = 0
+        max_patience = 40
+        for epoch in range(6000):
+            model.train()
+            optimizer.zero_grad()
+            output = model(X_train)
+            loss = criterion(output, Y_train)
+            loss.backward()
+            optimizer.step()
+
+            # Validation
+            model.eval()
+            with torch.no_grad():
+                val_output = model(X_val)
+                val_loss = criterion(val_output, Y_val).item()
+
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_model_state = model.state_dict()
+                patience = 0
+            else:
+                patience += 1
+                if patience >= max_patience:
+                    break
+
+        # Test with best model
+        model.load_state_dict(best_model_state)
+        model.eval()
+        with torch.no_grad():
+            pred_output_norm = model(X_test).cpu().numpy()
+            Y_pred_norm_all[test_idx, :] = pred_output_norm
+
+            pred_output = denormalize(pred_output_norm, target_min, target_max)
+            Y_test_denorm = denormalize(Y_test.numpy(), target_min, target_max)
+            mse = np.mean((pred_output - Y_test_denorm) ** 2)
+            mse_scores.append(mse)
+
+    pred_output_all = denormalize(Y_pred_norm_all, target_min, target_max)
+    pred_force = pred_output_all[:, :3]
+    pred_moment = pred_output_all[:, 3:6]
+    comp_force = target_data - pred_output_all
+
+    print(f"✅ Average MSE (Force Compensation): {np.mean(mse_scores):.6f}")
+    return pred_output_all, comp_force, mse_scores
+
+# def save_ann_weights_biases_to_json(model: nn.Module,
+#                                     input_min: np.ndarray,
+#                                     input_max: np.ndarray,
+#                                     target_min: np.ndarray,
+#                                     target_max: np.ndarray,
+#                                     json_file: str = "TIC_ann_weights_biases.json"):
+#     """
+#     Save ANN weights, biases, and normalization ranges to a JSON file.
+#     """
+#     layers = [layer for layer in model.net if isinstance(layer, nn.Linear)]
+
+#     if len(layers) != 3:
+#         raise ValueError("Model should have 3 Linear layers (2 hidden, 1 output).")
+
+#     weights_biases = {
+#         "weights1": layers[0].weight.detach().numpy().tolist(),
+#         "bias1": layers[0].bias.detach().numpy().tolist(),
+#         "weights2": layers[1].weight.detach().numpy().tolist(),
+#         "bias2": layers[1].bias.detach().numpy().tolist(),
+#         "weightsOut": layers[2].weight.detach().numpy().tolist(),
+#         "biasOut": layers[2].bias.detach().numpy().tolist(),
+#         "input_min": input_min.tolist(),
+#         "input_max": input_max.tolist(),
+#         "target_min": target_min.tolist(),
+#         "target_max": target_max.tolist()
+#     }
+
+#     # Save to JSON
+#     with open(json_file, 'w') as f:
+#         json.dump(weights_biases, f, indent=4)
+
+#     print(f"✅ ANN weights, biases, and normalization data saved to {json_file}")
 
 
 
@@ -250,26 +387,30 @@ def normalize_input_target_data(input_data, target_data):
 def main():
     print("✅ TIC KalmanEM Node 시작")
 
-    try:
-        raw_vel, TWC_comp_FT, ori_FT = load_and_preprocess_tic_data(data_num=2)
-    except RuntimeError as e:
-        print(e)
-        return
-
+    # Load & Preprocess
+    raw_vel, TWC_comp_FT, ori_FT = load_and_preprocess_tic_data(data_num=2)
     lin_vel_data, ang_vel_data, TWC_force_data, TWC_moment_data = \
         split_tic_components(raw_vel, TWC_comp_FT)
-
     lin_acc_data, ang_acc_data, converted_acc = \
         run_kalman_and_convert(lin_vel_data, ang_vel_data)
-
     input_data, target_data = build_input_target_data(
-        converted_acc, ang_acc_data, ang_vel_data,
-        TWC_force_data, TWC_moment_data
+        converted_acc, ang_acc_data, ang_vel_data, TWC_force_data, TWC_moment_data
     )
-
-    # ⬇️ 정규화 단계
     input_data_norm, target_data_norm, input_min, input_max, target_min, target_max = \
         normalize_input_target_data(input_data, target_data)
+
+    # Train & Evaluate
+    best_model = train_ann_kfold(
+        input_data_norm, target_data_norm, converted_acc, target_data,
+        input_min, input_max, target_min, target_max
+    )
+
+    # Save weights/biases to JSON
+    # save_ann_weights_biases_to_json(
+    #     best_model, input_min, input_max, target_min, target_max,
+    #     json_file="TIC_ann_weights_biases.json"
+    # )
+
 
 
 
