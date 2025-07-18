@@ -4,6 +4,7 @@ import json
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
+# %% Data Loading
 def load_and_preprocess_tic_data(data_num=2, base_folder="data/TIC/training"):
     """
     TIC 데이터를 불러오고 전처리를 수행합니다.
@@ -36,6 +37,31 @@ def load_and_preprocess_tic_data(data_num=2, base_folder="data/TIC/training"):
 
     return raw_vel, TWC_comp_FT, ori_FT
 
+# %% Data Preprocessing
+# % Extract RPY directly and force/moment data
+def split_tic_components(raw_vel, TWC_comp_FT):
+    """
+    raw_vel과 TWC_comp_FT 데이터를 분리하여 구성 요소를 반환합니다.
+
+    Returns:
+        lin_vel_data:     (Nx3) 선형 속도
+        ang_vel_data:     (Nx3) 각속도
+        TWC_force_data:   (Nx3) 보상된 힘
+        TWC_moment_data:  (Nx3) 보상된 모멘트
+    """
+    lin_vel_data = raw_vel[:, 0:3]
+    ang_vel_data = raw_vel[:, 3:6]
+    TWC_force_data = TWC_comp_FT[:, 0:3]
+    TWC_moment_data = TWC_comp_FT[:, 3:6]
+
+    print("✅ TIC 구성 요소 분리 완료")
+    print(f" - lin_vel_data shape: {lin_vel_data.shape}")
+    print(f" - ang_vel_data shape: {ang_vel_data.shape}")
+    print(f" - TWC_force_data shape: {TWC_force_data.shape}")
+    print(f" - TWC_moment_data shape: {TWC_moment_data.shape}")
+
+    return lin_vel_data, ang_vel_data, TWC_force_data, TWC_moment_data
+
 def main():
     print("✅ TIC KalmanEM Node 시작")
 
@@ -44,6 +70,9 @@ def main():
     except RuntimeError as e:
         print(e)
         return
+
+    lin_vel_data, ang_vel_data, TWC_force_data, TWC_moment_data = \
+        split_tic_components(raw_vel, TWC_comp_FT)
 
 if __name__ == '__main__':
     main()
