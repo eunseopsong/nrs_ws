@@ -348,40 +348,119 @@ def train_ann_kfold(input_data_norm, target_data_norm, converted_acc, target_dat
     print(f"✅ Average MSE (Force Compensation): {np.mean(mse_scores):.6f}")
     return pred_output_all, comp_force, mse_scores
 
-# def save_ann_weights_biases_to_json(model: nn.Module,
-#                                     input_min: np.ndarray,
-#                                     input_max: np.ndarray,
-#                                     target_min: np.ndarray,
-#                                     target_max: np.ndarray,
-#                                     json_file: str = "TIC_ann_weights_biases.json"):
-#     """
-#     Save ANN weights, biases, and normalization ranges to a JSON file.
-#     """
-#     layers = [layer for layer in model.net if isinstance(layer, nn.Linear)]
+
+
+
+# def save_ann_weights_biases_to_json(model, input_min, input_max, target_min, target_max,
+#                                     filename="TIC_ann_weights_biases.json"):
+#     import os
+#     import json
+#     import torch.nn as nn
+
+#     # 저장 경로 구성
+#     save_dir = os.path.join(os.path.dirname(__file__), 'json', 'TIC')
+#     os.makedirs(save_dir, exist_ok=True)
+#     save_path = os.path.join(save_dir, filename)
+
+#     # 모델 내 모든 Linear 계층 추출
+#     layers = []
+#     for layer in model.modules():
+#         if isinstance(layer, nn.Linear):
+#             layers.append(layer)
 
 #     if len(layers) != 3:
-#         raise ValueError("Model should have 3 Linear layers (2 hidden, 1 output).")
+#         raise ValueError(f"Expected 3 Linear layers in model (2 hidden + 1 output), but got {len(layers)}")
 
-#     weights_biases = {
-#         "weights1": layers[0].weight.detach().numpy().tolist(),
-#         "bias1": layers[0].bias.detach().numpy().tolist(),
-#         "weights2": layers[1].weight.detach().numpy().tolist(),
-#         "bias2": layers[1].bias.detach().numpy().tolist(),
-#         "weightsOut": layers[2].weight.detach().numpy().tolist(),
-#         "biasOut": layers[2].bias.detach().numpy().tolist(),
-#         "input_min": input_min.tolist(),
-#         "input_max": input_max.tolist(),
-#         "target_min": target_min.tolist(),
-#         "target_max": target_max.tolist()
+#     # 각 레이어에서 가중치와 편향 추출
+#     weights1 = layers[0].weight.detach().cpu().numpy().tolist()
+#     bias1 = layers[0].bias.detach().cpu().numpy().tolist()
+
+#     weights2 = layers[1].weight.detach().cpu().numpy().tolist()
+#     bias2 = layers[1].bias.detach().cpu().numpy().tolist()
+
+#     weightsOut = layers[2].weight.detach().cpu().numpy().tolist()
+#     biasOut = layers[2].bias.detach().cpu().numpy().tolist()
+
+#     # JSON 구조 생성
+#     data_to_save = {
+#         "weights1": weights1,
+#         "bias1": bias1,
+#         "weights2": weights2,
+#         "bias2": bias2,
+#         "weightsOut": weightsOut,
+#         "biasOut": biasOut,
+#         "input_min": input_min.tolist() if hasattr(input_min, 'tolist') else input_min,
+#         "input_max": input_max.tolist() if hasattr(input_max, 'tolist') else input_max,
+#         "target_min": target_min.tolist() if hasattr(target_min, 'tolist') else target_min,
+#         "target_max": target_max.tolist() if hasattr(target_max, 'tolist') else target_max,
 #     }
 
-#     # Save to JSON
-#     with open(json_file, 'w') as f:
-#         json.dump(weights_biases, f, indent=4)
+#     # JSON 파일로 저장
+#     with open(save_path, 'w') as json_file:
+#         json.dump(data_to_save, json_file, indent=2)
 
-#     print(f"✅ ANN weights, biases, and normalization data saved to {json_file}")
+#     print(f"✅ ANN 가중치 및 정규화 파라미터 저장 완료: {save_path}")
 
 
+def visualize_force_moment_prediction(
+    TWC_force_data, TWC_moment_data,
+    pred_force, pred_moment,
+    comp_force, comp_moment,
+    time_profile
+):
+    component_names = ['Fx', 'Fy', 'Fz']
+    moment_names = ['Mx', 'My', 'Mz']
+
+    # Force Prediction vs Raw Force
+    plt.figure("Force Prediction Comparison", figsize=(10, 8))
+    for i in range(3):
+        plt.subplot(3, 1, i + 1)
+        plt.plot(time_profile, TWC_force_data[:, i], 'r', linewidth=0.6, label='Raw Force')
+        plt.plot(time_profile, pred_force[:, i], 'k', linewidth=0.8, label='Predicted Force')
+        plt.title(f'{component_names[i]} Prediction vs Raw')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Force (N)')
+        plt.legend()
+        plt.grid(True)
+
+    # Force Compensation
+    plt.figure("Force Compensation Effect", figsize=(10, 8))
+    for i in range(3):
+        plt.subplot(3, 1, i + 1)
+        plt.plot(time_profile, TWC_force_data[:, i], 'r', linewidth=0.8, label='Uncompensated Force')
+        plt.plot(time_profile, comp_force[:, i], 'k', linewidth=0.6, label='Compensated Force')
+        plt.title(f'{component_names[i]} Compensation Result')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Force (N)')
+        plt.legend()
+        plt.grid(True)
+
+    # Moment Prediction vs Raw Moment
+    plt.figure("Moment Prediction Comparison", figsize=(10, 8))
+    for i in range(3):
+        plt.subplot(3, 1, i + 1)
+        plt.plot(time_profile, TWC_moment_data[:, i], 'r', linewidth=0.6, label='Raw Moment')
+        plt.plot(time_profile, pred_moment[:, i], 'k', linewidth=0.8, label='Predicted Moment')
+        plt.title(f'{moment_names[i]} Prediction vs Raw')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Moment (Nm)')
+        plt.legend()
+        plt.grid(True)
+
+    # Moment Compensation
+    plt.figure("Moment Compensation Effect", figsize=(10, 8))
+    for i in range(3):
+        plt.subplot(3, 1, i + 1)
+        plt.plot(time_profile, TWC_moment_data[:, i], 'r', linewidth=0.8, label='Uncompensated Moment')
+        plt.plot(time_profile, comp_moment[:, i], 'k', linewidth=0.6, label='Compensated Moment')
+        plt.title(f'{moment_names[i]} Compensation Result')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Moment (Nm)')
+        plt.legend()
+        plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
 
 
 def main():
@@ -400,16 +479,34 @@ def main():
         normalize_input_target_data(input_data, target_data)
 
     # Train & Evaluate
-    best_model = train_ann_kfold(
+    best_model, pred_output_all, _ = train_ann_kfold(
         input_data_norm, target_data_norm, converted_acc, target_data,
         input_min, input_max, target_min, target_max
     )
 
-    # Save weights/biases to JSON
+    # 추론 결과 분리
+    pred_force = pred_output_all[:, :3]
+    pred_moment = pred_output_all[:, 3:6]
+    time_profile = np.arange(TWC_force_data.shape[0]) * 0.01
+
+    # Save Trained Weights to JSON (선택)
     # save_ann_weights_biases_to_json(
-    #     best_model, input_min, input_max, target_min, target_max,
-    #     json_file="TIC_ann_weights_biases.json"
+    #     model=best_model,
+    #     input_min=input_min,
+    #     input_max=input_max,
+    #     target_min=target_min,
+    #     target_max=target_max,
+    #     filename="nrs_dlc/json/TIC/TIC_ann_weights_biases.json"
     # )
+
+    # Visualization
+    visualize_force_moment_prediction(
+        TWC_force_data, TWC_moment_data,
+        pred_force, pred_moment,
+        TWC_force_data - pred_force,
+        TWC_moment_data - pred_moment,
+        time_profile
+    )
 
 
 
