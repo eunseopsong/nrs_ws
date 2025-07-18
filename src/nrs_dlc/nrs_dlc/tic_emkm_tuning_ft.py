@@ -4,6 +4,7 @@ import json
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
+# %% Data Loading
 def load_and_preprocess_tic_data(data_num=1, base_folder="data/TIC/training"):
     """
     TIC 데이터를 불러오고 전처리를 수행합니다.
@@ -36,6 +37,8 @@ def load_and_preprocess_tic_data(data_num=1, base_folder="data/TIC/training"):
 
     return raw_vel, TWC_comp_FT, raw_FT
 
+# %% Data Preprocessing
+# % Extract RPY directly and force/moment data
 def split_tic_components(raw_vel, TWC_comp_FT):
     """
     raw_vel과 TWC_comp_FT 데이터를 분리하여 구성 요소를 반환합니다.
