@@ -210,7 +210,7 @@ def validate_and_plot_derivatives(original_data, kalman_data, dt, title='Force',
         plt.subplot(3, 1, i + 1)
         plt.plot(time_profile, kalman_data[:, i], 'r-', linewidth=2, label='Kalman Filter')
         plt.plot(time_profile, deri[:, i], 'k-', linewidth=0.8, label='Direct Derivative')
-        plt.plot(time_profile, smooth[:, i], 'b-', linewidth=2, label='Smoothed')
+        plt.plot(time_profile, smooth[:, i], 'b-', linewidth=2, label='Gaussian Smoothing')
         plt.xlabel('Time (s)')
         plt.ylabel(f'{title[0]}{component_names[i]} ({unit})')
         plt.grid(True)
