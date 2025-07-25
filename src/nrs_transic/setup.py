@@ -3,7 +3,7 @@ import pathlib
 import pkg_resources
 from setuptools import setup, find_packages
 
-PKG_NAME = "transic"
+PKG_NAME = "nrs_transic"
 VERSION = "0.0.1"
 EXTRAS = {}
 
