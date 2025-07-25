@@ -1,5 +1,4 @@
 import pathlib
-
 import pkg_resources
 from setuptools import setup, find_packages
 
@@ -7,10 +6,12 @@ PKG_NAME = "nrs_transic"
 VERSION = "0.0.1"
 EXTRAS = {}
 
-
 def _read_file(fname):
-    with pathlib.Path(fname).open() as fp:
-        return fp.read()
+    path = pathlib.Path(fname)
+    return path.read_text() if path.exists() else ""
+# def _read_file(fname):
+#     with pathlib.Path(fname).open() as fp:
+#         return fp.read()
 
 
 def _read_install_requires():
@@ -29,12 +30,12 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Robotics", "Reinforcement Learning", "Machine Learning"],
     license="Apache License, Version 2.0",
-    packages=find_packages(include=f"{PKG_NAME}.*"),
+    packages=find_packages(), # packages=find_packages(include=f"{PKG_NAME}.*"),
     include_package_data=True,
     zip_safe=False,
     entry_points={"console_scripts": []},
     install_requires=_read_install_requires(),
-    python_requires="==3.8.*",
+    python_requires=">=3.10,<3.11", # python_requires="==3.10.*",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Topic :: Scientific/Engineering :: Robotics",
