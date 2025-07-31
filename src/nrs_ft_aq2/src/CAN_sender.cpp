@@ -1,4 +1,4 @@
-#include "CAN_sender.hpp"
+#include "nrs_ft_aq2/CAN_sender.hpp"
 
 NRS_CAN_sender::~NRS_CAN_sender()
 {

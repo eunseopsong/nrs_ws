@@ -1,91 +1,84 @@
-# cmake_minimum_required(VERSION 3.10)
-# project(nrs_ft_aq2)
+cmake_minimum_required(VERSION 3.10)
+project(nrs_ft_aq2)
 
-# # ========================
-# # Dependencies
-# # ========================
-# find_package(ament_cmake REQUIRED)
-# find_package(rclcpp REQUIRED)
-# find_package(std_msgs REQUIRED)
-# find_package(geometry_msgs REQUIRED)
-# # find_package(NRS_Gen_Filter REQUIRED)
+# ==================== 필수 패키지 ====================
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_srvs REQUIRED)  # ✅ std_srvs 추가
+find_package(nrs_gen_filter2 REQUIRED)
 
-# # If you have custom messages
-# find_package(rosidl_default_generators REQUIRED)
+# ==================== 메시지 인터페이스 정의 ====================
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ViveFTMsg.msg"
+  DEPENDENCIES std_msgs geometry_msgs
+)
 
-# # ========================
-# # Message Files
-# # ========================
-# set(msg_files
-#   "msg/vive_ft_msg.msg"
-# )
+# ==================== include 디렉토리 ====================
+include_directories(include)
 
-# rosidl_generate_interfaces(${PROJECT_NAME}
-#   ${msg_files}
-#   DEPENDENCIES std_msgs geometry_msgs
-# )
+# ==================== 라이브러리 생성 ====================
+set(SRCS
+  src/CAN_reader.cpp
+  src/FT_Processing.cpp
+)
 
-# # ========================
-# # Include & Sources
-# # ========================
-# set(SRCS
-#   src/CAN_reader.cpp
-#   src/FT_Processing.cpp
-# )
+set(HEADERS
+  include/nrs_ft_aq2/CAN_reader.hpp
+  include/nrs_ft_aq2/FT_Processing.hpp
+)
 
-# set(HEADERS
-#   include/CAN_reader.hpp
-#   include/FT_Processing.hpp
-# )
+add_library(ft_lib SHARED ${SRCS} ${HEADERS})
+ament_target_dependencies(ft_lib
+  rclcpp
+  std_msgs
+  geometry_msgs
+  std_srvs        # ✅ std_srvs 추가
+  nrs_gen_filter2
+)
 
-# include_directories(
-#   include
-# )
+# ✅ 메시지 타입 지원 의존성 추가
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+add_dependencies(ft_lib ${cpp_typesupport_target})
 
-# # ========================
-# # Library
-# # ========================
-# add_library(FT_lib ${SRCS} ${HEADERS})
-# ament_target_dependencies(FT_lib rclcpp std_msgs geometry_msgs NRS_Gen_Filter)
+# ==================== 실행 파일 1: CAN_sender ====================
+add_executable(can_sender src/CAN_sender.cpp)
+ament_target_dependencies(can_sender
+  rclcpp
+  std_msgs
+  geometry_msgs
+  std_srvs        # ✅ std_srvs 추가
+  nrs_gen_filter2
+)
+target_link_libraries(can_sender ft_lib)
+add_dependencies(can_sender ${cpp_typesupport_target})
 
-# # ========================
-# # Executables
-# # ========================
-# add_executable(CAN_sender src/CAN_sender.cpp)
-# ament_target_dependencies(CAN_sender rclcpp std_msgs geometry_msgs NRS_Gen_Filter)
+# ==================== 실행 파일 2: FT_AQ_main ====================
+add_executable(ft_aq_main src/FT_AQ_main.cpp)
+ament_target_dependencies(ft_aq_main
+  rclcpp
+  std_msgs
+  geometry_msgs
+  std_srvs        # ✅ std_srvs 추가
+  nrs_gen_filter2
+)
+target_link_libraries(ft_aq_main ft_lib)
+add_dependencies(ft_aq_main ${cpp_typesupport_target})
 
-# add_executable(FT_AQ_main src/FT_AQ_main.cpp)
-# target_link_libraries(FT_AQ_main
-#   FT_lib
-# )
-# ament_target_dependencies(FT_AQ_main rclcpp std_msgs geometry_msgs NRS_Gen_Filter)
+# ==================== 설치 ====================
+install(TARGETS
+  ft_lib
+  can_sender
+  ft_aq_main
+  DESTINATION lib/${PROJECT_NAME}
+)
 
-# # Add message dependencies
-# rosidl_target_interfaces(FT_AQ_main
-#   ${PROJECT_NAME} "rosidl_typesupport_cpp"
-# )
+install(DIRECTORY include/
+  DESTINATION include/
+)
 
-# # ========================
-# # Install Targets
-# # ========================
-# install(TARGETS
-#   FT_lib
-#   CAN_sender
-#   FT_AQ_main
-#   DESTINATION lib/${PROJECT_NAME}
-# )
-
-# install(DIRECTORY include/
-#   DESTINATION include/
-# )
-
-# install(DIRECTORY msg
-#   DESTINATION share/${PROJECT_NAME}/
-# )
-
-# # ========================
-# # Export
-# # ========================
-# ament_export_include_directories(include)
-# ament_export_dependencies(rclcpp std_msgs geometry_msgs NRS_Gen_Filter)
-# ament_package()
+# ==================== export ====================
+ament_export_dependencies(rosidl_default_runtime)
+ament_package()

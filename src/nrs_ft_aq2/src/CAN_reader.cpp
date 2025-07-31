@@ -1,4 +1,4 @@
-#include "CAN_reader.hpp"
+#include "nrs_ft_aq2/CAN_reader.hpp"
 
 NRS_FTSensor::NRS_FTSensor(unsigned char Handle_ID_, unsigned char Contact_ID_, bool HaccSwitch_, bool CaccSwitch_)
 :inter_force(3,0), inter_moment(3), Cinter_force(3), Cinter_moment(3), inter_posAcc(3), inter_angAcc(3), Cinter_posAcc(3), Cinter_angAcc(3),

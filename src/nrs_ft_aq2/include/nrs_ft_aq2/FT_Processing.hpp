@@ -1,15 +1,31 @@
 #ifndef FT_PROCESSING_H
 #define FT_PROCESSING_H
 
-#include <stdio.h>
-#include <ros/ros.h>
-#include <std_msgs/String.h>
-#include <std_msgs/Float64MultiArray.h>
-#include <geometry_msgs/Wrench.h>
-#include "NRS_FT_AQ/vive_ft_msg.h"
-#include <std_srvs/Empty.h> // For ROS service - AIDIN GUI SERVER
-#include "Gen_filter.hpp"
-#include "CAN_reader.hpp"
+//// #include <stdio.h>
+//// #include <ros/ros.h>
+//// #include <std_msgs/String.h>
+//// #include <std_msgs/Float64MultiArray.h>
+//// #include <geometry_msgs/Wrench.h>
+//// #include "NRS_FT_AQ/vive_ft_msg.h"
+//// #include <std_srvs/Empty.h> // For ROS service - AIDIN GUI SERVER
+//// #include "Gen_filter.hpp"
+//// #include "CAN_reader.hpp"
+
+#include <cstdio>  // C 스타일 입출력
+#include <memory>  // std::shared_ptr 등 스마트 포인터
+
+#include "rclcpp/rclcpp.hpp"
+
+#include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
+#include "geometry_msgs/msg/wrench.hpp"
+
+// #include "nrs_ft_aq2/msg/vive_ft_msg.hpp" // 패키지명/msg/메시지명.hpp
+
+#include "std_srvs/srv/empty.hpp"  // 서비스는 srv 디렉토리로
+
+#include "nrs_gen_filter2/Gen_filter.hpp"
+#include "nrs_ft_aq2/CAN_reader.hpp"
 
 class FT_processing : public NRS_FTSensor
 {
