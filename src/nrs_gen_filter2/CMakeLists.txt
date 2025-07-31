@@ -1,25 +1,61 @@
-cmake_minimum_required(VERSION 3.8)
-project(nrs_gen_filter2)
+cmake_minimum_required(VERSION 3.10)
+project(NRS_Gen_Filter)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# find dependencies
+# ========================
+# Dependencies
+# ========================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
 
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
+# ========================
+# Include directories
+# ========================
+# 다른 package에서 find package하면 내 include directory 역시 
+# 자동으로 할당하게 하기 위함
+# 만들어 놓은 library 역시 마찬가지
+include_directories(include)
+
+# ========================
+# Library 1: Gen Filter Core
+# ========================
+add_library(NRS_Gen_Filter_Lib
+  src/Gen_filter.cpp
+)
+ament_target_dependencies(NRS_Gen_Filter_Lib rclcpp)
+
+# ========================
+# Library 2: Filter Applied Logic (includes Gen_filter.cpp again)
+# ========================
+add_library(NRS_Filter_Applied_Lib
+  src/Filter_applied.cpp
+  src/Gen_filter.cpp
+)
+ament_target_dependencies(NRS_Filter_Applied_Lib rclcpp)
+
+# ========================
+# Installation
+# ========================
+install(
+  TARGETS
+    NRS_Gen_Filter_Lib
+    NRS_Filter_Applied_Lib
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
+# ========================
+# Export
+# ========================
+ament_export_include_directories(include)
+ament_export_libraries(
+  NRS_Gen_Filter_Lib
+  NRS_Filter_Applied_Lib
+)
+ament_export_dependencies(rclcpp)
 
 ament_package()
