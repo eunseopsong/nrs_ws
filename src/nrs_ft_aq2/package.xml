@@ -1,21 +1,31 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>nrs_ft_aq2</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="lexondms1@g.skku.edu">eunseop</maintainer>
-  <license>TODO: License declaration</license>
+  <version>0.0.1</version>
+  <description>Force/Torque Acquisition Package for NRS (ROS 2)</description>
 
+  <maintainer email="root@todo.todo">root</maintainer>
+  <license>MIT</license>
+
+  <!-- Build tool -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>rclcpp</depend>
-  <depend>std_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <!-- <depend>nrs_gen_filter</depend> -->
+  <!-- Build dependencies -->
+  <build_depend>rclcpp</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>rosidl_default_generators</build_depend>
+  <build_depend>nrs_gen_filter2</build_depend>
 
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <!-- Dependencies for generated code -->
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <exec_depend>nrs_gen_filter2</exec_depend>
+
+  <!-- Message interface export -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>
     <build_type>ament_cmake</build_type>
