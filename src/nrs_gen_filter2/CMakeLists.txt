@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(NRS_Gen_Filter)
+project(nrs_gen_filter2)
 
 # ========================
 # Dependencies
@@ -18,27 +18,27 @@ include_directories(include)
 # ========================
 # Library 1: Gen Filter Core
 # ========================
-add_library(NRS_Gen_Filter_Lib
+add_library(nrs_gen_filter_lib
   src/Gen_filter.cpp
 )
-ament_target_dependencies(NRS_Gen_Filter_Lib rclcpp)
+ament_target_dependencies(nrs_gen_filter_lib rclcpp)
 
 # ========================
 # Library 2: Filter Applied Logic (includes Gen_filter.cpp again)
 # ========================
-add_library(NRS_Filter_Applied_Lib
+add_library(nrs_filter_applied_lib
   src/Filter_applied.cpp
   src/Gen_filter.cpp
 )
-ament_target_dependencies(NRS_Filter_Applied_Lib rclcpp)
+ament_target_dependencies(nrs_filter_applied_lib rclcpp)
 
 # ========================
 # Installation
 # ========================
 install(
   TARGETS
-    NRS_Gen_Filter_Lib
-    NRS_Filter_Applied_Lib
+    nrs_gen_filter_lib
+    nrs_filter_applied_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -53,8 +53,8 @@ install(DIRECTORY include/
 # ========================
 ament_export_include_directories(include)
 ament_export_libraries(
-  NRS_Gen_Filter_Lib
-  NRS_Filter_Applied_Lib
+  nrs_gen_filter_lib
+  nrs_filter_applied_lib
 )
 ament_export_dependencies(rclcpp)
 
