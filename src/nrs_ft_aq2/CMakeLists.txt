@@ -22,12 +22,12 @@ include_directories(include)
 # ==================== 라이브러리 생성 ====================
 set(SRCS
   src/CAN_reader.cpp
-  src/FT_Processing.cpp
+  src/FtProcessing.cpp
 )
 
 set(HEADERS
   include/nrs_ft_aq2/CAN_reader.hpp
-  include/nrs_ft_aq2/FT_Processing.hpp
+  include/nrs_ft_aq2/FtProcessing.h
 )
 
 add_library(ft_lib SHARED ${SRCS} ${HEADERS})
