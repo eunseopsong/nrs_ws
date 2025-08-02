@@ -89,7 +89,6 @@ public:
 private:
     rclcpp::executors::SingleThreadedExecutor executor_;
 
-
     //////// ROS2 Node ////////
     rclcpp::Node::SharedPtr node_;
     rclcpp::Clock::SharedPtr clock_;

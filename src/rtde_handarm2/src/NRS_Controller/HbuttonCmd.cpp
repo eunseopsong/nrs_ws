@@ -403,8 +403,7 @@ void HbuttonCmd::Playback_exe()
         {
             // Playback iteration number publish
             PbNum_command_msg.data = iter_num;
-            PbNum_command_pub->publish(PbNum_command_msg);
-            //// PbNum_command_pub.publish(PbNum_command_msg);
+            PbNum_command_pub->publish(PbNum_command_msg); //// PbNum_command_pub.publish(PbNum_command_msg);
             //// ros::spinOnce();
             current_status = mode2;
             PB_exe_counter++;
@@ -413,10 +412,11 @@ void HbuttonCmd::Playback_exe()
         {
             /*** STEP1 : Playback start ***/
             yoon_mode_msg.data = Playback_mode_cmd;
-            yoon_mode_pub->publish(yoon_mode_msg);
-            //// yoon_mode_pub.publish(yoon_mode_msg);
+            yoon_mode_pub->publish(yoon_mode_msg);        //// yoon_mode_pub.publish(yoon_mode_msg);
+
             //// ros::spinOnce();
             // rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
+
             current_status = mode3;
             iter_num = 0;
             PB_exe_counter = 0;
