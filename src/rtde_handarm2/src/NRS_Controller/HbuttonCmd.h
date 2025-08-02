@@ -84,6 +84,7 @@ public:
     void Iter_num_set();
     void Playback_exe();
     void catch_signal(int sig);
+    void print_status();
 
 private:
     rclcpp::executors::SingleThreadedExecutor executor_;
