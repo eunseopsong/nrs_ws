@@ -418,20 +418,25 @@ void HbuttonCmd::Playback_exe()
     else current_status = modeErr1;
 }
 
+void HbuttonCmd::print_status() {
+    printf("\n============================================================\n");
+    printf("************************************************************\n");
+    printf("NOTE : Before start the main node, the screen of handle \n");
+    printf("       must be 'STANBY MODE' \n");
+    printf("************************************************************\n");
+    printf("Current status: %s \n", current_status.c_str());
+    printf("Selected way points: %d, Iteration number(1~9): %d \n", point_counter, iter_num);
+    printf("Mode value: %d \n", Mode_val);
+    printf("============================================================\n");
+}
+
 void HbuttonCmd::HButton_main()
 {
-    while(1)
+    //// while(1)
+    while (rclcpp::ok())
     {
         /** Real time monitoring **/
-        printf("\n============================================================\n");
-        printf("************************************************************\n");
-        printf("NOTE : Before start the main node, the screen of handle \n");
-        printf("       must be 'STANBY MODE' \n");
-        printf("************************************************************\n");
-        printf("Current status: %s \n",current_status.c_str());
-        printf("Selected way points: %d, Iteration number(1~9): %d \n",point_counter,iter_num);
-        printf("Mode value: %d \n",Mode_val);
-        printf("\n============================================================\n");
+        print_status();
 
         #if(Handle_OnOff == 1)
         if(Yuart->YUART_start(buffer)) 
@@ -484,6 +489,9 @@ void HbuttonCmd::HButton_main()
         #endif
         //// ros::spinOnce(); // For service callback
         // rclcpp::spin_some(this->get_node_base_interface());  // ROS 2에서 spinOnce 대신
+
+        // ROS 2 방식으로 루프 주기 제한 (500ms)
+        // rclcpp::sleep_for(std::chrono::milliseconds(500));
     }
     exit(0);
     #if(Handle_OnOff == 1)
