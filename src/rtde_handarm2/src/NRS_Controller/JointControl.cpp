@@ -738,7 +738,8 @@ void JointControl::CalculateAndPublishJoint()
         case '1':
             ctrl = 0;
             pause_cnt = 0;
-            while (running)
+            //// while (running)
+            while (rclcpp::ok() && running) // Add on 2025.08.03 00:10
             {
                 // t_start = rtde_control.initPeriod();
                 getActualQ(); // Get the joint data of UR10e
