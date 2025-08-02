@@ -492,8 +492,7 @@ void HbuttonCmd::HButton_main()
         // ROS 2 방식으로 루프 주기 제한 (500ms)
         // rclcpp::sleep_for(std::chrono::milliseconds(500));
     }
-    rclcpp::shutdown(); // change on 2025.08.03 01:00
-    // exit(0);
+    rclcpp::shutdown(); // exit(0); // change on 2025.08.03 01:00
     #if(Handle_OnOff == 1)
     Yuart->YUART_terminate();
     #endif
