@@ -120,6 +120,7 @@ void HbuttonCmd::VRPose_Callback(const geometry_msgs::msg::PoseStamped::SharedPt
     VRPose_point.y = msg->pose.position.y;
     VRPose_point.z = msg->pose.position.z;
 
+    print_status();
     // RCLCPP_INFO(this->get_logger(), "Received VR Pose: (%.3f, %.3f, %.3f)", VRPose_point.x, VRPose_point.y, VRPose_point.z);
 }
 
@@ -134,6 +135,7 @@ bool HbuttonCmd::SRV1_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request
     #elif(TEACHING_MODE == 1)
         VR_mode_change();
     #endif
+    print_status();
     return true;
 }
 
@@ -147,6 +149,7 @@ bool HbuttonCmd::SRV3_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request
     #elif(TEACHING_MODE == 1)
         VR_point_save();
     #endif
+    print_status();
     return true;
 }
 
@@ -158,6 +161,7 @@ bool HbuttonCmd::SRV4_Handle(const std::shared_ptr<std_srvs::srv::Empty::Request
     #if(TEACHING_MODE == 0)
         Trajectory_gen();
     #endif
+    print_status();
     return true;
 }
 
@@ -170,6 +174,7 @@ bool HbuttonCmd::SRV11_Handle(
     #if(TEACHING_MODE == 0)
     Iter_num_set();
     #endif
+    print_status();
     return true;
 }
 
@@ -181,6 +186,7 @@ bool HbuttonCmd::SRV12_Handle(
     #if(TEACHING_MODE == 0)
     Playback_exe();
     #endif
+    print_status();
     return true;
 }
 
@@ -222,6 +228,7 @@ void HbuttonCmd::Mode_chage()
             // rclcpp::spin_some(this->get_node_base_interface());
         }
     }
+    print_status();
 }
 void HbuttonCmd::VR_mode_change()
 {
@@ -247,7 +254,7 @@ void HbuttonCmd::VR_mode_change()
         current_status = mode0;
         point_counter = 0;
     }
-
+    print_status();
 }
 
 void HbuttonCmd::Way_point_save()  // to solve error: (2025.06.27 23:35)
@@ -264,7 +271,7 @@ void HbuttonCmd::Way_point_save()  // to solve error: (2025.06.27 23:35)
     //// ros::spinOnce();
     // rclcpp::spin_some(this->get_node_base_interface());
     point_counter ++;
-
+    print_status();
 }
 
 void HbuttonCmd::VR_point_save()
@@ -276,6 +283,7 @@ void HbuttonCmd::VR_point_save()
     //// ros::spinOnce();
     // rclcpp::spin_some(this->get_node_base_interface());
     point_counter ++;
+    print_status();
 }
 
 void HbuttonCmd::Trajectory_gen()
@@ -374,6 +382,7 @@ void HbuttonCmd::Trajectory_gen()
 
     point_counter = 0; // selected way pYoon_UR10e_modeoint num init
     current_status = mode4;
+    print_status();
 }
 
 void HbuttonCmd::Iter_num_set()
@@ -383,6 +392,7 @@ void HbuttonCmd::Iter_num_set()
         if(iter_num<9) iter_num ++;
         else iter_num = 0;
     }
+    print_status();
 }
 
 void HbuttonCmd::Playback_exe()
@@ -416,6 +426,7 @@ void HbuttonCmd::Playback_exe()
 
     }
     else current_status = modeErr1;
+    print_status();
 }
 
 void HbuttonCmd::print_status() {
