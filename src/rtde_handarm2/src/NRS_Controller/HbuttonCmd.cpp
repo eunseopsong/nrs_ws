@@ -419,6 +419,7 @@ void HbuttonCmd::Playback_exe()
 }
 
 void HbuttonCmd::print_status() {
+    /** Real time monitoring **/
     printf("\n============================================================\n");
     printf("************************************************************\n");
     printf("NOTE : Before start the main node, the screen of handle \n");
@@ -432,12 +433,10 @@ void HbuttonCmd::print_status() {
 
 void HbuttonCmd::HButton_main()
 {
-    //// while(1)
+    print_status();
+
     while (rclcpp::ok())
     {
-        /** Real time monitoring **/
-        print_status();
-
         #if(Handle_OnOff == 1)
         if(Yuart->YUART_start(buffer)) 
         {
@@ -493,7 +492,8 @@ void HbuttonCmd::HButton_main()
         // ROS 2 방식으로 루프 주기 제한 (500ms)
         // rclcpp::sleep_for(std::chrono::milliseconds(500));
     }
-    exit(0);
+    rclcpp::shutdown(); // change on 2025.08.03 01:00
+    // exit(0);
     #if(Handle_OnOff == 1)
     Yuart->YUART_terminate();
     #endif
