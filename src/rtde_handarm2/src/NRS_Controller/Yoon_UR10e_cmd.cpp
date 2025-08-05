@@ -21,6 +21,9 @@
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
+#include <thread> // Add on 2025.08.05 16:33
+#include <atomic> // Add on 2025.08.05 16:33
+
 #define DOF 6
 #define PI 3.141592
 
@@ -58,6 +61,7 @@ int main(int argc, char *argv[])
     std_msgs::msg::UInt32 PbNum_command_msg;
 
     uint16_t control_mode = 0;
+    std::atomic<int> shared_control_mode(0);  // 추가!
     // uint16_t control_mode = 7;
 
     double joint_command[2]={0,}; // which joint(1~6), cmd angle(relative, unit: rad)
@@ -79,6 +83,14 @@ int main(int argc, char *argv[])
 
     //// ros::Rate loop_rate(100);
     rclcpp::Rate loop_rate(100);  // 100 Hz
+    // 💡 디버깅용 출력 스레드 시작 (1Hz)
+    std::thread debug_thread([&]() {
+    rclcpp::Rate debug_rate(1.0);  // 1Hz 출력
+    while (rclcpp::ok()) {
+        std::cout << "[DEBUG] current control_mode: " << shared_control_mode.load() << std::endl;
+        debug_rate.sleep();
+    }
+    });
 
     while(1)
     {
@@ -99,6 +111,7 @@ int main(int argc, char *argv[])
         std::cout << " Mode5: Data recording mode     , Mode6: Generate the path in cmd_node"<<std::endl;
         std::cout << " Mode7: Posture playback        , Mode0: Motion stop"<<std::endl;
         std::cin >>control_mode; // x,y,vel
+        shared_control_mode = control_mode;  // 🔸 업데이트
 
         if(control_mode == -1)
         {
@@ -364,6 +377,7 @@ int main(int argc, char *argv[])
 
 
     }
+    debug_thread.detach();  // 🔸 정리
     exit(0);
     return 0;
 
