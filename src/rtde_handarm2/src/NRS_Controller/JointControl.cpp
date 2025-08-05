@@ -12,7 +12,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     // Publishers
     YSurfN_Fext_pub_ = node_->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
     UR10e_mode_pub_  = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
-    UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
+    // UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
     UR10_pose_pub_   = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
     UR10_wrench_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
     joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20); // Add on 2025.07.09
@@ -838,18 +838,18 @@ void JointControl::CalculateAndPublishJoint()
                     printer_counter++;
                 }
                 /*====== Robot information publishing ======*/
-                UR10_Jangle_msg_.data.clear();
+                // UR10_Jangle_msg_.data.clear();
                 UR10_pose_msg_.data.clear();
                 UR10_wrench_msg_.data.clear();
 
                 for(int i=0; i<6; i++)
                 {
-                    UR10_Jangle_msg_.data.push_back(RArm.qc(i));
+                    // UR10_Jangle_msg_.data.push_back(RArm.qc(i));
                     if (i<3) {UR10_pose_msg_.data.push_back(RArm.xc(i));}
                     else {UR10_pose_msg_.data.push_back(RArm.thc(i-3));}
                     UR10_wrench_msg_.data.push_back(ftS2(i)); // Contact sensor data
                 }
-                UR10_Jangle_pub_->publish(UR10_Jangle_msg_); //// UR10_Jangle_pub.publish(UR10_Jangle_msg);
+                // UR10_Jangle_pub_->publish(UR10_Jangle_msg_); //// UR10_Jangle_pub.publish(UR10_Jangle_msg);
                 UR10_pose_pub_->publish(UR10_pose_msg_);     //// UR10_pose_pub.publish(UR10_pose_msg);
                 UR10_wrench_pub_->publish(UR10_wrench_msg_); //// UR10_wrench_pub.publish(UR10_wrench_msg);
 
