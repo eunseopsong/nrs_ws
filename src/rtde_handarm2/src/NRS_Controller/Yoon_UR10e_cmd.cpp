@@ -15,7 +15,7 @@
 
 // For trajectory generation
 #include "Text_loader.h"
-#include "Yoon_path.h"
+// #include "Yoon_path.h"
 
 // Yaml file headers
 #include <fstream>
@@ -24,14 +24,17 @@
 #include <thread> // Add on 2025.08.05 16:33
 #include <atomic> // Add on 2025.08.05 16:33
 
+
 #define DOF 6
 #define PI 3.141592
 
 /* Yaml file load start */
 //// std::ifstream fin2("/home/nrsur10/catkin_ws/src/rtde_handarm/NRS_yaml/NRS_Record_Printing.yaml");
-std::ifstream fin2("/home/eunseop/nrs_ws/src/rtde_handarm2/NRS_yaml/NRS_Record_Printing.yaml");
 
-YAML::Node NRS_recording = YAML::Load(fin2);
+# include "var_ur10e_main.h" // Change on 2025.08.04
+//// std::ifstream fin2("/home/eunseop/nrs_ws/src/rtde_handarm2/NRS_yaml/NRS_Record_Printing.yaml");
+//// YAML::Node NRS_recording = YAML::Load(fin2);
+
 /* Yaml file load end */
 
 void catch_signal(int sig)
@@ -58,7 +61,7 @@ int main(int argc, char *argv[])
     std_msgs::msg::Float64MultiArray joint_command_msg;
     std_msgs::msg::Float64MultiArray posture_command_msg;
     std_msgs::msg::UInt16 yoon_mode_msg;
-    std_msgs::msg::UInt32 PbNum_command_msg;
+    std_msgs::msg::UInt16 PbNum_command_msg;
 
     uint16_t control_mode = 0;
     std::atomic<int> shared_control_mode(0);  // 추가!

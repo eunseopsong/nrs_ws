@@ -89,6 +89,13 @@ target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen)
 ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 install(TARGETS nrs_ctrl DESTINATION lib/${PROJECT_NAME})
 
+# ------- ur10e_mode_cmd node dependencies -------- #
+add_executable(ur10e_mode_cmd Yoon_UR10e_cmd.cpp ${sources} ${Yoon_LIB} ${SUBSCRIBER_SRCS})
+target_include_directories(ur10e_mode_cmd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(ur10e_mode_cmd yaml-cpp Eigen3::Eigen)
+ament_target_dependencies(ur10e_mode_cmd ${COMMON_DEPENDENCIES})
+install(TARGETS ur10e_mode_cmd DESTINATION lib/${PROJECT_NAME})
+
 # -------- Hbutton node dependencies --------- #
 add_executable(hbutton node_Hbutton.cpp ${sources} ${Yoon_LIB} ${SUBSCRIBER_SRCS})
 target_include_directories(hbutton PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
