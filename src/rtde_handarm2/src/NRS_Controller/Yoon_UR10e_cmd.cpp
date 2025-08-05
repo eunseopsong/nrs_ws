@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
     //// ros::init(argc,argv,"Yoon_UR10e_cmd");
     //// ros::NodeHandle nh;
     rclcpp::init(argc, argv);
-    auto node = rclcpp::Node::make_shared("yoon_ur10e_cmd");
+    auto node = rclcpp::Node::make_shared("Yoon_UR10e_cmd");
 
     //// ros::Publisher yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
     //// ros::Publisher joint_command_pub = nh.advertise<std_msgs::Float64MultiArray>("yoon_UR10e_joint_cmd",20);
@@ -155,20 +155,20 @@ int main(int argc, char *argv[])
 
             printf("\nSelected joint: %1.0f, Target relative joint angle: %4f \n", joint_command[0],joint_command[1]);
 
-            // rclcpp::spin_some(node); //// ros::spinOnce();
+            rclcpp::spin_some(node); //// ros::spinOnce();
         }
 
         else if(control_mode == 3) // EE_Posture_control
         {
             yoon_mode_msg.data = EE_Posture_control_mode_cmd;
             yoon_mode_pub->publish(yoon_mode_msg);
-            // rclcpp::spin_some(node); //// ros::spinOnce();
+            rclcpp::spin_some(node); //// ros::spinOnce();
         }
         else if(control_mode == 4) // Hand_guiding
         {
             yoon_mode_msg.data = Hand_guiding_mode_cmd;
             yoon_mode_pub->publish(yoon_mode_msg);
-            // rclcpp::spin_some(node); //// ros::spinOnce();
+            rclcpp::spin_some(node); //// ros::spinOnce();
         }
         else if(control_mode == 5) // Data recording mode
         {
@@ -183,21 +183,21 @@ int main(int argc, char *argv[])
             {
                 yoon_mode_msg.data = Continuous_reording_start;
                 yoon_mode_pub->publish(yoon_mode_msg);
-                // rclcpp::spin_some(node); //// ros::spinOnce();
+                rclcpp::spin_some(node); //// ros::spinOnce();
                 std::cout << "To terminate the recording press '2'" << std::endl;
                 std::cin >> recording_mode;
                 if(recording_mode == 2)
                 {
                     yoon_mode_msg.data = Continusous_recording_end;
                     yoon_mode_pub->publish(yoon_mode_msg);
-                    // rclcpp::spin_some(node); //// ros::spinOnce();
+                    rclcpp::spin_some(node); //// ros::spinOnce();
                 }
             }
             else if(recording_mode == 2)
             {
                 yoon_mode_msg.data = Continusous_recording_end;
                 yoon_mode_pub->publish(yoon_mode_msg);
-                // rclcpp::spin_some(node);     //// ros::spinOnce();
+                rclcpp::spin_some(node);     //// ros::spinOnce();
             }
             else if(recording_mode == 3) 
             {
@@ -212,14 +212,14 @@ int main(int argc, char *argv[])
                         // std::cout << Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2) << std::endl;
                         yoon_mode_msg.data = Descrete_reording_start;
                         yoon_mode_pub->publish(yoon_mode_msg);
-                        // rclcpp::spin_some(node); //// ros::spinOnce();
+                        rclcpp::spin_some(node); //// ros::spinOnce();
                         point_counter ++;
                     }
                     else if(recording_mode == 2) // Terminate the point save & Save the selected point to text file
                     {
                         yoon_mode_msg.data = Descrete_recording_save;
                         yoon_mode_pub->publish(yoon_mode_msg);
-                        // rclcpp::spin_some(node); //// ros::spinOnce();
+                        rclcpp::spin_some(node); //// ros::spinOnce();
 
                         printf("Point recording was terminated \n");
                         printf("& The recorded point was saved to text file 'Descre_P_recording.txt'\n");
@@ -334,7 +334,7 @@ int main(int argc, char *argv[])
             {
                 PbNum_command_msg.data = iter_num;
                 PbNum_command_pub->publish(PbNum_command_msg);
-                // rclcpp::spin_some(node); //// ros::spinOnce();
+                rclcpp::spin_some(node); //// ros::spinOnce();
 
                 /*** STEP1 : Playback start ***/
                 int PB_exe_confirm = 0;
@@ -344,7 +344,7 @@ int main(int argc, char *argv[])
                 {
                     yoon_mode_msg.data = Playback_mode_cmd;
                     yoon_mode_pub->publish(yoon_mode_msg);
-                    // rclcpp::spin_some(node); //// ros::spinOnce();
+                    rclcpp::spin_some(node); //// ros::spinOnce();
                 }
             }
             else
@@ -358,7 +358,7 @@ int main(int argc, char *argv[])
         {
             yoon_mode_msg.data = Motion_stop_cmd;
             yoon_mode_pub->publish(yoon_mode_msg);
-            // rclcpp::spin_some(node); //// ros::spinOnce();
+            rclcpp::spin_some(node); //// ros::spinOnce();
         }
 
 
