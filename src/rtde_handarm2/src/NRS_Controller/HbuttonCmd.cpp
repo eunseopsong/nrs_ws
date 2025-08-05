@@ -18,7 +18,7 @@ HbuttonCmd::HbuttonCmd()
 
     ////// 3. ROS Publishers ///////
     yoon_mode_pub = this->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
-    PbNum_command_pub = this->create_publisher<std_msgs::msg::UInt32>("Yoon_PbNum_cmd", 20);
+    PbNum_command_pub = this->create_publisher<std_msgs::msg::UInt16>("Yoon_PbNum_cmd", 20);       //Uint 32 -> 16 2025.08.05
     Clicked_pub = this->create_publisher<geometry_msgs::msg::PointStamped>("clicked_point", 20);
 
     ////// 4. ROS Subscriber ///////

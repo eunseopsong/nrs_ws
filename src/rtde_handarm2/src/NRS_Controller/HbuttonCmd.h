@@ -107,13 +107,13 @@ private:
 
     /* ROS Message instance */
     rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr              yoon_mode_pub;
-    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr              PbNum_command_pub;
+    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr              PbNum_command_pub;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr   Clicked_pub;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr VRPose_sub;
 
     geometry_msgs::msg::PointStamped Clicked_msg;
     std_msgs::msg::UInt16            yoon_mode_msg;
-    std_msgs::msg::UInt32            PbNum_command_msg;
+    std_msgs::msg::UInt16            PbNum_command_msg;
 
     /* ROS Service instance */
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr Aidin_gui_srv1;
