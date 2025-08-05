@@ -140,10 +140,10 @@ set(COMMON_DEPENDENCIES
 # ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 
 
-add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
-target_include_directories(Yoon_UR10e_main PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>) # — 헤더 검색 경로 추가
-target_link_libraries(Yoon_UR10e_main yaml-cpp Eigen3::Eigen) ## target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
-ament_target_dependencies(Yoon_UR10e_main ${COMMON_DEPENDENCIES})
+# add_executable(Yoon_UR10e_main src/Yoon_UR10e_main.cpp src/globals.cpp ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
+# target_include_directories(Yoon_UR10e_main PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>) # — 헤더 검색 경로 추가
+# target_link_libraries(Yoon_UR10e_main yaml-cpp Eigen3::Eigen) ## target_link_libraries(Yoon_UR10e_main ${Yoon_LIB} yaml-cpp::yaml-cpp Eigen3::Eigen)
+# ament_target_dependencies(Yoon_UR10e_main ${COMMON_DEPENDENCIES})
 
 
 # It is not need because I use Isaac sim(Simlation)
@@ -180,7 +180,7 @@ ament_target_dependencies(Yoon_UR10e_main ${COMMON_DEPENDENCIES})
 # Install targets
 install(TARGETS
   # rtde_test
-  Yoon_UR10e_main
+  # Yoon_UR10e_main
   # Yoon_FT_acquisit
   # Yoon_UR10e_cmd
   # Yoon_Hbutton_cmd
