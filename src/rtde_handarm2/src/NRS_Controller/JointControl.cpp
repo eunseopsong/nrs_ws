@@ -69,7 +69,7 @@ bool JointControl::loadFirstTrajectoryPoint(
 {
     FILE* fp = fopen(filepath.c_str(), "rt");
     if (fp == nullptr) {
-        RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", filepath.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "❌XXXX Cannot open Hand_G_recording file: %s", filepath.c_str());
         return false;
     }
 
@@ -107,9 +107,11 @@ bool JointControl::loadFirstTrajectoryPoint(
 
 void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
+    // [DEBUG] 추가 2025.08.05
+    std::cout << "[DEBUG] cmdModeCallback called. ";
     mode_cmd = msg->data;
-
     printf("mode_cmd: %d \n", mode_cmd);
+    std::cout << std::endl;
 
     if(mode_cmd == Joint_control_mode_cmd) {} // Joint angle control mode (wit0.0016,0.0016,0.0016
 
