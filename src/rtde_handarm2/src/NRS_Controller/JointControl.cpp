@@ -606,9 +606,10 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
 // JointControl.cpp에서 정의 수정 2025.08.05
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
-    RCLCPP_INFO(node_->get_logger(), "Received joint state!");
-    for (int i = 0; i < 6; i++)
-        RArm.qc[i] = msg->position[i];
+    std::cout << "[DEBUG] getActualQ called. Current joint states: ";
+    for (int i = 0; i < 6; ++i)
+        std::cout << RArm.qc[i] << " ";
+    std::cout << std::endl;
 }
 
 
