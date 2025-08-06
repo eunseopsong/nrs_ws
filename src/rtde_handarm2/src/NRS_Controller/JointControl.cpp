@@ -5,6 +5,15 @@
 #include <algorithm>
 #include <cctype>
 constexpr int DOF = 6;
+#include <sys/stat.h>
+#include <fstream>
+#include <sstream>
+
+#include <ament_index_cpp/get_package_share_directory.hpp>
+// #include <fstream>
+#include <iostream>
+#include <string>
+
 
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 : node_(node), milisec(0)
@@ -65,36 +74,24 @@ JointControl::~JointControl() {}
 
 
 
-bool JointControl::loadFirstTrajectory()
-{
-    RCLCPP_INFO(node_->get_logger(), "🔄 Trying to load first trajectory...");
+bool JointControl::loadFirstTrajectory() {
+    RCLCPP_INFO(node_->get_logger(), "🔄 Trying to load first trajectory using ROS2 package path...");
 
-    // 1. YAML에서 경로 불러오기
-    std::string filepath = NRS_recording["Hand_G_recording"].as<std::string>();
+    std::string pkg_path = ament_index_cpp::get_package_share_directory("rtde_handarm2");
+    std::string filepath = pkg_path + "/data/Hand_G_recording.txt";
 
-    // 2. 디버깅용 원본 경로 출력
-    RCLCPP_INFO(node_->get_logger(), "[DEBUG] raw path: '%s'", filepath.c_str());
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG] resolved filepath: '%s'", filepath.c_str());
 
-    // 3. 공백 제거
-    filepath.erase(std::remove_if(filepath.begin(), filepath.end(),
-        [](unsigned char c) { return std::isspace(c); }), filepath.end());
-
-    // 4. 공백 제거 후 경로 출력
-    RCLCPP_INFO(node_->get_logger(), "[DEBUG] trimmed path: '%s'", filepath.c_str());
-
-    // 5. 파일 열기 시도
-    FILE* fp = fopen(filepath.c_str(), "rt");
-    if (fp == nullptr) {
-        RCLCPP_FATAL(node_->get_logger(),
-            "❌ Trajectory 파일 열기 실패: %s. 노드를 종료합니다.", filepath.c_str());
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        RCLCPP_FATAL(node_->get_logger(), "❌ std::ifstream으로 trajectory 파일 열기 실패: %s", filepath.c_str());
         rclcpp::shutdown();
         return false;
     }
 
-    // 6. trajectory 데이터를 읽어서 벡터에 저장
     std::vector<double> trajectory_row;
     double val;
-    while (fscanf(fp, "%lf", &val) != EOF) {
+    while (file >> val) {
         trajectory_row.push_back(val);
         if (trajectory_row.size() == DOF) {
             joint_trajectory_.push_back(trajectory_row);
@@ -102,9 +99,8 @@ bool JointControl::loadFirstTrajectory()
         }
     }
 
-    fclose(fp);
+    file.close();
 
-    // 7. trajectory 데이터 개수 확인
     if (joint_trajectory_.empty()) {
         RCLCPP_ERROR(node_->get_logger(), "⚠️ trajectory 데이터가 비어 있습니다.");
         return false;
@@ -113,6 +109,7 @@ bool JointControl::loadFirstTrajectory()
     RCLCPP_INFO(node_->get_logger(), "✅ 첫 trajectory 로드 완료. 총 %ld개 포인트가 있습니다.", joint_trajectory_.size());
     return true;
 }
+
 
 
 

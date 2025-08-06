@@ -17,6 +17,7 @@ find_package(Eigen3 REQUIRED)
 find_package(nrs_forcecon2 REQUIRED)
 find_package(nrs_msgmonitoring2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 ament_export_dependencies(
   rclcpp
@@ -85,21 +86,21 @@ list(REMOVE_ITEM sources ${EXCLUDE_SOURCES})
 # ------- ur10e_main node dependencies -------- #
 add_executable(nrs_ctrl node_ur10e_main.cpp ${sources} ${Yoon_LIB} ${SUBSCRIBER_SRCS})
 target_include_directories(nrs_ctrl PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen)
+target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen ament_index_cpp::ament_index_cpp)
 ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 install(TARGETS nrs_ctrl DESTINATION lib/${PROJECT_NAME})
 
 # ------- ur10e_mode_cmd node dependencies -------- #
 add_executable(ur10e_mode_cmd Yoon_UR10e_cmd.cpp ${sources} ${Yoon_LIB} ${SUBSCRIBER_SRCS})
 target_include_directories(ur10e_mode_cmd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-target_link_libraries(ur10e_mode_cmd yaml-cpp Eigen3::Eigen)
+target_link_libraries(ur10e_mode_cmd yaml-cpp Eigen3::Eigen ament_index_cpp::ament_index_cpp)
 ament_target_dependencies(ur10e_mode_cmd ${COMMON_DEPENDENCIES})
 install(TARGETS ur10e_mode_cmd DESTINATION lib/${PROJECT_NAME})
 
 # -------- Hbutton node dependencies --------- #
 add_executable(hbutton node_Hbutton.cpp ${sources} ${Yoon_LIB} ${SUBSCRIBER_SRCS})
 target_include_directories(hbutton PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-target_link_libraries(hbutton yaml-cpp Eigen3::Eigen)
+target_link_libraries(hbutton yaml-cpp Eigen3::Eigen ament_index_cpp::ament_index_cpp)
 ament_target_dependencies(hbutton ${COMMON_DEPENDENCIES})
 install(TARGETS hbutton DESTINATION lib/${PROJECT_NAME})
 
@@ -110,3 +111,12 @@ install(TARGETS path_receiver DESTINATION lib/${PROJECT_NAME})
 
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+
+install(DIRECTORY ../../data/
+  DESTINATION share/${PROJECT_NAME}/data
+)
+
+# install(DIRECTORY ../../launch/ DESTINATION share/${PROJECT_NAME})
+# install(DIRECTORY ../../config/ DESTINATION share/${PROJECT_NAME})
+# install(DIRECTORY ../../data/ DESTINATION share/${PROJECT_NAME})  # ✅ 이 줄이 꼭 있어야 함!
