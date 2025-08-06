@@ -411,9 +411,10 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
             LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
             LD_CFx, LD_CFy, LD_CFz);
 
+        // custom read txt file version 2025.08.05 20:27
         if (!success) {
             RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
-            // return;  // 조기 종료
+            return;  // 조기 종료
         }
 
         printf("%f %f %f %f %f %f %f %f %f\n",
