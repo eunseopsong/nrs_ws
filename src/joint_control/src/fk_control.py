@@ -38,7 +38,7 @@ class EndEffectorController(Node):
         self.joint_state.effort   = [0.0] * self.num_joints
 
         # 100Hz 타이머 (주기적으로 메시지 발행)
-        self.timer_period = 0.01
+        self.timer_period = 0.001
         self.timer = self.create_timer(self.timer_period, self.publish_command_msg)
 
     def publish_command_msg(self):
