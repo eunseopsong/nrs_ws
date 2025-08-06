@@ -341,10 +341,7 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 
         /* Trajectory directory load */
         auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-        if (Hand_G_playback == NULL) {
-            RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
-            // return;
-        }
+
 
         /* Contact admittance parameter laod */
         Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
@@ -364,6 +361,10 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         int reti;
 
         Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt"); // Open the trajectory file
+        if (Hand_G_playback == NULL) {
+            RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
+            // return;
+        }
 
         for(int i = 0; i<3;i++) // For safe data acquisition
         {
@@ -604,6 +605,8 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 void JointControl::CalculateAndPublishJoint()
 {
     _count += 0.001;
+    auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+    Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
     // RCLCPP_INFO(node_->get_logger(), "count_: %f", _count); // t 값을 디버깅하기 위해 출력
 
     /* Set application realtime priority */
@@ -757,6 +760,8 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("count_: %f \n", _count); // t 값을 디버깅하기 위해 출력
+                    printf("[DEBUG] Hand_G_recording path: %s \n", Hand_G_recording_path.c_str());
+
 
                     // UR10e actual joint angle monitoring
                     printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
