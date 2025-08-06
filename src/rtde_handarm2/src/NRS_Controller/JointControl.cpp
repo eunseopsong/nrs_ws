@@ -341,6 +341,10 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 
         /* Trajectory directory load */
         auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+        if (Hand_G_playback == NULL) {
+            RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
+            return;
+        }
 
         /* Contact admittance parameter laod */
         Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
