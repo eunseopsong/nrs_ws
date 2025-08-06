@@ -617,7 +617,7 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 void JointControl::CalculateAndPublishJoint()
 {
     _count += 0.001;
-    RCLCPP_INFO(node_->get_logger(), "count_: %f", _count); // t 값을 디버깅하기 위해 출력
+    // RCLCPP_INFO(node_->get_logger(), "count_: %f", _count); // t 값을 디버깅하기 위해 출력
 
     /* Set application realtime priority */
     int priority = 80;
@@ -746,8 +746,8 @@ void JointControl::CalculateAndPublishJoint()
             ctrl = 0;
             pause_cnt = 0;
             //// while (running)
-            while (rclcpp::ok() && running) // Add on 2025.08.03 00:10
-            {
+            // while (rclcpp::ok() && running) // Add on 2025.08.03 00:10
+            // {
                 // t_start = rtde_control.initPeriod();
                 // getActualQ(); // Get the joint data of UR10e
 
@@ -770,7 +770,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,ctrl,pre_ctrl,path_exe_counter,Path_point_num); //show the current mode data
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
-                    // printf("count_: %f \n", _count); // t 값을 디버깅하기 위해 출력
+                    printf("count_: %f \n", _count); // t 값을 디버깅하기 위해 출력
 
                     // UR10e actual joint angle monitoring
                     printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
@@ -881,7 +881,7 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
-                    continue;
+                    // continue;
                 }
 
                 /* Cartesian position control mode */
@@ -949,7 +949,7 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
-                    continue;
+                    // continue;
                 }
 
 
@@ -1177,7 +1177,7 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
-                    continue;
+                    // continue;
                 }
 
                 /* Posture/Power playback control mode */
@@ -1747,7 +1747,7 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.waitPeriod(t_start);
 
                     pre_ctrl = ctrl; // for ctrl mode switching detection
-                    continue;
+                    // continue;
                 }
 
                 else{
@@ -1770,14 +1770,14 @@ void JointControl::CalculateAndPublishJoint()
                 // double maxerrmin = 0.001;
 
                 //// rtde_control.waitPeriod(t_start);
-            }
+            // }
             // break;
 
         // default:
         //     break;
         // }
 
-        std::cout << "Control interrupted!" << std::endl;
+        // std::cout << "Control interrupted!" << std::endl;
 
         //// rtde_control.servoStop();
         //// rtde_control.stopScript();
