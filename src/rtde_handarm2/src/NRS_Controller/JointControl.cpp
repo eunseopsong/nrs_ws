@@ -3,7 +3,7 @@
 #include <memory>
 
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
-: node_(node), _count(0)
+: node_(node), milisec(0)
 ////   rclcpp::Node("nrs_control_node"),
 {
     AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "AdaptiveK_msg");
@@ -654,7 +654,7 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 
 void JointControl::CalculateAndPublishJoint()
 {
-    _count += 0.001;
+    milisec += 1;
 
     // auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
 
@@ -830,7 +830,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,ctrl,pre_ctrl,path_exe_counter,Path_point_num); //show the current mode data
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
-                    printf("count_: %f \n", _count); // t 값을 디버깅하기 위해 출력
+                    printf("milisec: %.2f \n", milisec); // t 값을 디버깅하기 위해 출력
                     // printf("[DEBUG] Hand_G_recording path: %s \n", Hand_G_recording_path.c_str());
 
 
