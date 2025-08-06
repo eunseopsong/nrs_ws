@@ -94,7 +94,7 @@ private:
     FILE* path_recording_joint;
     FILE* EXPdata1;
 
-    double _count;
+    double milisec;
 };
 
 #endif  // JOINTCONTROL_H
