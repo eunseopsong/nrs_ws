@@ -10,7 +10,8 @@ public:
     ~JointControl();
 
     void CalculateAndPublishJoint();
-    void getActualQ();  // Isaac Sim에서 받은 joint 값을 RArm.qc로 저장
+    // void getActualQ();  // Isaac Sim에서 받은 joint 값을 RArm.qc로 저장
+    void getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg); // fix on 2025.08.05
 
 private:
     //////// ROS2 Node 및 동기화 자료 ////////
