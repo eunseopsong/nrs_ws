@@ -63,7 +63,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Timer
     timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(2),
+        std::chrono::milliseconds(1),
         std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
@@ -708,25 +708,12 @@ void JointControl::CalculateAndPublishJoint()
 
     #endif
 
-    ///// Add on 2025.06.26 /////
-    // joint_pos 디버깅 출력
-    printf("Current joint_pos values: ");
-    for (int i = 0; i < 6; ++i) {
-        printf("%.4f ", joint_pos[i]);
-    }
-    printf("\n");
-    /////////////////////////////
-
     // cmdModeCallback();
     ctrl = 3;
     //// ctrl debugger ////
     // printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
     // printf("mode_cmd: %d \n", mode_cmd);
     ///////////////////////
-
-
-
-
 
     // spring mode control parameter
     VectorXd Hspring_mode_init_pos(6);
