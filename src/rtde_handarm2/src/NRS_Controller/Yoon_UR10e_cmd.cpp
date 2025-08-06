@@ -33,7 +33,7 @@
 
 # include "var_ur10e_main.h" // Change on 2025.08.04
 //// std::ifstream fin2("/home/eunseop/nrs_ws/src/rtde_handarm2/NRS_yaml/NRS_Record_Printing.yaml");
-//// YAML::Node NRS_recording = YAML::Load(fin2);
+// YAML::Node NRS_recording = YAML::Load(fin2);
 
 /* Yaml file load end */
 

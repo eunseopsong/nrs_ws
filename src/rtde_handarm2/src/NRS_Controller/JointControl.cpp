@@ -343,7 +343,7 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
         if (Hand_G_playback == NULL) {
             RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
-            return;
+            // return;
         }
 
         /* Contact admittance parameter laod */
