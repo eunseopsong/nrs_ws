@@ -607,8 +607,10 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
     std::cout << "[DEBUG] getActualQ called. Current joint states: ";
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 6; ++i){
+        RArm.qc[i] = msg->position[i];
         std::cout << RArm.qc[i] << " ";
+    }   
     std::cout << std::endl;
 }
 
