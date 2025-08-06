@@ -5,7 +5,6 @@
 
 # Path
 Data1_path: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Data1.txt"
-# Data1_path: /home/nrsur10/catkin_ws/src/rtde_handarm/src/Data1.txt
 
 # Switch
 Data1_switch: 0 # 1: Recording on, 0: Recording off
@@ -17,9 +16,6 @@ Data1_switch: 0 # 1: Recording on, 0: Recording off
 test_path_joint: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Experiment_data/test_path_joint.txt"
 test_path: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Experiment_data/test_path.txt"
 EXPdata1_path: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Experiment_data/Data1.txt"
-# test_path_joint: /home/nrsur10/catkin_ws/src/rtde_handarm/src/Experiment_data/test_path_joint.txt
-# test_path: /home/nrsur10/catkin_ws/src/rtde_handarm/src/Experiment_data/test_path.txt
-# EXPdata1_path: /home/nrsur10/catkin_ws/src/rtde_handarm/src/Experiment_data/Data1.txt
 
 # Switch
 EXPdata1_switch: 1 # 1: Recording on, 0: Recording off
@@ -30,8 +26,6 @@ EXPdata1_switch: 1 # 1: Recording on, 0: Recording off
 # Path - Hand_guiding
 Descre_P_recording: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Control_data/Descre_P_recording.txt"
 Hand_G_recording: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Control_data/Hand_G_recording.txt"
-# Descre_P_recording: /home/nrsur10/catkin_ws/src/rtde_handarm/src/Control_data/Descre_P_recording.txt
-# Hand_G_recording: /home/nrsur10/catkin_ws/src/rtde_handarm/src/Control_data/Hand_G_recording.txt
 
 # Switch - Hand_guiding
 
@@ -41,8 +35,6 @@ Hand_G_recording: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Control_data/Hand_
 # Path - VR
 VRCali_UR10CB_EE: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/NRS_VR_data/NRS_CaliData/UR10CB_EE.txt"
 VRCali_UR10CB_VR: "/home/eunseop/nrs_ws/src/rtde_handarm2/src/NRS_VR_data/NRS_CaliData/UR10CB_VR.txt"
-# VRCali_UR10CB_EE: /home/nrsur10/catkin_ws/src/rtde_handarm/src/NRS_VR_data/NRS_CaliData/UR10CB_EE.txt
-# VRCali_UR10CB_VR: /home/nrsur10/catkin_ws/src/rtde_handarm/src/NRS_VR_data/NRS_CaliData/UR10CB_VR.txt
 
 # Switch - VR
 
