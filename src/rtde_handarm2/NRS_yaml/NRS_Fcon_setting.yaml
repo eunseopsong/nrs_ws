@@ -7,7 +7,7 @@
 #****** Yoon_UR10e_main.cpp files ******#
 
 # Contact force control mode selector #
-Contact_Fcon_mode: 1 # 0:[static D, K=0], 1:[varialbe D, K=0], 2:[Variable K], 3: [Fuzzy variable K], 4: [Three step FAAC]
+Contact_Fcon_mode: 4 # 0:[static D, K=0], 1:[varialbe D, K=0], 2:[Variable K], 3: [Fuzzy variable K], 4: [Three step FAAC]
 
 # Initial admittance parameters for contact force control #
 ContactDesiredMass:

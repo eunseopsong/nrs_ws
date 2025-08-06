@@ -3,7 +3,7 @@
 #include <memory>
 
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
-: node_(node)
+: node_(node), _count(0)
 ////   rclcpp::Node("nrs_control_node"),
 {
     AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "AdaptiveK_msg");
