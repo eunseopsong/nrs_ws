@@ -407,16 +407,16 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 
         Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt"); // Open the trajectory file
 
-<<<<<<< HEAD
-        if (!success) {
-            RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
-            // return;  // 조기 종료
-=======
+
+        // if (!success) {
+        //     RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
+        //     // return;  // 조기 종료
+        // }
         for(int i = 0; i<3;i++) // For safe data acquisition
         {
             reti = fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f \n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw,
             &LD_CFx, &LD_CFy, &LD_CFz); // Get the starting point
->>>>>>> origin/main
+
         }
         printf("%f %f %f %f %f %f %f %f %f\n", LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw, LD_CFx, LD_CFy, LD_CFz);
 
@@ -653,7 +653,7 @@ void JointControl::CalculateAndPublishJoint()
 {
     _count += 0.001;
 
-<<<<<<< HEAD
+
     // auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
 
     // YAML에서 경로 읽기
@@ -676,10 +676,6 @@ void JointControl::CalculateAndPublishJoint()
     // }
 
 
-
-
-=======
->>>>>>> origin/main
     /* Set application realtime priority */
     int priority = 80;
     //// if (RTDEUtility::setRealtimePriority(priority)) {
@@ -831,11 +827,9 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("count_: %f \n", _count); // t 값을 디버깅하기 위해 출력
-<<<<<<< HEAD
                     // printf("[DEBUG] Hand_G_recording path: %s \n", Hand_G_recording_path.c_str());
 
-=======
->>>>>>> origin/main
+
 
                     // UR10e actual joint angle monitoring
                     printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
