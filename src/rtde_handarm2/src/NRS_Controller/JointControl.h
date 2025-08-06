@@ -41,11 +41,11 @@ private:
 
 
 
-    bool loadFirstTrajectoryPoint(
-        const std::string& filepath,
-        float& LD_X, float& LD_Y, float& LD_Z,
-        float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
-        float& LD_CFx, float& LD_CFy, float& LD_CFz);
+    // bool loadFirstTrajectoryPoint(
+    //     const std::string& filepath,
+    //     float& LD_X, float& LD_Y, float& LD_Z,
+    //     float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
+    //     float& LD_CFx, float& LD_CFy, float& LD_CFz);
 
 
 
