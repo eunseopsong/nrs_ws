@@ -413,7 +413,7 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 
         if (!success) {
             RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
-            return;  // 조기 종료
+            // return;  // 조기 종료
         }
 
         printf("%f %f %f %f %f %f %f %f %f\n",
@@ -659,23 +659,23 @@ void JointControl::CalculateAndPublishJoint()
     // auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
 
     // YAML에서 경로 읽기
-    std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+    // std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
 
-    // 1. 디버깅용으로 먼저 읽기 모드로 열기
-    FILE* fp_debug = fopen(Hand_G_recording_path.c_str(), "rt");
-    if (fp_debug == nullptr) {
-        RCLCPP_ERROR(node_->get_logger(), "❌ [DEBUG] Cannot open file for reading: %s", Hand_G_recording_path.c_str());
-    } else {
-        char line[1024];  // 한 줄 버퍼
-        if (fgets(line, sizeof(line), fp_debug) != nullptr) {
-            // 줄 끝 개행문자 제거
-            line[strcspn(line, "\r\n")] = '\0';
-            RCLCPP_INFO(node_->get_logger(), "[DEBUG] First line: %s", line);
-        } else {
-            RCLCPP_WARN(node_->get_logger(), "[DEBUG] File is empty or reading failed: %s", Hand_G_recording_path.c_str());
-        }
-        fclose(fp_debug);
-    }
+    // // 1. 디버깅용으로 먼저 읽기 모드로 열기
+    // FILE* fp_debug = fopen(Hand_G_recording_path.c_str(), "rt");
+    // if (fp_debug == nullptr) {
+    //     RCLCPP_ERROR(node_->get_logger(), "❌ [DEBUG] Cannot open file for reading: %s", Hand_G_recording_path.c_str());
+    // } else {
+    //     char line[1024];  // 한 줄 버퍼
+    //     if (fgets(line, sizeof(line), fp_debug) != nullptr) {
+    //         // 줄 끝 개행문자 제거
+    //         line[strcspn(line, "\r\n")] = '\0';
+    //         RCLCPP_INFO(node_->get_logger(), "[DEBUG] First line: %s", line);
+    //     } else {
+    //         RCLCPP_WARN(node_->get_logger(), "[DEBUG] File is empty or reading failed: %s", Hand_G_recording_path.c_str());
+    //     }
+    //     fclose(fp_debug);
+    // }
 
 
 
@@ -831,7 +831,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("count_: %f \n", _count); // t 값을 디버깅하기 위해 출력
-                    printf("[DEBUG] Hand_G_recording path: %s \n", Hand_G_recording_path.c_str());
+                    // printf("[DEBUG] Hand_G_recording path: %s \n", Hand_G_recording_path.c_str());
 
 
                     // UR10e actual joint angle monitoring
