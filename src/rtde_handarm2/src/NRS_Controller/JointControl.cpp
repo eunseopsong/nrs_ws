@@ -69,7 +69,7 @@ bool JointControl::loadFirstTrajectoryPoint(
 {
     FILE* fp = fopen(filepath.c_str(), "rt");
     if (fp == nullptr) {
-        RCLCPP_ERROR(node_->get_logger(), "❌XXXX Cannot open Hand_G_recording file: %s", filepath.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", filepath.c_str());
         return false;
     }
 
@@ -112,7 +112,6 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
     mode_cmd = msg->data;
     printf("mode_cmd: %d \n", mode_cmd);
     std::cout << std::endl;
-
 
     if(mode_cmd == Joint_control_mode_cmd) {} // Joint angle control mode (wit0.0016,0.0016,0.0016
 
@@ -385,15 +384,14 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
     }
     /* VR calibrarion point save with "Teaching handle" [end] */
 
-    else if(mode_cmd == Playback_mode_cmd) // Power playback
-	{
+    else if(mode_cmd == Playback_mode_cmd)
+    {
         /*** Parameter upload form yaml ***/
 
         /* Trajectory directory load */
         auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-        std::cout << "[DEBUG] Hand_G_recording_path: " << Hand_G_recording_path << std::endl;
 
-        /* Contact admittance parameter laod */
+        /* Contact admittance parameter load */
         Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
         Power_PB.PRamM[1]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
         Power_PB.PRamM[2]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>();
@@ -407,48 +405,51 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         Power_PB.PRamK[2]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>();
 
         /* Data load */
-        float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY
-        int reti;
+        float LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw;
+        float LD_CFx, LD_CFy, LD_CFz;
 
-        Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt");
-        if (Hand_G_playback == NULL) {
-            RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
-            perror("fopen");
-            return;  // 꼭 리턴해야 segmentation fault 방지됨
+        bool success = loadFirstTrajectoryPoint(
+            Hand_G_recording_path,
+            LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
+            LD_CFx, LD_CFy, LD_CFz);
+
+        if (!success) {
+            RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
+            // return;  // 조기 종료
         }
 
-        for(int i = 0; i<3;i++) // For safe data acquisition
-        {
-            reti = fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f \n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw,
-            &LD_CFx, &LD_CFy, &LD_CFz); // Get the starting point
-        }
-        printf("%f %f %f %f %f %f %f %f %f\n", LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw, LD_CFx, LD_CFy, LD_CFz);
+        printf("%f %f %f %f %f %f %f %f %f\n",
+            LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
+            LD_CFx, LD_CFy, LD_CFz);
 
         /* Trajectory generation to start point */
-
         double Linear_travel_vel = 0.03; // m/s
         double Linear_travel_time;
-        double Tar_pos[6] = {LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw};
-        double Init_pos[6] = {RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2)};
+        double Tar_pos[6] = {LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw};
+        double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2),
+                            RArm.thc(0), RArm.thc(1), RArm.thc(2)};
 
-        Linear_travel_time = sqrt(pow(Init_pos[0]-Tar_pos[0],2)+pow(Init_pos[1]-Tar_pos[1],2)+pow(Init_pos[2]-Tar_pos[2],2))/Linear_travel_vel;
-        if(Linear_travel_time < 3) Linear_travel_time = 3;
+        Linear_travel_time = sqrt(pow(Init_pos[0]-Tar_pos[0],2)+
+                                pow(Init_pos[1]-Tar_pos[1],2)+
+                                pow(Init_pos[2]-Tar_pos[2],2)) / Linear_travel_vel;
+
+        if (Linear_travel_time < 3)
+            Linear_travel_time = 3;
 
         PB_starting_path_done_flag = Posture_PB.PTP_6D_path_init(Init_pos, Tar_pos, Linear_travel_time);
 
         printf("Playback init path generation done \n");
-        // path_recording_pos = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/test_path.txt","wt");
+
         auto test_path_path = NRS_recording["test_path"].as<std::string>();
-        path_recording_pos = fopen(test_path_path.c_str(),"wt");
-        memcpy(message_status,ST_path_gen_done,sizeof(ST_path_gen_done));
+        path_recording_pos = fopen(test_path_path.c_str(), "wt");
+        memcpy(message_status, ST_path_gen_done, sizeof(ST_path_gen_done));
 
         #if Playback_mode == 1
-        /* Power playback initialization */
         Power_PB.playback_init(RArm.xc, RArm.thc);
         #endif
 
         ctrl = 3;
-	}
+    }
     else if(mode_cmd == Motion_stop_cmd) // Motion stop
 	{
         ctrl = 0;
