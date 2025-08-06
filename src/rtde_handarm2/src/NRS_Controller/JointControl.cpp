@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
-
+constexpr int DOF = 6;
 
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 : node_(node), milisec(0)
@@ -65,12 +65,24 @@ JointControl::~JointControl() {}
 
 
 
-bool JointControl::loadFirstTrajectoryPoint(
-    const std::string& filepath,
-    float& LD_X, float& LD_Y, float& LD_Z,
-    float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
-    float& LD_CFx, float& LD_CFy, float& LD_CFz)
+bool JointControl::loadFirstTrajectory()
 {
+    RCLCPP_INFO(node_->get_logger(), "🔄 Trying to load first trajectory...");
+
+    // 1. YAML에서 경로 불러오기
+    std::string filepath = NRS_recording["Hand_G_recording"].as<std::string>();
+
+    // 2. 디버깅용 원본 경로 출력
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG] raw path: '%s'", filepath.c_str());
+
+    // 3. 공백 제거
+    filepath.erase(std::remove_if(filepath.begin(), filepath.end(),
+        [](unsigned char c) { return std::isspace(c); }), filepath.end());
+
+    // 4. 공백 제거 후 경로 출력
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG] trimmed path: '%s'", filepath.c_str());
+
+    // 5. 파일 열기 시도
     FILE* fp = fopen(filepath.c_str(), "rt");
     if (fp == nullptr) {
         RCLCPP_FATAL(node_->get_logger(),
@@ -79,27 +91,26 @@ bool JointControl::loadFirstTrajectoryPoint(
         return false;
     }
 
-    float x, y, z, roll, pitch, yaw, fx, fy, fz;
-    int reti;
-
-    for (int i = 0; i < 3; ++i) {
-        reti = fscanf(fp, "%f %f %f %f %f %f %f %f %f\n",
-                      &x, &y, &z, &roll, &pitch, &yaw, &fx, &fy, &fz);
+    // 6. trajectory 데이터를 읽어서 벡터에 저장
+    std::vector<double> trajectory_row;
+    double val;
+    while (fscanf(fp, "%lf", &val) != EOF) {
+        trajectory_row.push_back(val);
+        if (trajectory_row.size() == DOF) {
+            joint_trajectory_.push_back(trajectory_row);
+            trajectory_row.clear();
+        }
     }
 
     fclose(fp);
 
-    if (reti != 9) {
-        RCLCPP_FATAL(node_->get_logger(),
-            "⚠️ trajectory 파일 형식 오류 (값 개수 %d/9). 노드를 종료합니다.", reti);
-        rclcpp::shutdown();
+    // 7. trajectory 데이터 개수 확인
+    if (joint_trajectory_.empty()) {
+        RCLCPP_ERROR(node_->get_logger(), "⚠️ trajectory 데이터가 비어 있습니다.");
         return false;
     }
 
-    LD_X = x; LD_Y = y; LD_Z = z;
-    LD_Roll = roll; LD_Pitch = pitch; LD_Yaw = yaw;
-    LD_CFx = fx; LD_CFy = fy; LD_CFz = fz;
-
+    RCLCPP_INFO(node_->get_logger(), "✅ 첫 trajectory 로드 완료. 총 %ld개 포인트가 있습니다.", joint_trajectory_.size());
     return true;
 }
 
@@ -391,55 +402,62 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
     }
     /* VR calibrarion point save with "Teaching handle" [end] */
 
-    else if(mode_cmd == Playback_mode_cmd)
+    else if (mode_cmd == Playback_mode_cmd)
     {
-        /*** Parameter upload form yaml ***/
+        /*** Parameter upload from yaml ***/
 
-        /* Trajectory directory load */
-        auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+        // 1. Contact admittance parameter load
+        Power_PB.PRamM[0] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
+        Power_PB.PRamM[1] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
+        Power_PB.PRamM[2] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>();
 
-        /* Contact admittance parameter load */
-        Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
-        Power_PB.PRamM[1]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
-        Power_PB.PRamM[2]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>();
+        Power_PB.PRamD[0] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD1"].as<double>();
+        Power_PB.PRamD[1] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD2"].as<double>();
+        Power_PB.PRamD[2] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>();
 
-        Power_PB.PRamD[0]= NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD1"].as<double>();
-        Power_PB.PRamD[1]= NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD2"].as<double>();
-        Power_PB.PRamD[2]= NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>();
+        Power_PB.PRamK[0] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK1"].as<double>();
+        Power_PB.PRamK[1] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK2"].as<double>();
+        Power_PB.PRamK[2] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>();
 
-        Power_PB.PRamK[0]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK1"].as<double>();
-        Power_PB.PRamK[1]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK2"].as<double>();
-        Power_PB.PRamK[2]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>();
-
-        /* Data load */
-        float LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw;
-        float LD_CFx, LD_CFy, LD_CFz;
-
-        bool success = loadFirstTrajectoryPoint(
-            Hand_G_recording_path,
-            LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
-            LD_CFx, LD_CFy, LD_CFz);
-
+        // 2. Trajectory 로드
+        bool success = loadFirstTrajectory();
         if (!success) {
-            RCLCPP_ERROR(node_->get_logger(),
-                "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
-            return;  // ★★ 반드시 조기 종료 필요
+            RCLCPP_FATAL(node_->get_logger(), "❌ Trajectory 파일 로딩 실패! 노드를 종료합니다.");
+            rclcpp::shutdown();
+            return;
         }
 
-        printf("%f %f %f %f %f %f %f %f %f\n",
-            LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
-            LD_CFx, LD_CFy, LD_CFz);
+        // 3. 첫 포인트 가져오기
+        if (joint_trajectory_.empty()) {
+            RCLCPP_FATAL(node_->get_logger(), "❌ trajectory 벡터가 비어 있습니다.");
+            rclcpp::shutdown();
+            return;
+        }
 
-        /* Trajectory generation to start point */
+        float LD_X     = joint_trajectory_[0][0];
+        float LD_Y     = joint_trajectory_[0][1];
+        float LD_Z     = joint_trajectory_[0][2];
+        float LD_Roll  = joint_trajectory_[0][3];
+        float LD_Pitch = joint_trajectory_[0][4];
+        float LD_Yaw   = joint_trajectory_[0][5];
+
+        printf("%f %f %f %f %f %f\n", LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw);
+
+        // 4. Trajectory generation to start point
         double Linear_travel_vel = 0.03; // m/s
         double Linear_travel_time;
-        double Tar_pos[6] = {LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw};
-        double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2),
-                            RArm.thc(0), RArm.thc(1), RArm.thc(2)};
 
-        Linear_travel_time = sqrt(pow(Init_pos[0]-Tar_pos[0],2)+
-                                pow(Init_pos[1]-Tar_pos[1],2)+
-                                pow(Init_pos[2]-Tar_pos[2],2)) / Linear_travel_vel;
+        double Tar_pos[6] = {LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw};
+        double Init_pos[6] = {
+            RArm.xc(0), RArm.xc(1), RArm.xc(2),
+            RArm.thc(0), RArm.thc(1), RArm.thc(2)
+        };
+
+        Linear_travel_time = sqrt(
+            pow(Init_pos[0] - Tar_pos[0], 2) +
+            pow(Init_pos[1] - Tar_pos[1], 2) +
+            pow(Init_pos[2] - Tar_pos[2], 2)
+        ) / Linear_travel_vel;
 
         if (Linear_travel_time < 3)
             Linear_travel_time = 3;
@@ -667,9 +685,9 @@ void JointControl::CalculateAndPublishJoint()
     milisec += 1;
 
 
-    std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-    std::cout << "[DEBUG] raw path = [" << Hand_G_recording_path << "]" << std::endl;
-    std::cout << "[DEBUG] size of path = " << Hand_G_recording_path.size() << std::endl;
+    // std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+    // std::cout << "[DEBUG] raw path = [" << Hand_G_recording_path << "]" << std::endl;
+    // std::cout << "[DEBUG] size of path = " << Hand_G_recording_path.size() << std::endl;
 
 
     /* Set application realtime priority */

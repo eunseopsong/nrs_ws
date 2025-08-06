@@ -10,7 +10,6 @@ public:
     ~JointControl();
 
     void CalculateAndPublishJoint();
-    // void getActualQ();  // Isaac Sim에서 받은 joint 값을 RArm.qc로 저장
     void getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg); // fix on 2025.08.05
 
 private:
@@ -40,13 +39,13 @@ private:
     sensor_msgs::msg::JointState joint_state_;
 
 
-
-    bool loadFirstTrajectoryPoint(
-        const std::string& filepath,
-        float& LD_X, float& LD_Y, float& LD_Z,
-        float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
-        float& LD_CFx, float& LD_CFy, float& LD_CFz);
-
+    bool loadFirstTrajectory();  // ← 이것도 추가
+    // bool loadFirstTrajectoryPoint(
+    //     const std::string& filepath,
+    //     float& LD_X, float& LD_Y, float& LD_Z,
+    //     float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
+    //     float& LD_CFx, float& LD_CFy, float& LD_CFz);
+    // std::vector<std::vector<double>> joint_trajectory_;
 
 
     std_msgs::msg::UInt16 UR10e_mode_msg_;
@@ -81,7 +80,11 @@ private:
     VectorXd qc_pre;
     VectorXd dqd_pre;
 
+
     int path_exe_counter = 0;
+    // trajectory 저장을 위한 벡터
+    std::vector<std::vector<double>> joint_trajectory_;
+
 
     Eigen::Matrix<double, 6, 1> Hadmit_M;
     Eigen::Matrix<double, 6, 1> Hadmit_D;
