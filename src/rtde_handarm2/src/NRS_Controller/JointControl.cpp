@@ -342,7 +342,6 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         /* Trajectory directory load */
         auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
 
-
         /* Contact admittance parameter laod */
         Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
         Power_PB.PRamM[1]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
@@ -360,7 +359,8 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY
         int reti;
 
-        Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt"); // Open the trajectory file
+        // Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt"); // Open the trajectory file
+        Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"wt");
         if (Hand_G_playback == NULL) {
             RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
             // return;
@@ -605,9 +605,30 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 void JointControl::CalculateAndPublishJoint()
 {
     _count += 0.001;
-    auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-    Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
-    // RCLCPP_INFO(node_->get_logger(), "count_: %f", _count); // t 값을 디버깅하기 위해 출력
+
+    // auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+
+    // YAML에서 경로 읽기
+    std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+
+    // 1. 디버깅용으로 먼저 읽기 모드로 열기
+    FILE* fp_debug = fopen(Hand_G_recording_path.c_str(), "rt");
+    if (fp_debug == nullptr) {
+        RCLCPP_ERROR(node_->get_logger(), "❌ [DEBUG] Cannot open file for reading: %s", Hand_G_recording_path.c_str());
+    } else {
+        char line[1024];  // 한 줄 버퍼
+        if (fgets(line, sizeof(line), fp_debug) != nullptr) {
+            // 줄 끝 개행문자 제거
+            line[strcspn(line, "\r\n")] = '\0';
+            RCLCPP_INFO(node_->get_logger(), "[DEBUG] First line: %s", line);
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[DEBUG] File is empty or reading failed: %s", Hand_G_recording_path.c_str());
+        }
+        fclose(fp_debug);
+    }
+
+
+
 
     /* Set application realtime priority */
     int priority = 80;
