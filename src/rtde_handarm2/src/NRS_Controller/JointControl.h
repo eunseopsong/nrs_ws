@@ -6,7 +6,7 @@
 class JointControl : public std::enable_shared_from_this<JointControl>
 {
 public:
-    JointControl(const rclcpp::Node::SharedPtr& node);  // 생성자
+    JointControl(const rclcpp::Node::SharedPtr& node);  // Consructor
     ~JointControl();
 
     void CalculateAndPublishJoint();
