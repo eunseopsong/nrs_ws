@@ -2,6 +2,10 @@
 #include <iostream>
 #include <memory>
 
+#include <algorithm>
+#include <cctype>
+
+
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 : node_(node), milisec(0)
 ////   rclcpp::Node("nrs_control_node"),
@@ -69,14 +73,15 @@ bool JointControl::loadFirstTrajectoryPoint(
 {
     FILE* fp = fopen(filepath.c_str(), "rt");
     if (fp == nullptr) {
-        RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", filepath.c_str());
+        RCLCPP_FATAL(node_->get_logger(),
+            "❌ Trajectory 파일 열기 실패: %s. 노드를 종료합니다.", filepath.c_str());
+        rclcpp::shutdown();
         return false;
     }
 
     float x, y, z, roll, pitch, yaw, fx, fy, fz;
     int reti;
 
-    // 3줄 중 마지막 줄을 읽어서 최종적으로 저장
     for (int i = 0; i < 3; ++i) {
         reti = fscanf(fp, "%f %f %f %f %f %f %f %f %f\n",
                       &x, &y, &z, &roll, &pitch, &yaw, &fx, &fy, &fz);
@@ -85,7 +90,9 @@ bool JointControl::loadFirstTrajectoryPoint(
     fclose(fp);
 
     if (reti != 9) {
-        RCLCPP_WARN(node_->get_logger(), "⚠️ fscanf returned %d, expected 9 values", reti);
+        RCLCPP_FATAL(node_->get_logger(),
+            "⚠️ trajectory 파일 형식 오류 (값 개수 %d/9). 노드를 종료합니다.", reti);
+        rclcpp::shutdown();
         return false;
     }
 
@@ -414,8 +421,9 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
             LD_CFx, LD_CFy, LD_CFz);
 
         if (!success) {
-            RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
-            // return;  // 조기 종료
+            RCLCPP_ERROR(node_->get_logger(),
+                "❌ Failed to load trajectory data from: %s", Hand_G_recording_path.c_str());
+            return;  // ★★ 반드시 조기 종료 필요
         }
 
         printf("%f %f %f %f %f %f %f %f %f\n",
@@ -658,28 +666,10 @@ void JointControl::CalculateAndPublishJoint()
 {
     milisec += 1;
 
-    // auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
 
-    // YAML에서 경로 읽기
-    // std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-
-    // // 1. 디버깅용으로 먼저 읽기 모드로 열기
-    // FILE* fp_debug = fopen(Hand_G_recording_path.c_str(), "rt");
-    // if (fp_debug == nullptr) {
-    //     RCLCPP_ERROR(node_->get_logger(), "❌ [DEBUG] Cannot open file for reading: %s", Hand_G_recording_path.c_str());
-    // } else {
-    //     char line[1024];  // 한 줄 버퍼
-    //     if (fgets(line, sizeof(line), fp_debug) != nullptr) {
-    //         // 줄 끝 개행문자 제거
-    //         line[strcspn(line, "\r\n")] = '\0';
-    //         RCLCPP_INFO(node_->get_logger(), "[DEBUG] First line: %s", line);
-    //     } else {
-    //         RCLCPP_WARN(node_->get_logger(), "[DEBUG] File is empty or reading failed: %s", Hand_G_recording_path.c_str());
-    //     }
-    //     fclose(fp_debug);
-    // }
-
-
+    std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
+    std::cout << "[DEBUG] raw path = [" << Hand_G_recording_path << "]" << std::endl;
+    std::cout << "[DEBUG] size of path = " << Hand_G_recording_path.size() << std::endl;
 
 
     /* Set application realtime priority */
