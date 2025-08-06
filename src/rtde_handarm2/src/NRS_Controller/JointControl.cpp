@@ -614,11 +614,11 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
     std::cout << std::endl;
 }
 
-
-
-
 void JointControl::CalculateAndPublishJoint()
 {
+    _count += 0.001;
+    RCLCPP_INFO(node_->get_logger(), "count_: %f", _count); // t 값을 디버깅하기 위해 출력
+
     /* Set application realtime priority */
     int priority = 80;
     //// if (RTDEUtility::setRealtimePriority(priority)) {
