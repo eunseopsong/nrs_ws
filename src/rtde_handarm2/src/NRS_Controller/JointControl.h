@@ -40,6 +40,15 @@ private:
     sensor_msgs::msg::JointState joint_state_;
 
 
+
+    bool loadFirstTrajectoryPoint(
+        const std::string& filepath,
+        float& LD_X, float& LD_Y, float& LD_Z,
+        float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
+        float& LD_CFx, float& LD_CFy, float& LD_CFz);
+
+
+
     std_msgs::msg::UInt16 UR10e_mode_msg_;
     // std_msgs::msg::Float64MultiArray UR10_Jangle_msg_;
     std_msgs::msg::Float64MultiArray UR10_pose_msg_;
