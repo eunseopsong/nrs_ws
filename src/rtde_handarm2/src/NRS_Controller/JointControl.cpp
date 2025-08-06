@@ -113,6 +113,7 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
     printf("mode_cmd: %d \n", mode_cmd);
     std::cout << std::endl;
 
+
     if(mode_cmd == Joint_control_mode_cmd) {} // Joint angle control mode (wit0.0016,0.0016,0.0016
 
     else if(mode_cmd == EE_Posture_control_mode_cmd) // E.E. posture control mode (with path blender)
@@ -390,7 +391,7 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 
         /* Trajectory directory load */
         auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-
+        std::cout << "[DEBUG] Hand_G_recording_path: " << Hand_G_recording_path << std::endl;
 
         /* Contact admittance parameter laod */
         Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
@@ -409,10 +410,11 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY
         int reti;
 
-        Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt"); // Open the trajectory file
+        Hand_G_playback = fopen(Hand_G_recording_path.c_str(),"rt");
         if (Hand_G_playback == NULL) {
             RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open Hand_G_recording file: %s", Hand_G_recording_path.c_str());
-            // return;
+            perror("fopen");
+            return;  // 꼭 리턴해야 segmentation fault 방지됨
         }
 
         for(int i = 0; i<3;i++) // For safe data acquisition
