@@ -47,16 +47,19 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         "/vive/pos0", 100,
         std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
 
+    // joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+    // "/isaac_joint_states", rclcpp::QoS(10),
+    // [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
+    //     //// if (msg->position.size() < 6) {
+    //     ////     RCLCPP_WARN(node_->get_logger(), "Received joint state has less than 6 elements.");
+    //     ////     return;
+    //     //// }
+    //     std::copy(msg->position.begin(), msg->position.begin() + 6, joint_pos.begin());
+    //     //// RCLCPP_INFO(node_->get_logger(), "JointState received. joint_pos[0]=%.3f", joint_pos[0]);
+    // });
     joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-    "/isaac_joint_states", rclcpp::QoS(10),
-    [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
-        //// if (msg->position.size() < 6) {
-        ////     RCLCPP_WARN(node_->get_logger(), "Received joint state has less than 6 elements.");
-        ////     return;
-        //// }
-        std::copy(msg->position.begin(), msg->position.begin() + 6, joint_pos.begin());
-        //// RCLCPP_INFO(node_->get_logger(), "JointState received. joint_pos[0]=%.3f", joint_pos[0]);
-    });
+        "/isaac_joint_states", rclcpp::QoS(10),
+        std::bind(&JointControl::getActualQ, this, std::placeholders::_1));
 
     // Timer
     timer_ = node_->create_wall_timer(
@@ -593,13 +596,23 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     // pos_cal_stamped_RPY.yaw = VR_CalPoseRPY(5);
 }
 
-void JointControl::getActualQ()
+// void JointControl::getActualQ()
+// {
+//     for (int i = 0; i < 6; ++i) {
+//         RArm.qc(i) = joint_pos[i];
+//         //// RCLCPP_INFO(node_->get_logger(), "RArm.qc(%d) = %.3f", i, RArm.qc(i));
+//     }
+// }
+// JointControl.cpp에서 정의 수정 2025.08.05
+void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
-    for (int i = 0; i < 6; ++i) {
-        RArm.qc(i) = joint_pos[i];
-        //// RCLCPP_INFO(node_->get_logger(), "RArm.qc(%d) = %.3f", i, RArm.qc(i));
-    }
+    RCLCPP_INFO(node_->get_logger(), "Received joint state!");
+    for (int i = 0; i < 6; i++)
+        RArm.qc[i] = msg->position[i];
 }
+
+
+
 
 void JointControl::CalculateAndPublishJoint()
 {
@@ -633,7 +646,7 @@ void JointControl::CalculateAndPublishJoint()
 		RArm.dqd(i) = 0;
 		RArm.dqc(i) = 0;
 	}
-	getActualQ();
+	// getActualQ();
 
 	RArm.qd = RArm.qc;
 	RArm.qt = RArm.qc;
@@ -742,7 +755,7 @@ void JointControl::CalculateAndPublishJoint()
             while (rclcpp::ok() && running) // Add on 2025.08.03 00:10
             {
                 // t_start = rtde_control.initPeriod();
-                getActualQ(); // Get the joint data of UR10e
+                // getActualQ(); // Get the joint data of UR10e
 
                 // tcp_pose = rtde_receive.getActualTCPPose(); // Get the TCP data of UR10e
                 // ros::spinOnce(); // Get the ROS message data
