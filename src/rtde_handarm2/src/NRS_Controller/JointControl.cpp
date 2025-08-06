@@ -723,6 +723,7 @@ void JointControl::CalculateAndPublishJoint()
 
     printf("MODE SELECT: Select Your Task\n");
     printf("1 : For Servoj,  q : Quit    \n");
+    // printf("getchar: %s \n", key_MODE);
 
     key_MODE=getchar();
 
@@ -736,9 +737,9 @@ void JointControl::CalculateAndPublishJoint()
     /*==================== Main control loop ==================*/
     try
     {
-        // switch (key_MODE)
-        // {
-        // case '1':
+        switch (key_MODE)
+        {
+        case '1':
             ctrl = 0;
             pause_cnt = 0;
             //// while (running)
@@ -1767,11 +1768,11 @@ void JointControl::CalculateAndPublishJoint()
 
                 //// rtde_control.waitPeriod(t_start);
             }
-            // break;
+            break;
 
-        // default:
-        //     break;
-        // }
+        default:
+            break;
+        }
 
         std::cout << "Control interrupted!" << std::endl;
 
