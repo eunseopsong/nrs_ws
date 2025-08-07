@@ -315,9 +315,9 @@ void HbuttonCmd::Trajectory_gen()
     /* trajectory planning && recording to text */ 
 
     /* Open the text file */
-    // FILE* Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
-    auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-    FILE* Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
+    // FILE* hand_g_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/hand_g_recording.txt","wt");
+    auto hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
+    FILE* hand_g_recording = fopen(hand_g_recording_path.c_str(),"wt");
 
     /**** Points to path profile ****/
 
@@ -372,13 +372,13 @@ void HbuttonCmd::Trajectory_gen()
         double path_out[7] = {0,};
         while(Descr_RD_blending.PPB_path_exe(path_out))
         {
-            fprintf(Hand_G_recording,"%10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+            fprintf(hand_g_recording,"%10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
             path_out[0], path_out[1], path_out[2], path_out[3], path_out[4], path_out[5],
             Desired_Fx, Desired_Fy, path_out[6]);
         }
     }
 
-    fclose(Hand_G_recording);
+    fclose(hand_g_recording);
 
     point_counter = 0; // selected way pYoon_UR10e_modeoint num init
     current_status = mode4;

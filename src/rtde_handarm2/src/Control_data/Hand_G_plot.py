@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-data2 = np.loadtxt('Hand_G_recording.txt')
+data2 = np.loadtxt('hand_g_recording.txt')
 
 PosiX = data2[:, 0]  # X position
 PosiY = data2[:, 1]  # Y position
