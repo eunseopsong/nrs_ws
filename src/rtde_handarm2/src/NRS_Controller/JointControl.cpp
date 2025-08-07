@@ -115,11 +115,6 @@ bool JointControl::loadFirstTrajectory() {
 
 
 
-
-
-
-
-
 void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     // [DEBUG] 추가 2025.08.05
