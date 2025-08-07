@@ -46,14 +46,12 @@ include_directories(
   include/rtde_handarm2/Yoon_communication
   include/rtde_handarm2/Yoon_data_loader
   include/rtde_handarm2/Third_party/Eigen3/eigen
+  ${CMAKE_CURRENT_SOURCE_DIR}/yaml    # ✅ 여기에 추가
 )
 
 # ──────────────── 소스 파일 수집 ──────────────── #
 file(GLOB_RECURSE MODULE_SRCS
   "include/rtde_handarm2/*/*.cpp"
-)
-file(GLOB SUBSCRIBER_SRCS
-  "src/Yoon_UR10e_main_subs/*.cpp"
 )
 
 file(GLOB_RECURSE SOURCES
@@ -84,19 +82,19 @@ set(COMMON_DEPENDENCIES
 )
 
 # ──────────────── 노드별 실행파일 추가 ──────────────── #
-add_executable(nrs_ctrl src/node_ur10e_main.cpp ${SOURCES} ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
+add_executable(nrs_ctrl src/node_ur10e_main.cpp ${SOURCES} ${MODULE_SRCS})
 target_include_directories(nrs_ctrl PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(nrs_ctrl yaml-cpp Eigen3::Eigen ament_index_cpp::ament_index_cpp)
 ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 install(TARGETS nrs_ctrl DESTINATION lib/${PROJECT_NAME})
 
-add_executable(ur10e_mode_cmd src/Yoon_UR10e_cmd.cpp ${SOURCES} ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
+add_executable(ur10e_mode_cmd src/Yoon_UR10e_cmd.cpp ${SOURCES} ${MODULE_SRCS})
 target_include_directories(ur10e_mode_cmd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(ur10e_mode_cmd yaml-cpp Eigen3::Eigen ament_index_cpp::ament_index_cpp)
 ament_target_dependencies(ur10e_mode_cmd ${COMMON_DEPENDENCIES})
 install(TARGETS ur10e_mode_cmd DESTINATION lib/${PROJECT_NAME})
 
-add_executable(hbutton src/node_Hbutton.cpp ${SOURCES} ${MODULE_SRCS} ${SUBSCRIBER_SRCS})
+add_executable(hbutton src/node_Hbutton.cpp ${SOURCES} ${MODULE_SRCS})
 target_include_directories(hbutton PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(hbutton yaml-cpp Eigen3::Eigen ament_index_cpp::ament_index_cpp)
 ament_target_dependencies(hbutton ${COMMON_DEPENDENCIES})
