@@ -196,7 +196,10 @@ install(DIRECTORY include/
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
 )
-
+install(
+  DIRECTORY data/
+  DESTINATION share/${PROJECT_NAME}/data
+)
 
 
 # Interface and package setup

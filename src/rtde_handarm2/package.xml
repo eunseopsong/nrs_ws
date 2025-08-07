@@ -23,6 +23,8 @@
   <exec_depend>geometry_msgs</exec_depend>
   <build_depend>sensor_msgs</build_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <build_depend>ament_index_cpp</build_depend>
+  <exec_depend>ament_index_cpp</exec_depend>
 
   <!-- 추가한 패키지 의존성 -->
   <build_depend>nrs_forcecon2</build_depend>
