@@ -249,7 +249,7 @@ extern int Path_point_num;
 extern bool path_done_flag;
 extern bool PB_starting_path_done_flag;
 extern bool path_recording_flag;
-extern FILE *path_recording_pos, *path_recording_joint, *Hand_G_recording, *Hand_G_playback;
+extern FILE *path_recording_pos, *path_recording_joint, *hand_g_recording, *Hand_G_playback;
 extern FILE *Descre_P_recording, *EXPdata1, *VRCali_UR10CB_EE, *VRCali_UR10CB_VR;
 extern int EXPdata1_switch;
 extern float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_resi,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY for playback

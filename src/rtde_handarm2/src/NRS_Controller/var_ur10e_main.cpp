@@ -190,7 +190,7 @@ int Path_point_num = -1;
 bool path_done_flag = false;
 bool PB_starting_path_done_flag = false;
 bool path_recording_flag = false;
-FILE *path_recording_pos, *path_recording_joint, *Hand_G_recording, *Hand_G_playback, *Descre_P_recording,
+FILE *path_recording_pos, *path_recording_joint, *hand_g_recording, *Hand_G_playback, *Descre_P_recording,
 *EXPdata1, *VRCali_UR10CB_EE, *VRCali_UR10CB_VR;
 int EXPdata1_switch = NRS_recording["EXPdata1_switch"].as<int>();
 float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_resi,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY for playback

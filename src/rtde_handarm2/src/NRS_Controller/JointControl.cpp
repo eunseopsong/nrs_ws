@@ -78,7 +78,7 @@ bool JointControl::loadFirstTrajectory() {
     RCLCPP_INFO(node_->get_logger(), "🔄 Trying to load first trajectory using ROS2 package path...");
 
     std::string pkg_path = ament_index_cpp::get_package_share_directory("rtde_handarm2");
-    std::string filepath = pkg_path + "/data/Hand_G_recording.txt";
+    std::string filepath = pkg_path + "/data/hand_g_recording.txt";
 
     RCLCPP_INFO(node_->get_logger(), "[DEBUG] resolved filepath: '%s'", filepath.c_str());
 
@@ -157,16 +157,16 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 	else if(mode_cmd == Continuous_reording_start) // data recording flag on
 	{
         path_recording_flag = true;
-        // Hand_G_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/Hand_G_recording.txt","wt");
-        auto Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-        Hand_G_recording = fopen(Hand_G_recording_path.c_str(),"wt");
+        // hand_g_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/hand_g_recording.txt","wt");
+        auto hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
+        hand_g_recording = fopen(hand_g_recording_path.c_str(),"wt");
         memcpy(message_status,Data_recording_on,sizeof(Data_recording_on));
 
 	}
 	else if(mode_cmd == Continusous_recording_end) // data recording flag off
 	{
         path_recording_flag = false;
-        fclose(Hand_G_recording);
+        fclose(hand_g_recording);
         memcpy(message_status,Data_recording_off,sizeof(Data_recording_off));
 	}
 
@@ -682,9 +682,9 @@ void JointControl::CalculateAndPublishJoint()
     milisec += 1;
 
 
-    // std::string Hand_G_recording_path = NRS_recording["Hand_G_recording"].as<std::string>();
-    // std::cout << "[DEBUG] raw path = [" << Hand_G_recording_path << "]" << std::endl;
-    // std::cout << "[DEBUG] size of path = " << Hand_G_recording_path.size() << std::endl;
+    // std::string hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
+    // std::cout << "[DEBUG] raw path = [" << hand_g_recording_path << "]" << std::endl;
+    // std::cout << "[DEBUG] size of path = " << hand_g_recording_path.size() << std::endl;
 
 
     /* Set application realtime priority */
@@ -838,7 +838,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("milisec: %.2f \n", milisec); // t 값을 디버깅하기 위해 출력
-                    // printf("[DEBUG] Hand_G_recording path: %s \n", Hand_G_recording_path.c_str());
+                    // printf("[DEBUG] hand_g_recording path: %s \n", hand_g_recording_path.c_str());
 
 
                     // UR10e actual joint angle monitoring
@@ -1223,7 +1223,7 @@ void JointControl::CalculateAndPublishJoint()
                     /* Recording(Desired posture & Contact force) start */
                     if(path_recording_flag == true)
                     {
-                        fprintf(Hand_G_recording,"%10f %10f %10f %10f %10f %10f %10f %10f %10f \n",
+                        fprintf(hand_g_recording,"%10f %10f %10f %10f %10f %10f %10f %10f %10f \n",
                         Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2),
                         Contact_Rot_force(0),Contact_Rot_force(1),Contact_Rot_force(2));
                     }
