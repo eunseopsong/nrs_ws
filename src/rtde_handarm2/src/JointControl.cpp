@@ -67,7 +67,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Timer
     timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(100),
+        std::chrono::milliseconds(1),
         std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
@@ -619,9 +619,9 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
     // std::cout << "[DEBUG] getActualQ called. Current joint states: ";
     for (int i = 0; i < 6; ++i){
         RArm.qc[i] = msg->position[i];
-        std::cout << RArm.qc[i] << " ";
+        // std::cout << RArm.qc[i] << " ";
     }
-    std::cout << std::endl;
+    // std::cout << std::endl;
 }
 
 void JointControl::CalculateAndPublishJoint()
