@@ -111,9 +111,6 @@ bool JointControl::loadFirstTrajectory() {
 
 
 
-
-
-
 void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     // [DEBUG] 추가 2025.08.05
@@ -473,6 +470,12 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         memcpy(message_status,Motion_stop_mode,sizeof(Motion_stop_mode));
 	}
 }
+
+
+
+
+
+
 
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
