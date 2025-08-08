@@ -81,6 +81,7 @@ bool JointControl::LoadFirstTrajectory(
     FILE* fp = fopen(filepath.c_str(), "rt");
     if (fp == nullptr) {
         RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open hand_g_recording file: %s", filepath.c_str());
+        rclcpp::shutdown();
         return false;
     }
 
@@ -97,6 +98,7 @@ bool JointControl::LoadFirstTrajectory(
 
     if (reti != 9) {
         RCLCPP_WARN(node_->get_logger(), "⚠️ fscanf returned %d, expected 9 values", reti);
+        rclcpp::shutdown();
         return false;
     }
 
