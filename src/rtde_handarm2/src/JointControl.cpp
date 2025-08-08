@@ -71,7 +71,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Timer
     timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(1),
+        std::chrono::milliseconds(50),
         std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
@@ -598,7 +598,7 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 
 void JointControl::CalculateAndPublishJoint()
 {
-    milisec += 1; // to get the published time
+    milisec += 50; // to get the published time
 
 
     // std::string hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
