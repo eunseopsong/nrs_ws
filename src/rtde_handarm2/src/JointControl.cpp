@@ -67,7 +67,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Timer
     timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(1),
+        std::chrono::milliseconds(100),
         std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
@@ -85,8 +85,6 @@ static std::string trim_path(std::string s) {
   }
   return s;
 }
-
-
 
 
 // ===== LoadFirstTrajectory: 마지막 유효 라인 1줄만 읽기 (9개 float) =====
