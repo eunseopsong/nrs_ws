@@ -72,43 +72,40 @@ JointControl::~JointControl() {}
 
 
 
-
-bool JointControl::loadFirstTrajectory() {
-    RCLCPP_INFO(node_->get_logger(), "🔄 Trying to load first trajectory using ROS2 package path...");
-
-    std::string pkg_path = ament_index_cpp::get_package_share_directory("rtde_handarm2");
-    std::string filepath = pkg_path + "/data/hand_g_recording.txt";
-
-    RCLCPP_INFO(node_->get_logger(), "[DEBUG] resolved filepath: '%s'", filepath.c_str());
-
-    std::ifstream file(filepath);
-    if (!file.is_open()) {
-        RCLCPP_FATAL(node_->get_logger(), "❌ std::ifstream으로 trajectory 파일 열기 실패: %s", filepath.c_str());
-        rclcpp::shutdown();
+bool JointControl::LoadFirstTrajectory(
+    const std::string& filepath,
+    float& LD_X, float& LD_Y, float& LD_Z,
+    float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
+    float& LD_CFx, float& LD_CFy, float& LD_CFz)
+{
+    FILE* fp = fopen(filepath.c_str(), "rt");
+    if (fp == nullptr) {
+        RCLCPP_ERROR(node_->get_logger(), "❌ Cannot open hand_g_recording file: %s", filepath.c_str());
         return false;
     }
 
-    std::vector<double> trajectory_row;
-    double val;
-    while (file >> val) {
-        trajectory_row.push_back(val);
-        if (trajectory_row.size() == DOF) {
-            joint_trajectory_.push_back(trajectory_row);
-            trajectory_row.clear();
-        }
+    float x, y, z, roll, pitch, yaw, fx, fy, fz;
+    int reti;
+
+    // 3줄 중 마지막 줄을 읽어서 최종적으로 저장
+    for (int i = 0; i < 3; ++i) {
+        reti = fscanf(fp, "%f %f %f %f %f %f %f %f %f\n",
+                      &x, &y, &z, &roll, &pitch, &yaw, &fx, &fy, &fz);
     }
 
-    file.close();
+    fclose(fp);
 
-    if (joint_trajectory_.empty()) {
-        RCLCPP_ERROR(node_->get_logger(), "⚠️ trajectory 데이터가 비어 있습니다.");
+    if (reti != 9) {
+        RCLCPP_WARN(node_->get_logger(), "⚠️ fscanf returned %d, expected 9 values", reti);
         return false;
     }
 
-    RCLCPP_INFO(node_->get_logger(), "✅ 첫 trajectory 로드 완료. 총 %ld개 포인트가 있습니다.", joint_trajectory_.size());
+    LD_X = x; LD_Y = y; LD_Z = z;
+    LD_Roll = roll; LD_Pitch = pitch; LD_Yaw = yaw;
+    LD_CFx = fx; LD_CFy = fy; LD_CFz = fz;
+
     return true;
 }
-
 
 
 void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
@@ -390,62 +387,54 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
     }
     /* VR calibrarion point save with "Teaching handle" [end] */
 
-    else if (mode_cmd == Playback_mode_cmd)
+    else if(mode_cmd == Playback_mode_cmd)
     {
-        /*** Parameter upload from yaml ***/
+        /*** Parameter upload form yaml ***/
 
-        // 1. Contact admittance parameter load
-        Power_PB.PRamM[0] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
-        Power_PB.PRamM[1] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
-        Power_PB.PRamM[2] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>();
+        /* Trajectory directory load */
+        auto hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
 
-        Power_PB.PRamD[0] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD1"].as<double>();
-        Power_PB.PRamD[1] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD2"].as<double>();
-        Power_PB.PRamD[2] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>();
+        /* Contact admittance parameter load */
+        Power_PB.PRamM[0]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
+        Power_PB.PRamM[1]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
+        Power_PB.PRamM[2]= NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>();
 
-        Power_PB.PRamK[0] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK1"].as<double>();
-        Power_PB.PRamK[1] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK2"].as<double>();
-        Power_PB.PRamK[2] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>();
+        Power_PB.PRamD[0]= NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD1"].as<double>();
+        Power_PB.PRamD[1]= NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD2"].as<double>();
+        Power_PB.PRamD[2]= NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>();
 
-        // 2. Trajectory 로드
-        bool success = loadFirstTrajectory();
+        Power_PB.PRamK[0]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK1"].as<double>();
+        Power_PB.PRamK[1]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK2"].as<double>();
+        Power_PB.PRamK[2]= NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>();
+
+        /* Data load */
+        float LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw;
+        float LD_CFx, LD_CFy, LD_CFz;
+
+        bool success = LoadFirstTrajectory(
+            hand_g_recording_path,
+            LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
+            LD_CFx, LD_CFy, LD_CFz);
+
         if (!success) {
-            RCLCPP_FATAL(node_->get_logger(), "❌ Trajectory 파일 로딩 실패! 노드를 종료합니다.");
-            rclcpp::shutdown();
-            return;
+            RCLCPP_ERROR(node_->get_logger(), "❌ Failed to load trajectory data from: %s", hand_g_recording_path.c_str());
+            // return;  // 조기 종료
         }
 
-        // 3. 첫 포인트 가져오기
-        if (joint_trajectory_.empty()) {
-            RCLCPP_FATAL(node_->get_logger(), "❌ trajectory 벡터가 비어 있습니다.");
-            rclcpp::shutdown();
-            return;
-        }
+        printf("%f %f %f %f %f %f %f %f %f\n",
+            LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw,
+            LD_CFx, LD_CFy, LD_CFz);
 
-        float LD_X     = joint_trajectory_[0][0];
-        float LD_Y     = joint_trajectory_[0][1];
-        float LD_Z     = joint_trajectory_[0][2];
-        float LD_Roll  = joint_trajectory_[0][3];
-        float LD_Pitch = joint_trajectory_[0][4];
-        float LD_Yaw   = joint_trajectory_[0][5];
-
-        printf("%f %f %f %f %f %f\n", LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw);
-
-        // 4. Trajectory generation to start point
+        /* Trajectory generation to start point */
         double Linear_travel_vel = 0.03; // m/s
         double Linear_travel_time;
-
         double Tar_pos[6] = {LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw};
-        double Init_pos[6] = {
-            RArm.xc(0), RArm.xc(1), RArm.xc(2),
-            RArm.thc(0), RArm.thc(1), RArm.thc(2)
-        };
+        double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2),
+                            RArm.thc(0), RArm.thc(1), RArm.thc(2)};
 
-        Linear_travel_time = sqrt(
-            pow(Init_pos[0] - Tar_pos[0], 2) +
-            pow(Init_pos[1] - Tar_pos[1], 2) +
-            pow(Init_pos[2] - Tar_pos[2], 2)
-        ) / Linear_travel_vel;
+        Linear_travel_time = sqrt(pow(Init_pos[0]-Tar_pos[0],2)+
+                                pow(Init_pos[1]-Tar_pos[1],2)+
+                                pow(Init_pos[2]-Tar_pos[2],2)) / Linear_travel_vel;
 
         if (Linear_travel_time < 3)
             Linear_travel_time = 3;
@@ -470,8 +459,6 @@ void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
         memcpy(message_status,Motion_stop_mode,sizeof(Motion_stop_mode));
 	}
 }
-
-
 
 
 
@@ -663,20 +650,20 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     // pos_cal_stamped_RPY.yaw = VR_CalPoseRPY(5);
 }
 
-// JointControl.cpp에서 정의 수정 2025.08.05
+//// JointControl.cpp에서 정의 수정 2025.08.05
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
     std::cout << "[DEBUG] getActualQ called. Current joint states: ";
     for (int i = 0; i < 6; ++i){
         RArm.qc[i] = msg->position[i];
         std::cout << RArm.qc[i] << " ";
-    }   
+    }
     std::cout << std::endl;
 }
 
 void JointControl::CalculateAndPublishJoint()
 {
-    milisec += 1;
+    milisec += 1; // to get the published time
 
 
     // std::string hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
