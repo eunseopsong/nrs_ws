@@ -40,11 +40,11 @@ private:
 
 
     // bool LoadFirstTrajectory();  // ← 이것도 추가
-    bool LoadFirstTrajectory(
-        const std::string& filepath,
-        float& LD_X, float& LD_Y, float& LD_Z,
-        float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
-        float& LD_CFx, float& LD_CFy, float& LD_CFz);
+    // bool LoadFirstTrajectory(
+    //     const std::string& filepath,
+    //     float& LD_X, float& LD_Y, float& LD_Z,
+    //     float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
+    //     float& LD_CFx, float& LD_CFy, float& LD_CFz);
 
 
     std_msgs::msg::UInt16 UR10e_mode_msg_;
