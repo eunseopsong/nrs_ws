@@ -191,7 +191,7 @@ int main(int argc, char *argv[])
             int recording_mode = -1;
             std::cout << "\n[ -- Recording mode selection -- ]" << std::endl;
             std::cout << "1 : Continuous reording start, 2 : Continuous reording end" << std::endl;
-            std::cout << "3 : Descrete point rececording start " << std::endl;
+            std::cout << "3 : Discrete point rececording start " << std::endl;
             std::cout << "0 : quit" << std::endl;
             std::cin >> recording_mode;
 
@@ -226,19 +226,19 @@ int main(int argc, char *argv[])
                     if(recording_mode == 1) // Point save
                     {
                         // std::cout << Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2) << std::endl;
-                        yoon_mode_msg.data = Descrete_reording_start;
+                        yoon_mode_msg.data = Discrete_reording_start;
                         yoon_mode_pub->publish(yoon_mode_msg);
                         rclcpp::spin_some(node); //// ros::spinOnce();
                         point_counter ++;
                     }
                     else if(recording_mode == 2) // Terminate the point save & Save the selected point to text file
                     {
-                        yoon_mode_msg.data = Descrete_recording_save;
+                        yoon_mode_msg.data = Discrete_recording_save;
                         yoon_mode_pub->publish(yoon_mode_msg);
                         rclcpp::spin_some(node); //// ros::spinOnce();
 
                         printf("Point recording was terminated \n");
-                        printf("& The recorded point was saved to text file 'Descre_P_recording.txt'\n");
+                        printf("& The recorded point was saved to text file 'Discre_P_recording.txt'\n");
                     }
 
                     if (recording_mode==2)
@@ -255,10 +255,10 @@ int main(int argc, char *argv[])
         else if(control_mode == 6) // Select the iteration number & Generate the path in cmd node
         {
             /*** STEP1 : Load the waypoints ***/
-            // Tot_txt_load txt_loader("/home/gene/catkin_ws/src/rtde_handarm/src/Descre_P_recording.txt");
-            auto YamlDescre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-            char* Descre_P_recording_path = const_cast<char*>(YamlDescre_P_recording_path.c_str());
-            Tot_txt_load txt_loader(Descre_P_recording_path);
+            // Tot_txt_load txt_loader("/home/gene/catkin_ws/src/rtde_handarm/src/Discre_P_recording.txt");
+            auto YamlDiscre_P_recording_path = NRS_recording["Discre_P_recording"].as<std::string>();
+            char* Discre_P_recording_path = const_cast<char*>(YamlDiscre_P_recording_path.c_str());
+            Tot_txt_load txt_loader(Discre_P_recording_path);
             Eigen::MatrixXd Decr_RD_points;
             txt_loader.Tot_data_read(Decr_RD_points);
 
@@ -336,7 +336,7 @@ int main(int argc, char *argv[])
             fclose(hand_g_recording);
 
             #endif
-            printf("\n Descrete points to path profile done \n");
+            printf("\n Discrete points to path profile done \n");
 
 
         }

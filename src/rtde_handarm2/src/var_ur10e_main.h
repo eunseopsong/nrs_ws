@@ -250,7 +250,7 @@ extern bool path_done_flag;
 extern bool PB_starting_path_done_flag;
 extern bool path_recording_flag;
 extern FILE *path_recording_pos, *path_recording_joint, *hand_g_recording, *Hand_G_playback;
-extern FILE *Descre_P_recording, *EXPdata1, *VRCali_UR10CB_EE, *VRCali_UR10CB_VR;
+extern FILE *Discre_P_recording, *EXPdata1, *VRCali_UR10CB_EE, *VRCali_UR10CB_VR;
 extern int EXPdata1_switch;
 extern float LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw,LD_resi,LD_CFx,LD_CFy,LD_CFz; // Loaded XYZRPY for playback
 extern double PB_RCF_norm; // For contact detection on playback control with recorded contact force
@@ -265,7 +265,7 @@ extern double PPB_surfN_Fext;
 extern uint32_t PB_iter_cmd; // number of playback iteration
 extern uint32_t PB_iter_cur; // current itereation status
 
-/* descrete points path parms */
+/* Discrete points path parms */
 extern Eigen::MatrixXd Decr_RD_points;
 extern Eigen::MatrixXd Inst_RD_points;
 extern int Num_RD_points;

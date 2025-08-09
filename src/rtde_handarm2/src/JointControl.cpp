@@ -12,6 +12,12 @@ constexpr int DOF = 6;
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <iostream>
 #include <string>
+#include <filesystem>
+#include <cerrno>
+#include <cstring>
+#include <mutex>
+#include <cstdio>
+#include <cmath>
 
 
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
@@ -24,13 +30,12 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     // Publishers
     YSurfN_Fext_pub_ = node_->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
     UR10e_mode_pub_  = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
-    // UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
+    //// UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
     UR10_pose_pub_   = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
     UR10_wrench_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
-    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20); // Add on 2025.07.09
-
 
     //// Add on 2025.07.09
+    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20);
     joint_state_.name = {
       "shoulder_pan_joint",
       "shoulder_lift_joint",
@@ -65,414 +70,331 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Timer
     timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(1),
+        std::chrono::milliseconds(50),
         std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
 
 
 
+// 재진입 방지 (멀티스레드 실행기 사용 시)
+static std::mutex g_cmdmode_mtx;
 
-bool JointControl::loadFirstTrajectory() {
-    RCLCPP_INFO(node_->get_logger(), "🔄 Trying to load first trajectory using ROS2 package path...");
-
-    std::string pkg_path = ament_index_cpp::get_package_share_directory("rtde_handarm2");
-    std::string filepath = pkg_path + "/data/hand_g_recording.txt";
-
-    RCLCPP_INFO(node_->get_logger(), "[DEBUG] resolved filepath: '%s'", filepath.c_str());
-
-    std::ifstream file(filepath);
-    if (!file.is_open()) {
-        RCLCPP_FATAL(node_->get_logger(), "❌ std::ifstream으로 trajectory 파일 열기 실패: %s", filepath.c_str());
-        rclcpp::shutdown();
-        return false;
-    }
-
-    std::vector<double> trajectory_row;
-    double val;
-    while (file >> val) {
-        trajectory_row.push_back(val);
-        if (trajectory_row.size() == DOF) {
-            joint_trajectory_.push_back(trajectory_row);
-            trajectory_row.clear();
-        }
-    }
-
-    file.close();
-
-    if (joint_trajectory_.empty()) {
-        RCLCPP_ERROR(node_->get_logger(), "⚠️ trajectory 데이터가 비어 있습니다.");
-        return false;
-    }
-
-    RCLCPP_INFO(node_->get_logger(), "✅ 첫 trajectory 로드 완료. 총 %ld개 포인트가 있습니다.", joint_trajectory_.size());
-    return true;
+// ===== 경로 트리밍 =====
+static std::string trim_path(std::string s) {
+  auto notspace = [](unsigned char c){ return !std::isspace(c); };
+  // 앞쪽 공백 제거
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
+  // 뒤쪽 공백/CR/LF 제거
+  while (!s.empty() && (s.back()=='\r' || s.back()=='\n' || std::isspace((unsigned char)s.back()))) {
+    s.pop_back();
+  }
+  return s;
 }
 
-
-
-
-
-
-void JointControl::cmdModeCallback(std_msgs::msg::UInt16::SharedPtr msg)
+// ===== JointControl::cmdModeCallback 구현 =====
+void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
 {
-    // [DEBUG] 추가 2025.08.05
-    std::cout << "[DEBUG] cmdModeCallback called. ";
+  std::lock_guard<std::mutex> lk(g_cmdmode_mtx); // 재진입 방지
+
+  try {
+    RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] cmdModeCallback called. mode_cmd=%u", msg->data);
     mode_cmd = msg->data;
-    printf("mode_cmd: %d \n", mode_cmd);
-    std::cout << std::endl;
 
-    if(mode_cmd == Joint_control_mode_cmd) {} // Joint angle control mode (wit0.0016,0.0016,0.0016
+    // YAML 키 존재 여부 가볍게 로깅(디버깅 편의용)
+    if (!NRS_recording["hand_g_recording"]) {
+      RCLCPP_WARN(node_->get_logger(), "YAML key 'hand_g_recording' not found.");
+    }
 
-    else if(mode_cmd == EE_Posture_control_mode_cmd) // E.E. posture control mode (with path blender)
-	{
-        #if 0
-        ctrl = 1;
+    if (mode_cmd == Joint_control_mode_cmd) {
+      // no-op
+    }
+    else if (mode_cmd == EE_Posture_control_mode_cmd) {
+      // 기존 비활성 코드 유지 (#if 0 영역)
+    }
+    else if (mode_cmd == Hand_guiding_mode_cmd) {
+      ctrl = 2;
+      memcpy(message_status, Hand_guiding_mode, sizeof(Hand_guiding_mode));
+    }
+    else if (mode_cmd == Continuous_reording_start) { // 연속 기록 시작
+      path_recording_flag = true;
 
-        double Tar_pos[] = {0.1,0.1}; // Target position array, unit: m (this value is applied as absolute value)
-        double Tar_vel[] = {-0.02,-0.02}; // Target velocity array, unit: m/s (the direction is controled by cmd velocity)
-        double Waiting_time[] = {0,0}; // Waiting time, unit : s, 0이 아닌 값을 넣으려면 동일 array 위치의 pos와 vel은 0 
+      // 같은 파일 반복 오픈 방지: 기존 핸들 있으면 먼저 닫기
+      if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording = nullptr; }
 
-        TCP_path_start << RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2);
+      auto raw = NRS_recording["hand_g_recording"].as<std::string>();
+      auto hand_g_recording_path = trim_path(raw);
 
-        Path_point_num = path_planning.Single_blended_path(Tar_pos,Tar_vel,Waiting_time,(int)(sizeof(Tar_pos)/sizeof(*Tar_pos)));
-        if(Path_point_num != -1)
-        {
-            memcpy(message_status,path_gen_done,sizeof(path_gen_done));
-            path_done_flag = true;
-        }
-        #endif
-	}
-    else if(mode_cmd == Hand_guiding_mode_cmd)
-	{
-        ctrl = 2;
-        memcpy(message_status,Hand_guiding_mode,sizeof(Hand_guiding_mode));
-	}
-	else if(mode_cmd == Continuous_reording_start) // data recording flag on
-	{
-        path_recording_flag = true;
-        // hand_g_recording = fopen("/home/gene/catkin_ws/src/rtde_handarm/src/hand_g_recording.txt","wt");
-        auto hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
-        hand_g_recording = fopen(hand_g_recording_path.c_str(),"wt");
-        memcpy(message_status,Data_recording_on,sizeof(Data_recording_on));
-
-	}
-	else if(mode_cmd == Continusous_recording_end) // data recording flag off
-	{
+      hand_g_recording = fopen(hand_g_recording_path.c_str(), "wt");
+      if (!hand_g_recording) {
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)",
+                     hand_g_recording_path.c_str(), errno, strerror(errno));
         path_recording_flag = false;
-        fclose(hand_g_recording);
-        memcpy(message_status,Data_recording_off,sizeof(Data_recording_off));
-	}
-
-    /* Way point teaching with "Teaching handle" [start] */
-    else if(mode_cmd == Descrete_reording_start) // Recording the descrete way points start
-    {
-        if(Num_RD_points != 0)
-        {
-            Inst_RD_points = Decr_RD_points;
-            Decr_RD_points.resize(Num_RD_points+1,6);
-            Decr_RD_points.topRows(Num_RD_points) = Inst_RD_points;
-        }
-        else{Decr_RD_points.topRows(Num_RD_points+1) = Inst_RD_points;}
-
-        // Decr_RD_points.bottomRows(1) << Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2);
-        Decr_RD_points.bottomRows(1) << RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2);
-        Num_RD_points ++;
-
-        sprintf(Saved_way_point,"Saved way point: %d",Num_RD_points);
-        memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
-        std::cout << "\n" <<Decr_RD_points << std::endl;
+        return;
+      }
+      memcpy(message_status, Data_recording_on, sizeof(Data_recording_on));
     }
-
-    else if(mode_cmd == Descrete_recording_save) // Save the recorded decrete way points
-    {
-        /* Open the text file */
-        auto Descre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-        Descre_P_recording = fopen(Descre_P_recording_path.c_str(),"wt");
-
-        /* Save the data to text file */
-        for(int i = 0; i<Num_RD_points;i++)
-        {
-            // Last space is for desired force
-            fprintf(Descre_P_recording,"%10f %10f %10f %10f %10f %10f %10f\n",
-            Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2), Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
-        }
-        /* Close the text file */
-        fclose(Descre_P_recording);
-        Num_RD_points = 0;
-        Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
-        Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
-
-        printf("\n Descrete points was save to txt file \n");
+    else if (mode_cmd == Continusous_recording_end) { // 연속 기록 종료
+      path_recording_flag = false;
+      if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording = nullptr; }
+      memcpy(message_status, Data_recording_off, sizeof(Data_recording_off));
     }
-    /* Way point teaching with "Teaching handle" [end] */
-
-    /* Way point teaching with "VR tracker" [start] */
-    else if(mode_cmd == VRTeac_reording_start) // Recording the descrete way points start
-    {
-        if(Num_RD_points != 0)
-        {
-            Inst_RD_points = Decr_RD_points;
-            Decr_RD_points.resize(Num_RD_points+1,6);
-            Decr_RD_points.topRows(Num_RD_points) = Inst_RD_points;
-        }
-        else{Decr_RD_points.topRows(Num_RD_points+1) = Inst_RD_points;}
-
-        // In here we must save the VR quaternion to X,Y,Z, Roll, Pitch, Yaw
-
-        Decr_RD_points.bottomRows(1) <<
-        VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2), VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
-        Num_RD_points ++;
-
-        sprintf(Saved_way_point,"Saved way point: %d",Num_RD_points);
-        memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
-        std::cout << "\n" <<Decr_RD_points << std::endl;
+    else if (mode_cmd == Discrete_reording_start) { // 이산 웨이포인트 1개 추가
+      if (Num_RD_points != 0) {
+        Inst_RD_points = Decr_RD_points;
+        Decr_RD_points.resize(Num_RD_points+1, 6);
+        Decr_RD_points.topRows(Num_RD_points) = Inst_RD_points;
+      } else {
+        Decr_RD_points.topRows(Num_RD_points+1) = Inst_RD_points;
+      }
+      Decr_RD_points.bottomRows(1) << RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2);
+      Num_RD_points++;
+      sprintf(Saved_way_point, "Saved way point: %d", Num_RD_points);
+      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
+      std::cout << "\n" << Decr_RD_points << std::endl;
     }
+    else if (mode_cmd == Discrete_recording_save) { // 이산 웨이포인트 저장
+      auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
+      auto path = trim_path(raw);
 
-    else if(mode_cmd == VRTeac_recording_save) // Save the recorded decrete way points
-    {
-        /* Open the text file */
-        auto Descre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-        Descre_P_recording = fopen(Descre_P_recording_path.c_str(),"wt");
+      // 기존 핸들 깔끔히 정리
+      if (Discre_P_recording) { fclose(Discre_P_recording); Discre_P_recording = nullptr; }
 
-        /* Save the data to text file */
-        for(int i = 0; i<Num_RD_points;i++)
-        {
-            // Last space is for desired force
-            fprintf(Descre_P_recording,"%10f %10f %10f %10f %10f %10f %10f\n",
-            Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2), Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
-        }
-        /* Close the text file */
-        fclose(Descre_P_recording);
-        Num_RD_points = 0;
-        Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
-        Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
-
-        printf("\n Descrete points was save to txt file \n");
+      Discre_P_recording = fopen(path.c_str(), "wt");
+      if (!Discre_P_recording) {
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, strerror(errno));
+        return;
+      }
+      for (int i = 0; i < Num_RD_points; i++) {
+        fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
+                Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
+                Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
+      }
+      fclose(Discre_P_recording); Discre_P_recording = nullptr;
+      Num_RD_points = 0;
+      Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
+      Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
+      printf("\n Discrete points was save to txt file \n");
     }
-    /* Way point teaching with "VR tracker" [end] */
-
-//     ////////////////////////////////////////////////////////////여기////////////////////
-//     /* Continuous teaching with "VR tracker" [start] */
-//     else if(mode_cmd == VRConTeaching_mode) // Recording the descrete way points start
-//     {
-//         if(Num_RD_points != 0)
-//         {
-//             Inst_RD_points = Decr_RD_points;
-//             Decr_RD_points.resize(Num_RD_points+1,6);
-//             Decr_RD_points.topRows(Num_RD_points) = Inst_RD_points;
-//         }
-//         else{Decr_RD_points.topRows(Num_RD_points+1) = Inst_RD_points;}
-
-//         // In here we must save the VR quaternion to X,Y,Z, Roll, Pitch, Yaw
-
-//         Decr_RD_points.bottomRows(1) <<
-//         VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2), VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
-//         Num_RD_points ++;
-
-//         sprintf(Saved_way_point,"Saved way point: %d",Num_RD_points);
-//         memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
-//         std::cout << "\n" <<Decr_RD_points << std::endl;
-//     }
-
-//     else if(mode_cmd == VRConTeac_recording_save) // Save the recorded decrete way points
-//     {
-//         /* Open the text file */
-//         auto Descre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-//         Descre_P_recording = fopen(Descre_P_recording_path.c_str(),"wt");
-
-//         /* Save the data to text file */
-//         for(int i = 0; i<Num_RD_points;i++)
-//         {
-//             // Last space is for desired force
-//             fprintf(Descre_P_recording,"%10f %10f %10f %10f %10f %10f %10f\n",
-//             Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2), Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
-//         }
-//         /* Close the text file */
-//         fclose(Descre_P_recording);
-//         Num_RD_points = 0;
-//         Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
-//         Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
-
-//         printf("\n Descrete points was save to txt file \n");
-//     }
-//     /* Continuous teaching with "VR tracker" [end] */
-
-// ////////////////////////////////////////////////////////////까지//////
-
-
-    /* VR calibrarion point save with "Teaching handle" [start] */
-    else if(mode_cmd == VRCali_reording_start) // Recording the descrete points start
-    {
-        // [Save the actual robot EE data]
-        // Note: In VR calibration, we save the actual TF values (Not desired)
-        if(Num_EE_points != 0)
-        {
-            Inst_EE_points = Decr_EE_points;
-            Decr_EE_points.resize(Num_EE_points+1,12);
-            Decr_EE_points.topRows(Num_EE_points) = Inst_EE_points;
-        }
-        else{Decr_EE_points.topRows(Num_EE_points+1) = Inst_EE_points;}
-
-        Decr_EE_points.bottomRows(1) <<
-        RArm.Tc(0,0),RArm.Tc(1,0),RArm.Tc(2,0), // Rx
-        RArm.Tc(0,1),RArm.Tc(1,1),RArm.Tc(2,1), // Ry
-        RArm.Tc(0,2),RArm.Tc(1,2),RArm.Tc(2,2), // Rz
-        RArm.Tc(0,3),RArm.Tc(1,3),RArm.Tc(2,3); // P
-
-        Num_EE_points ++;
-
-        sprintf(Saved_way_point,"Saved cali. points: %d",Num_EE_points);
-        memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
-        std::cout << "\n" <<Decr_EE_points << std::endl;
-
-        // [Save the VR quaternion data]
-        if(Num_VR_points != 0)
-        {
-            Inst_VR_points = Decr_VR_points;
-            Decr_VR_points.resize(Num_VR_points+1,7);
-            Decr_VR_points.topRows(Num_VR_points) = Inst_VR_points;
-        }
-        else{Decr_VR_points.topRows(Num_VR_points+1) = Inst_VR_points;}
-
-        Decr_VR_points.bottomRows(1) <<
-        VR_pose[0],VR_pose[1],VR_pose[2], // VR position data load
-        VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6]; // VR orientation data load
-
-        Num_VR_points ++;
-
-        sprintf(Saved_way_point,"Saved VR points: %d",Num_VR_points);
-        memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
-        std::cout << "\n" <<Decr_VR_points << std::endl;
+    else if (mode_cmd == VRTeac_reording_start) { // VR 이산 기록 시작
+      if (Num_RD_points != 0) {
+        Inst_RD_points = Decr_RD_points;
+        Decr_RD_points.resize(Num_RD_points+1,6);
+        Decr_RD_points.topRows(Num_RD_points) = Inst_RD_points;
+      } else {
+        Decr_RD_points.topRows(Num_RD_points+1) = Inst_RD_points;
+      }
+      Decr_RD_points.bottomRows(1) <<
+        VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
+        VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
+      Num_RD_points++;
+      sprintf(Saved_way_point,"Saved way point: %d",Num_RD_points);
+      memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
+      std::cout << "\n" << Decr_RD_points << std::endl;
     }
+    else if (mode_cmd == VRTeac_recording_save) { // VR 이산 기록 저장
+      auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
+      auto path = trim_path(raw);
 
-    else if(mode_cmd == VRCali_recording_save) // Save the recorded decrete points
-    {
-        // [Save the actual robot EE data]
-        /* Open the text file */
-        auto VRCali_UR10CB_EE_path = NRS_recording["VRCali_UR10CB_EE"].as<std::string>();
-        VRCali_UR10CB_EE = fopen(VRCali_UR10CB_EE_path.c_str(),"wt");
+      if (Discre_P_recording) { fclose(Discre_P_recording); Discre_P_recording = nullptr; }
 
-        /* Save the data to text file */
-        for(int i = 0; i<Num_EE_points;i++)
-        {
-            // Last space is for desired force
-            fprintf(VRCali_UR10CB_EE,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n", // 12 cols.(9 rot. + 3 posi.)
-            Decr_EE_points(i,0), Decr_EE_points(i,1),  Decr_EE_points(i,2),
-            Decr_EE_points(i,3), Decr_EE_points(i,4),  Decr_EE_points(i,5),
-            Decr_EE_points(i,6), Decr_EE_points(i,7),  Decr_EE_points(i,8),
-            Decr_EE_points(i,9), Decr_EE_points(i,10), Decr_EE_points(i,11));
-        }
-        /* Close the text file */
-        fclose(VRCali_UR10CB_EE);
-        Num_EE_points = 0;
-        Decr_EE_points = Eigen::MatrixXd::Zero(1,12);
-        Inst_EE_points = Eigen::MatrixXd::Zero(1,12);
-
-        printf("\n Descrete EE points was save to txt file \n");
-
-        // [Save the VR quaternion data]
-        /* Open the text file */
-        auto VRCali_UR10CB_VR_path = NRS_recording["VRCali_UR10CB_VR"].as<std::string>();
-        VRCali_UR10CB_VR = fopen(VRCali_UR10CB_VR_path.c_str(),"wt");
-
-        /* Save the data to text file */
-        for(int i = 0; i<Num_VR_points;i++)
-        {
-            // Last space is for desired force
-            fprintf(VRCali_UR10CB_VR,"%10f %10f %10f %10f %10f %10f %10f\n",
-            Decr_VR_points(i,0), Decr_VR_points(i,1), Decr_VR_points(i,2), Decr_VR_points(i,3), Decr_VR_points(i,4), Decr_VR_points(i,5), Decr_VR_points(i,6));
-        }
-        /* Close the text file */
-        fclose(VRCali_UR10CB_VR);
-        Num_VR_points = 0;
-        Decr_VR_points = Eigen::MatrixXd::Zero(1,7);
-        Inst_VR_points = Eigen::MatrixXd::Zero(1,7);
-
-        printf("\n Cali points was save to txt file \n");
+      Discre_P_recording = fopen(path.c_str(), "wt");
+      if (!Discre_P_recording) {
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, strerror(errno));
+        return;
+      }
+      for (int i = 0; i < Num_RD_points; i++) {
+        fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
+                Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
+                Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
+      }
+      fclose(Discre_P_recording); Discre_P_recording = nullptr;
+      Num_RD_points = 0;
+      Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
+      Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
+      printf("\n Discrete points was save to txt file \n");
     }
-    /* VR calibrarion point save with "Teaching handle" [end] */
+    else if (mode_cmd == VRCali_reording_start) { // VR 캘리 포인트 1개 저장
+      if (Num_EE_points != 0) {
+        Inst_EE_points = Decr_EE_points;
+        Decr_EE_points.resize(Num_EE_points+1,12);
+        Decr_EE_points.topRows(Num_EE_points) = Inst_EE_points;
+      } else {
+        Decr_EE_points.topRows(Num_EE_points+1) = Inst_EE_points;
+      }
+      Decr_EE_points.bottomRows(1) <<
+        RArm.Tc(0,0),RArm.Tc(1,0),RArm.Tc(2,0),
+        RArm.Tc(0,1),RArm.Tc(1,1),RArm.Tc(2,1),
+        RArm.Tc(0,2),RArm.Tc(1,2),RArm.Tc(2,2),
+        RArm.Tc(0,3),RArm.Tc(1,3),RArm.Tc(2,3);
+      Num_EE_points++;
+      sprintf(Saved_way_point,"Saved cali. points: %d",Num_EE_points);
+      memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
+      std::cout << "\n" << Decr_EE_points << std::endl;
 
-    else if (mode_cmd == Playback_mode_cmd)
-    {
-        /*** Parameter upload from yaml ***/
-
-        // 1. Contact admittance parameter load
-        Power_PB.PRamM[0] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM1"].as<double>();
-        Power_PB.PRamM[1] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM2"].as<double>();
-        Power_PB.PRamM[2] = NRS_Fcon_setting["ContactDesiredMass"]["LamdaM3"].as<double>();
-
-        Power_PB.PRamD[0] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD1"].as<double>();
-        Power_PB.PRamD[1] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD2"].as<double>();
-        Power_PB.PRamD[2] = NRS_Fcon_setting["ContactDesiredDamper"]["LamdaD3"].as<double>();
-
-        Power_PB.PRamK[0] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK1"].as<double>();
-        Power_PB.PRamK[1] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK2"].as<double>();
-        Power_PB.PRamK[2] = NRS_Fcon_setting["ContactDesiredSpring"]["LamdaK3"].as<double>();
-
-        // 2. Trajectory 로드
-        bool success = loadFirstTrajectory();
-        if (!success) {
-            RCLCPP_FATAL(node_->get_logger(), "❌ Trajectory 파일 로딩 실패! 노드를 종료합니다.");
-            rclcpp::shutdown();
-            return;
-        }
-
-        // 3. 첫 포인트 가져오기
-        if (joint_trajectory_.empty()) {
-            RCLCPP_FATAL(node_->get_logger(), "❌ trajectory 벡터가 비어 있습니다.");
-            rclcpp::shutdown();
-            return;
-        }
-
-        float LD_X     = joint_trajectory_[0][0];
-        float LD_Y     = joint_trajectory_[0][1];
-        float LD_Z     = joint_trajectory_[0][2];
-        float LD_Roll  = joint_trajectory_[0][3];
-        float LD_Pitch = joint_trajectory_[0][4];
-        float LD_Yaw   = joint_trajectory_[0][5];
-
-        printf("%f %f %f %f %f %f\n", LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw);
-
-        // 4. Trajectory generation to start point
-        double Linear_travel_vel = 0.03; // m/s
-        double Linear_travel_time;
-
-        double Tar_pos[6] = {LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw};
-        double Init_pos[6] = {
-            RArm.xc(0), RArm.xc(1), RArm.xc(2),
-            RArm.thc(0), RArm.thc(1), RArm.thc(2)
-        };
-
-        Linear_travel_time = sqrt(
-            pow(Init_pos[0] - Tar_pos[0], 2) +
-            pow(Init_pos[1] - Tar_pos[1], 2) +
-            pow(Init_pos[2] - Tar_pos[2], 2)
-        ) / Linear_travel_vel;
-
-        if (Linear_travel_time < 3)
-            Linear_travel_time = 3;
-
-        PB_starting_path_done_flag = Posture_PB.PTP_6D_path_init(Init_pos, Tar_pos, Linear_travel_time);
-
-        printf("Playback init path generation done \n");
-
-        auto test_path_path = NRS_recording["test_path"].as<std::string>();
-        path_recording_pos = fopen(test_path_path.c_str(), "wt");
-        memcpy(message_status, ST_path_gen_done, sizeof(ST_path_gen_done));
-
-        #if Playback_mode == 1
-        Power_PB.playback_init(RArm.xc, RArm.thc);
-        #endif
-
-        ctrl = 3;
+      if (Num_VR_points != 0) {
+        Inst_VR_points = Decr_VR_points;
+        Decr_VR_points.resize(Num_VR_points+1,7);
+        Decr_VR_points.topRows(Num_VR_points) = Inst_VR_points;
+      } else {
+        Decr_VR_points.topRows(Num_VR_points+1) = Inst_VR_points;
+      }
+      Decr_VR_points.bottomRows(1) <<
+        VR_pose[0],VR_pose[1],VR_pose[2],
+        VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6];
+      Num_VR_points++;
+      sprintf(Saved_way_point,"Saved VR points: %d",Num_VR_points);
+      memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
+      std::cout << "\n" << Decr_VR_points << std::endl;
     }
-    else if(mode_cmd == Motion_stop_cmd) // Motion stop
-	{
+    else if (mode_cmd == VRCali_recording_save) { // VR 캘리 포인트 저장
+      auto ee_raw = NRS_recording["VRCali_UR10CB_EE"].as<std::string>();
+      auto vr_raw = NRS_recording["VRCali_UR10CB_VR"].as<std::string>();
+      auto ee_path = trim_path(ee_raw);
+      auto vr_path = trim_path(vr_raw);
+
+      if (VRCali_UR10CB_EE) { fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr; }
+      if (VRCali_UR10CB_VR) { fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr; }
+
+      VRCali_UR10CB_EE = fopen(ee_path.c_str(), "wt");
+      if (!VRCali_UR10CB_EE) {
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", ee_path.c_str(), errno, strerror(errno));
+        return;
+      }
+      for (int i = 0; i < Num_EE_points; i++) {
+        fprintf(VRCali_UR10CB_EE, "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+          Decr_EE_points(i,0), Decr_EE_points(i,1),  Decr_EE_points(i,2),
+          Decr_EE_points(i,3), Decr_EE_points(i,4),  Decr_EE_points(i,5),
+          Decr_EE_points(i,6), Decr_EE_points(i,7),  Decr_EE_points(i,8),
+          Decr_EE_points(i,9), Decr_EE_points(i,10), Decr_EE_points(i,11));
+      }
+      fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr;
+      Num_EE_points = 0;
+      Decr_EE_points = Eigen::MatrixXd::Zero(1,12);
+      Inst_EE_points = Eigen::MatrixXd::Zero(1,12);
+      printf("\n Discrete EE points was save to txt file \n");
+
+      VRCali_UR10CB_VR = fopen(vr_path.c_str(), "wt");
+      if (!VRCali_UR10CB_VR) {
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", vr_path.c_str(), errno, strerror(errno));
+        return;
+      }
+      for (int i = 0; i < Num_VR_points; i++) {
+        fprintf(VRCali_UR10CB_VR, "%10f %10f %10f %10f %10f %10f %10f\n",
+          Decr_VR_points(i,0), Decr_VR_points(i,1), Decr_VR_points(i,2),
+          Decr_VR_points(i,3), Decr_VR_points(i,4), Decr_VR_points(i,5), Decr_VR_points(i,6));
+      }
+      fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr;
+      Num_VR_points = 0;
+      Decr_VR_points = Eigen::MatrixXd::Zero(1,7);
+      Inst_VR_points = Eigen::MatrixXd::Zero(1,7);
+      printf("\n Cali points was save to txt file \n");
+    }
+    else if (mode_cmd == Playback_mode_cmd) { // 재생 시작
+      // 1) 경로 문자열 정리
+      auto raw = NRS_recording["hand_g_recording"].as<std::string>();
+      auto hand_path = trim_path(raw);
+
+      if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
+        RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
         ctrl = 0;
-        memcpy(message_status,Motion_stop_mode,sizeof(Motion_stop_mode));
-	}
+        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        return;
+      }
+
+      // 2) 기존 재생 핸들 정리 후 오픈
+      if (Hand_G_playback) { fclose(Hand_G_playback); Hand_G_playback = nullptr; }
+      Hand_G_playback = fopen(hand_path.c_str(), "rt");
+      if (!Hand_G_playback) {
+        RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (errno=%d: %s)",
+                     hand_path.c_str(), errno, strerror(errno));
+        ctrl = 0;
+        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        return;
+      }
+
+      // 3) 파일에서 “마지막 유효 라인(9개 float)” 1줄만 미리 얻기
+      auto read_last_valid_9f = [&](const std::string& p,
+                                    float& x,float& y,float& z,
+                                    float& r,float& pitch,float& yaw,
+                                    float& fx,float& fy,float& fz)->bool {
+        FILE* fp = fopen(p.c_str(), "rt");
+        if (!fp) return false;
+        char buf[2048];
+        bool got=false;
+        while (fgets(buf, sizeof(buf), fp)) {
+          // 공백/주석 스킵
+          bool only_space=true;
+          for (char* t=buf; *t; ++t){ if(!std::isspace((unsigned char)*t)){ only_space=false; break; } }
+          if (only_space || buf[0]=='#') continue;
+          float tx,ty,tz,tr,tp,tw,tfx,tfy,tfz;
+          int n = std::sscanf(buf, " %f %f %f %f %f %f %f %f %f ",
+                              &tx,&ty,&tz,&tr,&tp,&tw,&tfx,&tfy,&tfz);
+          if (n==9){ x=tx; y=ty; z=tz; r=tr; pitch=tp; yaw=tw; fx=tfx; fy=tfy; fz=tfz; got=true; }
+        }
+        fclose(fp);
+        return got;
+      };
+
+      float LD_X=0, LD_Y=0, LD_Z=0, LD_Roll=0, LD_Pitch=0, LD_Yaw=0, LD_CFx=0, LD_CFy=0, LD_CFz=0;
+      if (!read_last_valid_9f(hand_path, LD_X,LD_Y,LD_Z, LD_Roll,LD_Pitch,LD_Yaw, LD_CFx,LD_CFy,LD_CFz)) {
+        RCLCPP_ERROR(node_->get_logger(), "Failed to parse a valid line from '%s'", hand_path.c_str());
+        fclose(Hand_G_playback); Hand_G_playback=nullptr;
+        ctrl=0; memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        return;
+      }
+
+      printf("%f %f %f %f %f %f %f %f %f\n",
+             LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw, LD_CFx, LD_CFy, LD_CFz);
+
+      // 4) 시작점으로 이동 경로 생성
+      double Linear_travel_vel  = 0.03; // m/s
+      double Tar_pos[6]  = {LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw};
+      double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2)};
+
+      double Linear_travel_time =
+        std::sqrt(std::pow(Init_pos[0]-Tar_pos[0],2) +
+                  std::pow(Init_pos[1]-Tar_pos[1],2) +
+                  std::pow(Init_pos[2]-Tar_pos[2],2)) / Linear_travel_vel;
+      if (Linear_travel_time < 3) Linear_travel_time = 3;
+
+      PB_starting_path_done_flag = Posture_PB.PTP_6D_path_init(Init_pos, Tar_pos, Linear_travel_time);
+      RCLCPP_INFO(node_->get_logger(), "Playback init path generation done");
+
+      // 5) 기록 파일 열기(있으면 교체)
+      auto tprow = NRS_recording["test_path"].as<std::string>();
+      auto test_path = trim_path(tprow);
+      if (path_recording_pos) { fclose(path_recording_pos); path_recording_pos = nullptr; }
+      path_recording_pos = fopen(test_path.c_str(), "wt");
+      if (!path_recording_pos) {
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)",
+                     test_path.c_str(), errno, strerror(errno));
+        // 기록만 실패 → 재생은 계속
+      }
+
+      memcpy(message_status, ST_path_gen_done, sizeof(ST_path_gen_done));
+
+      #if Playback_mode == 1
+      Power_PB.playback_init(RArm.xc, RArm.thc);
+      #endif
+
+      ctrl = 3;
+    }
+    else if (mode_cmd == Motion_stop_cmd) {
+      ctrl = 0;
+      memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+      // 재생/기록 중이면 안전하게 닫기
+      if (Hand_G_playback) { fclose(Hand_G_playback); Hand_G_playback=nullptr; }
+      if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording=nullptr; }
+      if (path_recording_pos) { fclose(path_recording_pos); path_recording_pos=nullptr; }
+    }
+
+  } catch (const std::exception& e) {
+    RCLCPP_FATAL(node_->get_logger(), "cmdModeCallback exception: %s", e.what());
+  }
 }
+
+
 
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
@@ -660,20 +582,21 @@ void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg
     // pos_cal_stamped_RPY.yaw = VR_CalPoseRPY(5);
 }
 
-// JointControl.cpp에서 정의 수정 2025.08.05
+//// JointControl.cpp에서 정의 수정 2025.08.05
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
-    std::cout << "[DEBUG] getActualQ called. Current joint states: ";
+    // std::cout << "[DEBUG] getActualQ called. Current joint states: ";
     for (int i = 0; i < 6; ++i){
         RArm.qc[i] = msg->position[i];
-        std::cout << RArm.qc[i] << " ";
-    }   
-    std::cout << std::endl;
+        // std::cout << RArm.qc[i] << " ";
+    }
+    // std::cout << std::endl;
 }
+
 
 void JointControl::CalculateAndPublishJoint()
 {
-    milisec += 1;
+    milisec += 20; // to get the published time
 
 
     // std::string hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
@@ -770,7 +693,7 @@ void JointControl::CalculateAndPublishJoint()
     #endif
 
     // cmdModeCallback();
-    ctrl = 3;
+    // ctrl = 3;
     //// ctrl debugger ////
     // printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
     // printf("mode_cmd: %d \n", mode_cmd);
@@ -832,7 +755,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("milisec: %.2f \n", milisec); // t 값을 디버깅하기 위해 출력
-                    // printf("[DEBUG] hand_g_recording path: %s \n", hand_g_recording_path.c_str());
+                    //// printf("[DEBUG] hand_g_recording path: %s \n", hand_g_recording_path.c_str());
 
 
                     // UR10e actual joint angle monitoring
@@ -1274,7 +1197,7 @@ void JointControl::CalculateAndPublishJoint()
                         }
                         #endif
 
-                        /* [Find contact region using Descre_P_recording point] */
+                        /* [Find contact region using Discre_P_recording point] */
                         KdToZero_flag = false;
                         ZeroToKd_flag = false;
                         KTZ_Fd_flag = false;
@@ -1285,15 +1208,15 @@ void JointControl::CalculateAndPublishJoint()
                         KTZ_Kd_threshold = 3;
                         KTZ_Kd_h = KTZ_Kd_init;
 
-                        auto Descre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-                        Descre_P_recording = fopen(Descre_P_recording_path.c_str(),"rt");
+                        auto Discre_P_recording_path = NRS_recording["Discre_P_recording"].as<std::string>();
+                        Discre_P_recording = fopen(Discre_P_recording_path.c_str(),"rt");
                         int CR_reti = 0;
                         int CR_reti_counter = 0;
                         double CR_LD_histoty[100] = {0,};
 
                         while(CR_reti != -1)
                         {
-                            CR_reti = fscanf(Descre_P_recording, "%f %f %f %f %f %f %f\n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw, &LD_resi);
+                            CR_reti = fscanf(Discre_P_recording, "%f %f %f %f %f %f %f\n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw, &LD_resi);
                             CR_LD_histoty[CR_reti_counter] = LD_Z;
                             if(CR_reti_counter == 1) {CR_start<< LD_X,LD_Y,LD_Z;}
                             CR_reti_counter++;
