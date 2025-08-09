@@ -71,7 +71,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     // Timer
     timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(100),
-        std::bind(&JointControl::CalculateAndPublishJoint, this));
+        std::bind(&JointControl::CalculateAndPublishJoint, this));  
 }
 JointControl::~JointControl() {}
 
@@ -80,7 +80,15 @@ JointControl::~JointControl() {}
 // 재진입 방지
 static std::mutex g_cmdmode_mtx;
 
-// 공백/CRLF 트리밍 (이미 위에 있다면 생략)
+// message_status 안전 설정 헬퍼
+// message_status 가 char 배열(고정 크기)라고 가정합니다.
+// 선언부에 크기 상수(ex. MSG_STATUS_LEN)나 sizeof(message_status)가 보인다면 그대로 쓰세요.
+template <size_t N>
+static inline void set_status(char (&dst)[N], const char* s) {
+  std::snprintf(dst, N, "%s", s ? s : "");
+}
+
+// 공백/CRLF 트리밍
 static std::string trim_path(std::string s) {
   auto notspace = [](unsigned char c){ return !std::isspace(c); };
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
@@ -92,13 +100,12 @@ static std::string trim_path(std::string s) {
 
 void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
 {
-  std::lock_guard<std::mutex> lk(g_cmdmode_mtx); // 재진입 방지
+  std::lock_guard<std::mutex> lk(g_cmdmode_mtx);
 
   try {
     mode_cmd = msg->data;
     printf("[DEBUG] cmdModeCallback called. mode_cmd=%u\n", mode_cmd);
 
-    // 안전 로그
     if (!NRS_recording["hand_g_recording"]) {
       RCLCPP_WARN(node_->get_logger(), "YAML key 'hand_g_recording' not found.");
     }
@@ -111,13 +118,12 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
     }
     else if (mode_cmd == Hand_guiding_mode_cmd) {
       ctrl.store(2, std::memory_order_release);
-      memcpy(message_status, Hand_guiding_mode, sizeof(Hand_guiding_mode));
+      set_status(message_status, Hand_guiding_mode);   // ✅ 안전 복사
     }
-    else if (mode_cmd == Continuous_reording_start) { // 연속 기록 시작
+    else if (mode_cmd == Continuous_reording_start) {
       path_recording_flag = true;
 
       if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
-
       auto raw = NRS_recording["hand_g_recording"].as<std::string>();
       auto hand_g_recording_path = trim_path(raw);
 
@@ -128,14 +134,14 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         path_recording_flag = false;
         return;
       }
-      memcpy(message_status, Data_recording_on, sizeof(Data_recording_on));
+      set_status(message_status, Data_recording_on);   // ✅
     }
-    else if (mode_cmd == Continusous_recording_end) { // 연속 기록 종료
+    else if (mode_cmd == Continusous_recording_end) {
       path_recording_flag = false;
       if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
-      memcpy(message_status, Data_recording_off, sizeof(Data_recording_off));
+      set_status(message_status, Data_recording_off);  // ✅
     }
-    else if (mode_cmd == Discrete_reording_start) { // 이산 웨이포인트 1개 추가
+    else if (mode_cmd == Discrete_reording_start) {
       if (Num_RD_points != 0) {
         Inst_RD_points = Decr_RD_points;
         Decr_RD_points.resize(Num_RD_points+1, 6);
@@ -146,15 +152,14 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Decr_RD_points.bottomRows(1) << RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2);
       Num_RD_points++;
       std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved way point: %d", Num_RD_points);
-      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
+      set_status(message_status, Saved_way_point);     // ✅
       std::cout << "\n" << Decr_RD_points << std::endl;
     }
-    else if (mode_cmd == Discrete_recording_save) { // 이산 웨이포인트 저장
+    else if (mode_cmd == Discrete_recording_save) {
       auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
       auto path = trim_path(raw);
 
       if (Discre_P_recording) { std::fclose(Discre_P_recording); Discre_P_recording = nullptr; }
-
       Discre_P_recording = std::fopen(path.c_str(), "wt");
       if (!Discre_P_recording) {
         RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, std::strerror(errno));
@@ -171,7 +176,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
       printf("\n Discrete points was save to txt file \n");
     }
-    else if (mode_cmd == VRTeac_reording_start) { // VR 이산 기록 시작
+    else if (mode_cmd == VRTeac_reording_start) {
       if (Num_RD_points != 0) {
         Inst_RD_points = Decr_RD_points;
         Decr_RD_points.resize(Num_RD_points+1,6);
@@ -184,15 +189,14 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
       Num_RD_points++;
       std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved way point: %d", Num_RD_points);
-      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
+      set_status(message_status, Saved_way_point);     // ✅
       std::cout << "\n" << Decr_RD_points << std::endl;
     }
-    else if (mode_cmd == VRTeac_recording_save) { // VR 이산 저장
+    else if (mode_cmd == VRTeac_recording_save) {
       auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
       auto path = trim_path(raw);
 
       if (Discre_P_recording) { std::fclose(Discre_P_recording); Discre_P_recording = nullptr; }
-
       Discre_P_recording = std::fopen(path.c_str(), "wt");
       if (!Discre_P_recording) {
         RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, std::strerror(errno));
@@ -209,7 +213,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
       printf("\n Discrete points was save to txt file \n");
     }
-    else if (mode_cmd == VRCali_reording_start) { // VR 캘리 1점 저장
+    else if (mode_cmd == VRCali_reording_start) {
       if (Num_EE_points != 0) {
         Inst_EE_points = Decr_EE_points;
         Decr_EE_points.resize(Num_EE_points+1,12);
@@ -224,7 +228,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         RArm.Tc(0,3),RArm.Tc(1,3),RArm.Tc(2,3);
       Num_EE_points++;
       std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved cali. points: %d", Num_EE_points);
-      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
+      set_status(message_status, Saved_way_point);     // ✅
       std::cout << "\n" << Decr_EE_points << std::endl;
 
       if (Num_VR_points != 0) {
@@ -239,10 +243,10 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6];
       Num_VR_points++;
       std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved VR points: %d", Num_VR_points);
-      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
+      set_status(message_status, Saved_way_point);     // ✅
       std::cout << "\n" << Decr_VR_points << std::endl;
     }
-    else if (mode_cmd == VRCali_recording_save) { // VR 캘리 저장
+    else if (mode_cmd == VRCali_recording_save) {
       auto ee_raw = NRS_recording["VRCali_UR10CB_EE"].as<std::string>();
       auto vr_raw = NRS_recording["VRCali_UR10CB_VR"].as<std::string>();
       auto ee_path = trim_path(ee_raw);
@@ -257,7 +261,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         return;
       }
       for (int i = 0; i < Num_EE_points; i++) {
-        std::fprintf(VRCali_UR10CB_EE, "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+        std::fprintf(VRCali_UR10CB_EE,
+          "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
           Decr_EE_points(i,0), Decr_EE_points(i,1),  Decr_EE_points(i,2),
           Decr_EE_points(i,3), Decr_EE_points(i,4),  Decr_EE_points(i,5),
           Decr_EE_points(i,6), Decr_EE_points(i,7),  Decr_EE_points(i,8),
@@ -285,29 +290,26 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Inst_VR_points = Eigen::MatrixXd::Zero(1,7);
       printf("\n Cali points was save to txt file \n");
     }
-    else if (mode_cmd == Playback_mode_cmd) { // 재생 시작
-      // 1) 기록(핸드가이딩) 파일 경로 확인 & 마지막 유효 줄 파싱
+    else if (mode_cmd == Playback_mode_cmd) {
       auto raw = NRS_recording["hand_g_recording"].as<std::string>();
       auto hand_path = trim_path(raw);
 
       if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
         RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
         ctrl.store(0, std::memory_order_release);
-        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        set_status(message_status, Motion_stop_mode);   // ✅
         return;
       }
 
-      // helper: 마지막 유효 9-플로트 라인 읽기
+      // 마지막 유효 9-플로트 라인 읽기
       auto read_last_valid_9f = [&](const std::string& p,
                                     float& x,float& y,float& z,
                                     float& r,float& pitch,float& yaw,
                                     float& fx,float& fy,float& fz)->bool {
         FILE* fp = std::fopen(p.c_str(), "rt");
         if (!fp) return false;
-        char buf[2048];
-        bool got=false;
+        char buf[2048]; bool got=false;
         while (std::fgets(buf, sizeof(buf), fp)) {
-          // 공백/주석 스킵
           bool only_space=true;
           for (char* t=buf; *t; ++t){ if(!std::isspace((unsigned char)*t)){ only_space=false; break; } }
           if (only_space || buf[0]=='#') continue;
@@ -324,23 +326,21 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       if (!read_last_valid_9f(hand_path, LD_X,LD_Y,LD_Z, LD_Roll,LD_Pitch,LD_Yaw, LD_CFx,LD_CFy,LD_CFz)) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to parse a valid line from '%s'", hand_path.c_str());
         ctrl.store(0, std::memory_order_release);
-        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        set_status(message_status, Motion_stop_mode);   // ✅
         return;
       }
 
-      // 2) 재생 파일 오픈(이전 핸들 정리)
       if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
       Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
       if (!Hand_G_playback) {
         RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (errno=%d: %s)",
                      hand_path.c_str(), errno, std::strerror(errno));
         ctrl.store(0, std::memory_order_release);
-        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        set_status(message_status, Motion_stop_mode);   // ✅
         return;
       }
 
-      // 3) 시작점으로 이동 경로 생성
-      double Linear_travel_vel  = 0.03; // m/s
+      double Linear_travel_vel  = 0.03;
       double Tar_pos[6]  = {LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw};
       double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2)};
 
@@ -353,7 +353,6 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       PB_starting_path_done_flag = Posture_PB.PTP_6D_path_init(Init_pos, Tar_pos, Linear_travel_time);
       printf("Playback init path generation done\n");
 
-      // 4) 포지션 기록 파일 오픈 (실패해도 재생은 계속)
       auto tprow = NRS_recording["test_path"].as<std::string>();
       auto test_path = trim_path(tprow);
       if (path_recording_pos) { std::fclose(path_recording_pos); path_recording_pos = nullptr; }
@@ -363,8 +362,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
                      test_path.c_str(), errno, std::strerror(errno));
       }
 
-      memcpy(message_status, ST_path_gen_done, sizeof(ST_path_gen_done));
-
+      set_status(message_status, ST_path_gen_done);     // ✅
       #if Playback_mode == 1
       Power_PB.playback_init(RArm.xc, RArm.thc);
       #endif
@@ -373,7 +371,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
     }
     else if (mode_cmd == Motion_stop_cmd) {
       ctrl.store(0, std::memory_order_release);
-      memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+      set_status(message_status, Motion_stop_mode);     // ✅
       if (Hand_G_playback)   { std::fclose(Hand_G_playback);   Hand_G_playback   = nullptr; }
       if (hand_g_recording)  { std::fclose(hand_g_recording);  hand_g_recording  = nullptr; }
       if (path_recording_pos){ std::fclose(path_recording_pos);path_recording_pos= nullptr; }
@@ -383,6 +381,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
     RCLCPP_FATAL(node_->get_logger(), "cmdModeCallback exception: %s", e.what());
   }
 }
+
 
 
 
