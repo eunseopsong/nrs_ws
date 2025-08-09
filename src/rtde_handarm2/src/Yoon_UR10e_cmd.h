@@ -13,9 +13,9 @@
 #define Data_recording_mode_cmd 5000
 #define Continuous_reording_start 5001
 #define Continusous_recording_end 5002
-#define Descrete_reording_start 5101
-#define Descrete_recording_end 5102
-#define Descrete_recording_save 5103
+#define Discrete_reording_start 5101
+#define Discrete_recording_end 5102
+#define Discrete_recording_save 5103
 
 #define VRCali_reording_start 5201
 #define VRCali_recording_end 5202
