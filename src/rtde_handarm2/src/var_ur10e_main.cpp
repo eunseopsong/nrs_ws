@@ -73,8 +73,8 @@ double lookahead_time = 0.1;
 double gain = 600;
 
 /* flag */
-int ctrl=0;     // control mode status
-int pre_ctrl=0; // previous control mode status
+std::atomic<int> ctrl{0};       //// int ctrl=0;     // control mode status
+std::atomic<int> pre_ctrl{0};   //// int pre_ctrl=0; // previous control mode status
 char message_status[32] = "Motion stop"; // message status;
 int pause_cnt=0;
 int speedmode = 0;
