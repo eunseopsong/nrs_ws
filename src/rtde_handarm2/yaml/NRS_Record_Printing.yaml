@@ -24,7 +24,7 @@ EXPdata1_switch: 1 # 1: Recording on, 0: Recording off
 #****** HbuttonCmd.cpp files ******#
 
 # Path - Hand_guiding
-Descre_P_recording: "/home/eunseop/nrs_ws/src/rtde_handarm2/data/control_data/Descre_P_recording.txt"
+Discre_P_recording: "/home/eunseop/nrs_ws/src/rtde_handarm2/data/control_data/Discre_P_recording.txt"
 hand_g_recording: "/home/eunseop/nrs_ws/src/rtde_handarm2/data/hand_g_recording.txt"
 
 # Switch - Hand_guiding
