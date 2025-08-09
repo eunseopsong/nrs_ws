@@ -22,11 +22,14 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
-// #include <std_msgs/msg/UInt16.hpp> 
+#include <std_msgs/msg/u_int16.hpp>   // ROS2: UInt16
 #include <yaml-cpp/yaml.h>
 
 constexpr int DOF = 6;
 using Vector6d = Eigen::Matrix<double, 6, 1>;
+
+// ===== 추가: 초기 타겟 RPY 보관 (헤더 수정 없이 사용하려고 전역 정적 변수로 둠)
+static Eigen::Vector3d first_pose_rpy_(0.0, 0.0, 0.0);
 
 // ===================== 외부에서 선언/정의된 타입/인스턴스 가정 =====================
 // - AKin                              : kinematics helper (ForwardK_T, InverseK_min, etc.)
@@ -55,6 +58,29 @@ static std::string trim_path(std::string s) {
     s.pop_back();
   }
   return s;
+}
+
+// ===== 추가: TXT 첫 유효 라인의 9개 실수(X Y Z R P Y Fx Fy Fz) 읽기
+static bool read_first_valid_9f(const std::string& path,
+                                float& x,float& y,float& z,
+                                float& r,float& p,float& yw,
+                                float& fx,float& fy,float& fz)
+{
+  FILE* fp = std::fopen(path.c_str(), "rt");
+  if (!fp) return false;
+  char buf[2048];
+  bool ok=false;
+  while (std::fgets(buf, sizeof(buf), fp)) {
+    bool only_space=true;
+    for (char* t=buf; *t; ++t){ if(!std::isspace((unsigned char)*t)){ only_space=false; break; } }
+    if (only_space || buf[0]=='#') continue;
+    double tx,ty,tz,tr,tp,tw,tfx,tfy,tfz;
+    int n = std::sscanf(buf, " %lf %lf %lf %lf %lf %lf %lf %lf %lf ",
+                        &tx,&ty,&tz,&tr,&tp,&tw,&tfx,&tfy,&tfz);
+    if (n==9){ x=tx; y=ty; z=tz; r=tr; p=tp; yw=tw; fx=tfx; fy=tfy; fz=tfz; ok=true; break; }
+  }
+  std::fclose(fp);
+  return ok;
 }
 
 // ===================== JointControl =====================
@@ -321,30 +347,10 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         return;
       }
 
-      // 마지막 유효 9-플로트 라인 읽기 (타겟 정의용)
-      auto read_last_valid_9f = [&](const std::string& p,
-                                    float& x,float& y,float& z,
-                                    float& r,float& pitch,float& yaw,
-                                    float& fx,float& fy,float& fz)->bool {
-        FILE* fp = std::fopen(p.c_str(), "rt");
-        if (!fp) return false;
-        char buf[2048]; bool got=false;
-        while (std::fgets(buf, sizeof(buf), fp)) {
-          bool only_space=true;
-          for (char* t=buf; *t; ++t){ if(!std::isspace((unsigned char)*t)){ only_space=false; break; } }
-          if (only_space || buf[0]=='#') continue;
-          float tx,ty,tz,tr,tp,tw,tfx,tfy,tfz;
-          int n = std::sscanf(buf, " %f %f %f %f %f %f %f %f %f ",
-                              &tx,&ty,&tz,&tr,&tp,&tw,&tfx,&tfy,&tfz);
-          if (n==9){ x=tx; y=ty; z=tz; r=tr; pitch=tp; yaw=tw; fx=tfx; fy=tfy; fz=tfz; got=true; }
-        }
-        std::fclose(fp);
-        return got;
-      };
-
+      // 🔴 TXT "첫 줄"을 초기 타겟으로 사용
       float LDx=0, LDy=0, LDz=0, LDr=0, LDp=0, LDw=0, LFx=0, LFy=0, LFz=0;
-      if (!read_last_valid_9f(hand_path, LDx,LDy,LDz, LDr,LDp,LDw, LFx,LFy,LFz)) {
-        RCLCPP_ERROR(node_->get_logger(), "Failed to parse a valid line from '%s'", hand_path.c_str());
+      if (!read_first_valid_9f(hand_path, LDx,LDy,LDz, LDr,LDp,LDw, LFx,LFy,LFz)) {
+        RCLCPP_ERROR(node_->get_logger(), "Failed to parse first valid line from '%s'", hand_path.c_str());
         ctrl.store(0, std::memory_order_release);
         set_status(message_status, Motion_stop_mode);
         return;
@@ -359,10 +365,13 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         return;
       }
 
-      // 시작점 -> 파일 첫번째 포즈까지 PTP 경로 생성
+      // ✅ 초기 이동 타겟 (PTP) 생성 — 회전 포함
       double Linear_travel_vel  = 0.03;
-      double Tar_pos[6]  = {LDx,LDy,LDz,LDr,LDp,LDw};
-      double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2)};
+      double Tar_pos[6]  = { (double)LDx,(double)LDy,(double)LDz,(double)LDr,(double)LDp,(double)LDw };
+      double Init_pos[6] = { RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2) };
+
+      // 초기 RPY 보관 (PTP에서 0으로 돌아오는 경우 보정용)
+      first_pose_rpy_ = Eigen::Vector3d(Tar_pos[3], Tar_pos[4], Tar_pos[5]);
 
       double Linear_travel_time =
         std::sqrt(std::pow(Init_pos[0]-Tar_pos[0],2) +
@@ -527,6 +536,7 @@ void JointControl::CalculateAndPublishJoint()
     #elif TCP_standard == 1
     AKin.Ycontact_ForwardK_T(&RArm);
     #endif
+    AKin.Rotation2EulerAngle(&RArm);   // 🔴 RArm.thc 갱신 (RPY=0 이슈 해결)
 
 	RArm.Td=RArm.Tc;
     VectorXd Init_qc = RArm.qc;
@@ -671,14 +681,12 @@ void JointControl::CalculateAndPublishJoint()
         return;
     }
 
-    // 3) Playback (요청: 매 콜백마다 TXT 읽은 값과 Desired 출력)
+    // 3) Playback (매 콜백마다 TXT 값과 Desired 출력)
     if (c == 3)
     {
-        // 초기 진입시 1회 설정
+        // 초기 진입시 1회: Discrete 파일 확인 등
         if (pc != c)
         {
-            // contact/초기화 등 필요한 값들 설정 (생략 부분 기존 코드 그대로)
-            // Discrete 파일 로드 시 가드
             auto disc_path = trim_path(NRS_recording["Discre_P_recording"].as<std::string>());
             FILE* fp = std::fopen(disc_path.c_str(), "rt");
             if (fp) {
@@ -706,7 +714,6 @@ void JointControl::CalculateAndPublishJoint()
                 RCLCPP_WARN(node_->get_logger(), "[PB] Cannot open discrete file: '%s'", disc_path.c_str());
             }
 
-            // 파일 핸들 확인
             if (!Hand_G_playback) {
                 RCLCPP_ERROR(node_->get_logger(), "[PB] Hand_G_playback is null at entry. Stop playback.");
                 ctrl.store(0, std::memory_order_release);
@@ -716,7 +723,6 @@ void JointControl::CalculateAndPublishJoint()
             }
         }
 
-        // 실제 실행
         // 현재 자세
         Vector6d Hadm_pos_act; Hadm_pos_act << RArm.xc(0),RArm.xc(1),RArm.xc(2),RArm.thc(0),RArm.thc(1),RArm.thc(2);
 
@@ -727,7 +733,14 @@ void JointControl::CalculateAndPublishJoint()
             if(Posture_PB.PTP_6D_path_exe(path_out))
             {
                 Desired_XYZ << path_out[0], path_out[1], path_out[2];
-                Desired_RPY << path_out[3], path_out[4], path_out[5];
+
+                // 🔴 경로 생성기가 회전을 0,0,0으로 내보내는 경우 보정
+                const double rpy_sum_abs = std::fabs(path_out[3]) + std::fabs(path_out[4]) + std::fabs(path_out[5]);
+                if (rpy_sum_abs < 1e-9) {
+                    Desired_RPY << first_pose_rpy_(0), first_pose_rpy_(1), first_pose_rpy_(2);
+                } else {
+                    Desired_RPY << path_out[3], path_out[4], path_out[5];
+                }
 
                 // 초기 이동 중에는 파일 Fz 영향 없음
                 LD_CFx = LD_CFy = LD_CFz = 0.0f;
@@ -774,14 +787,12 @@ void JointControl::CalculateAndPublishJoint()
                        Desired_RPY(0),Desired_RPY(1),Desired_RPY(2));
             }
 
-            // Playback_mode == 1 (Power playback)인 경우 필요한 보정/제어 수행 (기존 코드 유지 가정)
+            // IK
             AKin.EulerAngle2Rotation(Desired_rot,Desired_RPY);
             RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ(0),
                        Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
                        Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
                        0,0,0,1;
-
-            // IK
             #if TCP_standard == 0
             AKin.InverseK_min(&RArm);
             #else
@@ -807,7 +818,6 @@ void JointControl::CalculateAndPublishJoint()
         }
         else
         {
-            // 시작경로 미생성(이론상 여기 안 옴)
             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 3000,
                                  "[PB] Start path not initialized.");
         }
