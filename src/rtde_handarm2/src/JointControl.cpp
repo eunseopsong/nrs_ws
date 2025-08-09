@@ -140,7 +140,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording = nullptr; }
       memcpy(message_status, Data_recording_off, sizeof(Data_recording_off));
     }
-    else if (mode_cmd == Descrete_reording_start) { // 이산 웨이포인트 1개 추가
+    else if (mode_cmd == Discrete_reording_start) { // 이산 웨이포인트 1개 추가
       if (Num_RD_points != 0) {
         Inst_RD_points = Decr_RD_points;
         Decr_RD_points.resize(Num_RD_points+1, 6);
@@ -154,28 +154,28 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
       std::cout << "\n" << Decr_RD_points << std::endl;
     }
-    else if (mode_cmd == Descrete_recording_save) { // 이산 웨이포인트 저장
-      auto raw = NRS_recording["Descre_P_recording"].as<std::string>();
+    else if (mode_cmd == Discrete_recording_save) { // 이산 웨이포인트 저장
+      auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
       auto path = trim_path(raw);
 
       // 기존 핸들 깔끔히 정리
-      if (Descre_P_recording) { fclose(Descre_P_recording); Descre_P_recording = nullptr; }
+      if (Discre_P_recording) { fclose(Discre_P_recording); Discre_P_recording = nullptr; }
 
-      Descre_P_recording = fopen(path.c_str(), "wt");
-      if (!Descre_P_recording) {
+      Discre_P_recording = fopen(path.c_str(), "wt");
+      if (!Discre_P_recording) {
         RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, strerror(errno));
         return;
       }
       for (int i = 0; i < Num_RD_points; i++) {
-        fprintf(Descre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
+        fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
                 Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
                 Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
       }
-      fclose(Descre_P_recording); Descre_P_recording = nullptr;
+      fclose(Discre_P_recording); Discre_P_recording = nullptr;
       Num_RD_points = 0;
       Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
       Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
-      printf("\n Descrete points was save to txt file \n");
+      printf("\n Discrete points was save to txt file \n");
     }
     else if (mode_cmd == VRTeac_reording_start) { // VR 이산 기록 시작
       if (Num_RD_points != 0) {
@@ -194,26 +194,26 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       std::cout << "\n" << Decr_RD_points << std::endl;
     }
     else if (mode_cmd == VRTeac_recording_save) { // VR 이산 기록 저장
-      auto raw = NRS_recording["Descre_P_recording"].as<std::string>();
+      auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
       auto path = trim_path(raw);
 
-      if (Descre_P_recording) { fclose(Descre_P_recording); Descre_P_recording = nullptr; }
+      if (Discre_P_recording) { fclose(Discre_P_recording); Discre_P_recording = nullptr; }
 
-      Descre_P_recording = fopen(path.c_str(), "wt");
-      if (!Descre_P_recording) {
+      Discre_P_recording = fopen(path.c_str(), "wt");
+      if (!Discre_P_recording) {
         RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, strerror(errno));
         return;
       }
       for (int i = 0; i < Num_RD_points; i++) {
-        fprintf(Descre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
+        fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
                 Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
                 Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
       }
-      fclose(Descre_P_recording); Descre_P_recording = nullptr;
+      fclose(Discre_P_recording); Discre_P_recording = nullptr;
       Num_RD_points = 0;
       Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
       Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
-      printf("\n Descrete points was save to txt file \n");
+      printf("\n Discrete points was save to txt file \n");
     }
     else if (mode_cmd == VRCali_reording_start) { // VR 캘리 포인트 1개 저장
       if (Num_EE_points != 0) {
@@ -273,7 +273,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Num_EE_points = 0;
       Decr_EE_points = Eigen::MatrixXd::Zero(1,12);
       Inst_EE_points = Eigen::MatrixXd::Zero(1,12);
-      printf("\n Descrete EE points was save to txt file \n");
+      printf("\n Discrete EE points was save to txt file \n");
 
       VRCali_UR10CB_VR = fopen(vr_path.c_str(), "wt");
       if (!VRCali_UR10CB_VR) {
@@ -695,7 +695,7 @@ void JointControl::CalculateAndPublishJoint()
     #endif
 
     // cmdModeCallback();
-    ctrl = 3;
+    // ctrl = 3;
     //// ctrl debugger ////
     // printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
     // printf("mode_cmd: %d \n", mode_cmd);
@@ -757,8 +757,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("milisec: %.2f \n", milisec); // t 값을 디버깅하기 위해 출력
-                    printf("control mode: %d \n", ctrl); // 디버깅용 모드 출력
-                    // printf("[DEBUG] hand_g_recording path: %s \n", hand_g_recording_path.c_str());
+                    //// printf("[DEBUG] hand_g_recording path: %s \n", hand_g_recording_path.c_str());
 
 
                     // UR10e actual joint angle monitoring
@@ -1200,7 +1199,7 @@ void JointControl::CalculateAndPublishJoint()
                         }
                         #endif
 
-                        /* [Find contact region using Descre_P_recording point] */
+                        /* [Find contact region using Discre_P_recording point] */
                         KdToZero_flag = false;
                         ZeroToKd_flag = false;
                         KTZ_Fd_flag = false;
@@ -1211,15 +1210,15 @@ void JointControl::CalculateAndPublishJoint()
                         KTZ_Kd_threshold = 3;
                         KTZ_Kd_h = KTZ_Kd_init;
 
-                        auto Descre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-                        Descre_P_recording = fopen(Descre_P_recording_path.c_str(),"rt");
+                        auto Discre_P_recording_path = NRS_recording["Discre_P_recording"].as<std::string>();
+                        Discre_P_recording = fopen(Discre_P_recording_path.c_str(),"rt");
                         int CR_reti = 0;
                         int CR_reti_counter = 0;
                         double CR_LD_histoty[100] = {0,};
 
                         while(CR_reti != -1)
                         {
-                            CR_reti = fscanf(Descre_P_recording, "%f %f %f %f %f %f %f\n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw, &LD_resi);
+                            CR_reti = fscanf(Discre_P_recording, "%f %f %f %f %f %f %f\n", &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw, &LD_resi);
                             CR_LD_histoty[CR_reti_counter] = LD_Z;
                             if(CR_reti_counter == 1) {CR_start<< LD_X,LD_Y,LD_Z;}
                             CR_reti_counter++;

@@ -222,7 +222,7 @@ void HbuttonCmd::Mode_chage()
         if (point_counter != 0)
         {
             // Way point save termination message publish
-            yoon_mode_msg.data = Descrete_recording_save;
+            yoon_mode_msg.data = Discrete_recording_save;
             yoon_mode_pub->publish(yoon_mode_msg);
             //// ros::spinOnce();
             // rclcpp::spin_some(this->get_node_base_interface());
@@ -266,7 +266,7 @@ void HbuttonCmd::Way_point_save()  // to solve error: (2025.06.27 23:35)
     // yoon_path.header.frame_id = "base_link";
     // yoon_path.poses.push_back(pose_msg);
 
-    yoon_mode_msg.data = Descrete_reording_start;
+    yoon_mode_msg.data = Discrete_reording_start;
     yoon_mode_pub->publish(yoon_mode_msg);
     //// ros::spinOnce();
     // rclcpp::spin_some(this->get_node_base_interface());
@@ -301,10 +301,10 @@ void HbuttonCmd::Trajectory_gen()
     double MMotion_vel = NRS_Fcon_desired["AAC_Des_velocity"]["MMotion_vel"].as<double>();
 
     /*** STEP1 : Load the waypoints ***/
-    // Tot_txt_load txt_loader("/home/gene/catkin_ws/src/rtde_handarm/src/Descre_P_recording.txt");
-    auto YamlDescre_P_recording_path = NRS_recording["Descre_P_recording"].as<std::string>();
-    char* Descre_P_recording_path = const_cast<char*>(YamlDescre_P_recording_path.c_str());
-    Tot_txt_load txt_loader(Descre_P_recording_path);
+    // Tot_txt_load txt_loader("/home/gene/catkin_ws/src/rtde_handarm/src/Discre_P_recording.txt");
+    auto YamlDiscre_P_recording_path = NRS_recording["Discre_P_recording"].as<std::string>();
+    char* Discre_P_recording_path = const_cast<char*>(YamlDiscre_P_recording_path.c_str());
+    Tot_txt_load txt_loader(Discre_P_recording_path);
     Eigen::MatrixXd Decr_RD_points, Decr_RD_points_tem;
     txt_loader.Tot_data_read(Decr_RD_points_tem);
 
