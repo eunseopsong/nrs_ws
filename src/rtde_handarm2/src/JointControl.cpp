@@ -77,22 +77,19 @@ JointControl::~JointControl() {}
 
 
 
-// 재진입 방지 (멀티스레드 실행기 사용 시)
+// 재진입 방지
 static std::mutex g_cmdmode_mtx;
 
-// ===== 경로 트리밍 =====
+// 공백/CRLF 트리밍 (이미 위에 있다면 생략)
 static std::string trim_path(std::string s) {
   auto notspace = [](unsigned char c){ return !std::isspace(c); };
-  // 앞쪽 공백 제거
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
-  // 뒤쪽 공백/CR/LF 제거
   while (!s.empty() && (s.back()=='\r' || s.back()=='\n' || std::isspace((unsigned char)s.back()))) {
     s.pop_back();
   }
   return s;
 }
 
-// ===== JointControl::cmdModeCallback 구현 =====
 void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
 {
   std::lock_guard<std::mutex> lk(g_cmdmode_mtx); // 재진입 방지
@@ -101,7 +98,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
     mode_cmd = msg->data;
     printf("[DEBUG] cmdModeCallback called. mode_cmd=%u\n", mode_cmd);
 
-    // YAML 키 존재 여부 가볍게 로깅(디버깅 편의용)
+    // 안전 로그
     if (!NRS_recording["hand_g_recording"]) {
       RCLCPP_WARN(node_->get_logger(), "YAML key 'hand_g_recording' not found.");
     }
@@ -110,26 +107,24 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       // no-op
     }
     else if (mode_cmd == EE_Posture_control_mode_cmd) {
-      // 기존 비활성 코드 유지 (#if 0 영역)
+      // 필요 시 구현
     }
     else if (mode_cmd == Hand_guiding_mode_cmd) {
-    //   ctrl = 2;
-      ctrl.store(2, std::memory_order_release); 
+      ctrl.store(2, std::memory_order_release);
       memcpy(message_status, Hand_guiding_mode, sizeof(Hand_guiding_mode));
     }
     else if (mode_cmd == Continuous_reording_start) { // 연속 기록 시작
       path_recording_flag = true;
 
-      // 같은 파일 반복 오픈 방지: 기존 핸들 있으면 먼저 닫기
-      if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording = nullptr; }
+      if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
 
       auto raw = NRS_recording["hand_g_recording"].as<std::string>();
       auto hand_g_recording_path = trim_path(raw);
 
-      hand_g_recording = fopen(hand_g_recording_path.c_str(), "wt");
+      hand_g_recording = std::fopen(hand_g_recording_path.c_str(), "wt");
       if (!hand_g_recording) {
         RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)",
-                     hand_g_recording_path.c_str(), errno, strerror(errno));
+                     hand_g_recording_path.c_str(), errno, std::strerror(errno));
         path_recording_flag = false;
         return;
       }
@@ -137,7 +132,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
     }
     else if (mode_cmd == Continusous_recording_end) { // 연속 기록 종료
       path_recording_flag = false;
-      if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording = nullptr; }
+      if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
       memcpy(message_status, Data_recording_off, sizeof(Data_recording_off));
     }
     else if (mode_cmd == Discrete_reording_start) { // 이산 웨이포인트 1개 추가
@@ -150,7 +145,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       }
       Decr_RD_points.bottomRows(1) << RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2);
       Num_RD_points++;
-      sprintf(Saved_way_point, "Saved way point: %d", Num_RD_points);
+      std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved way point: %d", Num_RD_points);
       memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
       std::cout << "\n" << Decr_RD_points << std::endl;
     }
@@ -158,20 +153,19 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
       auto path = trim_path(raw);
 
-      // 기존 핸들 깔끔히 정리
-      if (Discre_P_recording) { fclose(Discre_P_recording); Discre_P_recording = nullptr; }
+      if (Discre_P_recording) { std::fclose(Discre_P_recording); Discre_P_recording = nullptr; }
 
-      Discre_P_recording = fopen(path.c_str(), "wt");
+      Discre_P_recording = std::fopen(path.c_str(), "wt");
       if (!Discre_P_recording) {
-        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, strerror(errno));
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, std::strerror(errno));
         return;
       }
       for (int i = 0; i < Num_RD_points; i++) {
-        fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
-                Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
-                Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
+        std::fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
+          Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
+          Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), 0.0);
       }
-      fclose(Discre_P_recording); Discre_P_recording = nullptr;
+      std::fclose(Discre_P_recording); Discre_P_recording = nullptr;
       Num_RD_points = 0;
       Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
       Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
@@ -189,33 +183,33 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
         VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
       Num_RD_points++;
-      sprintf(Saved_way_point,"Saved way point: %d",Num_RD_points);
-      memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
+      std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved way point: %d", Num_RD_points);
+      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
       std::cout << "\n" << Decr_RD_points << std::endl;
     }
-    else if (mode_cmd == VRTeac_recording_save) { // VR 이산 기록 저장
+    else if (mode_cmd == VRTeac_recording_save) { // VR 이산 저장
       auto raw = NRS_recording["Discre_P_recording"].as<std::string>();
       auto path = trim_path(raw);
 
-      if (Discre_P_recording) { fclose(Discre_P_recording); Discre_P_recording = nullptr; }
+      if (Discre_P_recording) { std::fclose(Discre_P_recording); Discre_P_recording = nullptr; }
 
-      Discre_P_recording = fopen(path.c_str(), "wt");
+      Discre_P_recording = std::fopen(path.c_str(), "wt");
       if (!Discre_P_recording) {
-        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, strerror(errno));
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", path.c_str(), errno, std::strerror(errno));
         return;
       }
       for (int i = 0; i < Num_RD_points; i++) {
-        fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
-                Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
-                Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), (double)0.0);
+        std::fprintf(Discre_P_recording, "%10f %10f %10f %10f %10f %10f %10f\n",
+          Decr_RD_points(i,0), Decr_RD_points(i,1), Decr_RD_points(i,2),
+          Decr_RD_points(i,3), Decr_RD_points(i,4), Decr_RD_points(i,5), 0.0);
       }
-      fclose(Discre_P_recording); Discre_P_recording = nullptr;
+      std::fclose(Discre_P_recording); Discre_P_recording = nullptr;
       Num_RD_points = 0;
       Decr_RD_points = Eigen::MatrixXd::Zero(1,6);
       Inst_RD_points = Eigen::MatrixXd::Zero(1,6);
       printf("\n Discrete points was save to txt file \n");
     }
-    else if (mode_cmd == VRCali_reording_start) { // VR 캘리 포인트 1개 저장
+    else if (mode_cmd == VRCali_reording_start) { // VR 캘리 1점 저장
       if (Num_EE_points != 0) {
         Inst_EE_points = Decr_EE_points;
         Decr_EE_points.resize(Num_EE_points+1,12);
@@ -229,8 +223,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         RArm.Tc(0,2),RArm.Tc(1,2),RArm.Tc(2,2),
         RArm.Tc(0,3),RArm.Tc(1,3),RArm.Tc(2,3);
       Num_EE_points++;
-      sprintf(Saved_way_point,"Saved cali. points: %d",Num_EE_points);
-      memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
+      std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved cali. points: %d", Num_EE_points);
+      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
       std::cout << "\n" << Decr_EE_points << std::endl;
 
       if (Num_VR_points != 0) {
@@ -244,88 +238,75 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
         VR_pose[0],VR_pose[1],VR_pose[2],
         VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6];
       Num_VR_points++;
-      sprintf(Saved_way_point,"Saved VR points: %d",Num_VR_points);
-      memcpy(message_status,Saved_way_point,sizeof(Saved_way_point));
+      std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved VR points: %d", Num_VR_points);
+      memcpy(message_status, Saved_way_point, sizeof(Saved_way_point));
       std::cout << "\n" << Decr_VR_points << std::endl;
     }
-    else if (mode_cmd == VRCali_recording_save) { // VR 캘리 포인트 저장
+    else if (mode_cmd == VRCali_recording_save) { // VR 캘리 저장
       auto ee_raw = NRS_recording["VRCali_UR10CB_EE"].as<std::string>();
       auto vr_raw = NRS_recording["VRCali_UR10CB_VR"].as<std::string>();
       auto ee_path = trim_path(ee_raw);
       auto vr_path = trim_path(vr_raw);
 
-      if (VRCali_UR10CB_EE) { fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr; }
-      if (VRCali_UR10CB_VR) { fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr; }
+      if (VRCali_UR10CB_EE) { std::fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr; }
+      if (VRCali_UR10CB_VR) { std::fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr; }
 
-      VRCali_UR10CB_EE = fopen(ee_path.c_str(), "wt");
+      VRCali_UR10CB_EE = std::fopen(ee_path.c_str(), "wt");
       if (!VRCali_UR10CB_EE) {
-        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", ee_path.c_str(), errno, strerror(errno));
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", ee_path.c_str(), errno, std::strerror(errno));
         return;
       }
       for (int i = 0; i < Num_EE_points; i++) {
-        fprintf(VRCali_UR10CB_EE, "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+        std::fprintf(VRCali_UR10CB_EE, "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
           Decr_EE_points(i,0), Decr_EE_points(i,1),  Decr_EE_points(i,2),
           Decr_EE_points(i,3), Decr_EE_points(i,4),  Decr_EE_points(i,5),
           Decr_EE_points(i,6), Decr_EE_points(i,7),  Decr_EE_points(i,8),
           Decr_EE_points(i,9), Decr_EE_points(i,10), Decr_EE_points(i,11));
       }
-      fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr;
+      std::fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr;
       Num_EE_points = 0;
       Decr_EE_points = Eigen::MatrixXd::Zero(1,12);
       Inst_EE_points = Eigen::MatrixXd::Zero(1,12);
       printf("\n Discrete EE points was save to txt file \n");
 
-      VRCali_UR10CB_VR = fopen(vr_path.c_str(), "wt");
+      VRCali_UR10CB_VR = std::fopen(vr_path.c_str(), "wt");
       if (!VRCali_UR10CB_VR) {
-        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", vr_path.c_str(), errno, strerror(errno));
+        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)", vr_path.c_str(), errno, std::strerror(errno));
         return;
       }
       for (int i = 0; i < Num_VR_points; i++) {
-        fprintf(VRCali_UR10CB_VR, "%10f %10f %10f %10f %10f %10f %10f\n",
+        std::fprintf(VRCali_UR10CB_VR, "%10f %10f %10f %10f %10f %10f %10f\n",
           Decr_VR_points(i,0), Decr_VR_points(i,1), Decr_VR_points(i,2),
           Decr_VR_points(i,3), Decr_VR_points(i,4), Decr_VR_points(i,5), Decr_VR_points(i,6));
       }
-      fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr;
+      std::fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr;
       Num_VR_points = 0;
       Decr_VR_points = Eigen::MatrixXd::Zero(1,7);
       Inst_VR_points = Eigen::MatrixXd::Zero(1,7);
       printf("\n Cali points was save to txt file \n");
     }
     else if (mode_cmd == Playback_mode_cmd) { // 재생 시작
-      // 1) 경로 문자열 정리
+      // 1) 기록(핸드가이딩) 파일 경로 확인 & 마지막 유효 줄 파싱
       auto raw = NRS_recording["hand_g_recording"].as<std::string>();
       auto hand_path = trim_path(raw);
 
       if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
         RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
-        // ctrl = 0;
-        ctrl.store(0, std::memory_order_release); 
+        ctrl.store(0, std::memory_order_release);
         memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
         return;
       }
 
-      // 2) 기존 재생 핸들 정리 후 오픈
-      if (Hand_G_playback) { fclose(Hand_G_playback); Hand_G_playback = nullptr; }
-      Hand_G_playback = fopen(hand_path.c_str(), "rt");
-      if (!Hand_G_playback) {
-        RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (errno=%d: %s)",
-                     hand_path.c_str(), errno, strerror(errno));
-        // ctrl = 0;
-        ctrl.store(0, std::memory_order_release); 
-        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
-        return;
-      }
-
-      // 3) 파일에서 “마지막 유효 라인(9개 float)” 1줄만 미리 얻기
+      // helper: 마지막 유효 9-플로트 라인 읽기
       auto read_last_valid_9f = [&](const std::string& p,
                                     float& x,float& y,float& z,
                                     float& r,float& pitch,float& yaw,
                                     float& fx,float& fy,float& fz)->bool {
-        FILE* fp = fopen(p.c_str(), "rt");
+        FILE* fp = std::fopen(p.c_str(), "rt");
         if (!fp) return false;
         char buf[2048];
         bool got=false;
-        while (fgets(buf, sizeof(buf), fp)) {
+        while (std::fgets(buf, sizeof(buf), fp)) {
           // 공백/주석 스킵
           bool only_space=true;
           for (char* t=buf; *t; ++t){ if(!std::isspace((unsigned char)*t)){ only_space=false; break; } }
@@ -335,24 +316,30 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
                               &tx,&ty,&tz,&tr,&tp,&tw,&tfx,&tfy,&tfz);
           if (n==9){ x=tx; y=ty; z=tz; r=tr; pitch=tp; yaw=tw; fx=tfx; fy=tfy; fz=tfz; got=true; }
         }
-        fclose(fp);
+        std::fclose(fp);
         return got;
       };
 
       float LD_X=0, LD_Y=0, LD_Z=0, LD_Roll=0, LD_Pitch=0, LD_Yaw=0, LD_CFx=0, LD_CFy=0, LD_CFz=0;
       if (!read_last_valid_9f(hand_path, LD_X,LD_Y,LD_Z, LD_Roll,LD_Pitch,LD_Yaw, LD_CFx,LD_CFy,LD_CFz)) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to parse a valid line from '%s'", hand_path.c_str());
-        fclose(Hand_G_playback); Hand_G_playback=nullptr;
-        // ctrl=0;
-        ctrl.store(0, std::memory_order_release); 
+        ctrl.store(0, std::memory_order_release);
         memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
         return;
       }
 
-      printf("%f %f %f %f %f %f %f %f %f\n",
-             LD_X, LD_Y, LD_Z, LD_Roll, LD_Pitch, LD_Yaw, LD_CFx, LD_CFy, LD_CFz);
+      // 2) 재생 파일 오픈(이전 핸들 정리)
+      if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
+      Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
+      if (!Hand_G_playback) {
+        RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (errno=%d: %s)",
+                     hand_path.c_str(), errno, std::strerror(errno));
+        ctrl.store(0, std::memory_order_release);
+        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        return;
+      }
 
-      // 4) 시작점으로 이동 경로 생성
+      // 3) 시작점으로 이동 경로 생성
       double Linear_travel_vel  = 0.03; // m/s
       double Tar_pos[6]  = {LD_X,LD_Y,LD_Z,LD_Roll,LD_Pitch,LD_Yaw};
       double Init_pos[6] = {RArm.xc(0), RArm.xc(1), RArm.xc(2), RArm.thc(0), RArm.thc(1), RArm.thc(2)};
@@ -366,15 +353,14 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       PB_starting_path_done_flag = Posture_PB.PTP_6D_path_init(Init_pos, Tar_pos, Linear_travel_time);
       printf("Playback init path generation done\n");
 
-      // 5) 기록 파일 열기(있으면 교체)
+      // 4) 포지션 기록 파일 오픈 (실패해도 재생은 계속)
       auto tprow = NRS_recording["test_path"].as<std::string>();
       auto test_path = trim_path(tprow);
-      if (path_recording_pos) { fclose(path_recording_pos); path_recording_pos = nullptr; }
-      path_recording_pos = fopen(test_path.c_str(), "wt");
+      if (path_recording_pos) { std::fclose(path_recording_pos); path_recording_pos = nullptr; }
+      path_recording_pos = std::fopen(test_path.c_str(), "wt");
       if (!path_recording_pos) {
         RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (errno=%d: %s)",
-                     test_path.c_str(), errno, strerror(errno));
-        // 기록만 실패 → 재생은 계속
+                     test_path.c_str(), errno, std::strerror(errno));
       }
 
       memcpy(message_status, ST_path_gen_done, sizeof(ST_path_gen_done));
@@ -383,23 +369,21 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Power_PB.playback_init(RArm.xc, RArm.thc);
       #endif
 
-    //   ctrl = 3;
-      ctrl.store(3, std::memory_order_release); 
+      ctrl.store(3, std::memory_order_release);
     }
     else if (mode_cmd == Motion_stop_cmd) {
-    //   ctrl = 0;
-      ctrl.store(0, std::memory_order_release); 
+      ctrl.store(0, std::memory_order_release);
       memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
-      // 재생/기록 중이면 안전하게 닫기
-      if (Hand_G_playback) { fclose(Hand_G_playback); Hand_G_playback=nullptr; }
-      if (hand_g_recording) { fclose(hand_g_recording); hand_g_recording=nullptr; }
-      if (path_recording_pos) { fclose(path_recording_pos); path_recording_pos=nullptr; }
+      if (Hand_G_playback)   { std::fclose(Hand_G_playback);   Hand_G_playback   = nullptr; }
+      if (hand_g_recording)  { std::fclose(hand_g_recording);  hand_g_recording  = nullptr; }
+      if (path_recording_pos){ std::fclose(path_recording_pos);path_recording_pos= nullptr; }
     }
 
   } catch (const std::exception& e) {
     RCLCPP_FATAL(node_->get_logger(), "cmdModeCallback exception: %s", e.what());
   }
 }
+
 
 
 
