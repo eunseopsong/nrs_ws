@@ -113,7 +113,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       // 기존 비활성 코드 유지 (#if 0 영역)
     }
     else if (mode_cmd == Hand_guiding_mode_cmd) {
-      ctrl = 2;
+    //   ctrl = 2;
+      ctrl.store(2, std::memory_order_release); 
       memcpy(message_status, Hand_guiding_mode, sizeof(Hand_guiding_mode));
     }
     else if (mode_cmd == Continuous_reording_start) { // 연속 기록 시작
@@ -297,7 +298,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
 
       if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
         RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
-        ctrl = 0;
+        // ctrl = 0;
+        ctrl.store(0, std::memory_order_release); 
         memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
         return;
       }
@@ -308,7 +310,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       if (!Hand_G_playback) {
         RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (errno=%d: %s)",
                      hand_path.c_str(), errno, strerror(errno));
-        ctrl = 0;
+        // ctrl = 0;
+        ctrl.store(0, std::memory_order_release); 
         memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
         return;
       }
@@ -340,7 +343,9 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       if (!read_last_valid_9f(hand_path, LD_X,LD_Y,LD_Z, LD_Roll,LD_Pitch,LD_Yaw, LD_CFx,LD_CFy,LD_CFz)) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to parse a valid line from '%s'", hand_path.c_str());
         fclose(Hand_G_playback); Hand_G_playback=nullptr;
-        ctrl=0; memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
+        // ctrl=0;
+        ctrl.store(0, std::memory_order_release); 
+        memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
         return;
       }
 
@@ -378,10 +383,12 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       Power_PB.playback_init(RArm.xc, RArm.thc);
       #endif
 
-      ctrl = 3;
+    //   ctrl = 3;
+      ctrl.store(3, std::memory_order_release); 
     }
     else if (mode_cmd == Motion_stop_cmd) {
-      ctrl = 0;
+    //   ctrl = 0;
+      ctrl.store(0, std::memory_order_release); 
       memcpy(message_status, Motion_stop_mode, sizeof(Motion_stop_mode));
       // 재생/기록 중이면 안전하게 닫기
       if (Hand_G_playback) { fclose(Hand_G_playback); Hand_G_playback=nullptr; }
@@ -425,7 +432,8 @@ void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr 
     Path_point_num = J_single.Single_blended_path(Tar_pos,Tar_vel,Waiting_time,(int)(sizeof(Tar_pos)/sizeof(*Tar_pos)));
     if(Path_point_num != -1)
     {
-        ctrl = 1;
+        // ctrl = 1;
+        ctrl.store(1, std::memory_order_release); 
         memcpy(message_status,path_gen_done,sizeof(path_gen_done));
         path_done_flag = true;
 
@@ -727,7 +735,8 @@ void JointControl::CalculateAndPublishJoint()
         // switch (key_MODE)
         // {
         // case '1':
-            ctrl = 0;
+            // ctrl = 0;
+            ctrl.store(0, std::memory_order_release); 
             pause_cnt = 0;
             //// while (running)
             // while (rclcpp::ok() && running) // Add on 2025.08.03 00:10
