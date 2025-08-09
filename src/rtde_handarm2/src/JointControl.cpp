@@ -70,7 +70,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     // Timer
     timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(50),
+        std::chrono::milliseconds(100),
         std::bind(&JointControl::CalculateAndPublishJoint, this));
 }
 JointControl::~JointControl() {}
@@ -98,8 +98,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
   std::lock_guard<std::mutex> lk(g_cmdmode_mtx); // 재진입 방지
 
   try {
-    RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] cmdModeCallback called. mode_cmd=%u", msg->data);
     mode_cmd = msg->data;
+    printf("[DEBUG] cmdModeCallback called. mode_cmd=%u\n", mode_cmd);
 
     // YAML 키 존재 여부 가볍게 로깅(디버깅 편의용)
     if (!NRS_recording["hand_g_recording"]) {
@@ -359,7 +359,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
       if (Linear_travel_time < 3) Linear_travel_time = 3;
 
       PB_starting_path_done_flag = Posture_PB.PTP_6D_path_init(Init_pos, Tar_pos, Linear_travel_time);
-      RCLCPP_INFO(node_->get_logger(), "Playback init path generation done");
+      printf("Playback init path generation done\n");
 
       // 5) 기록 파일 열기(있으면 교체)
       auto tprow = NRS_recording["test_path"].as<std::string>();

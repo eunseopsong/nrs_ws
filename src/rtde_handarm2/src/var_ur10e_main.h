@@ -52,6 +52,9 @@
 #include <thread>
 #include <csignal>
 #include <cmath>
+
+#include <atomic> // Add on 2025.08.09
+
 /*---------------------------- Yaml file headers ---------------------------------*/
 #include <fstream>
 #include <iostream>
@@ -131,8 +134,8 @@ extern double lookahead_time;
 extern double gain;
 
 /* flag */
-extern int ctrl; // control mode status
-extern int pre_ctrl; // previous control mode status
+extern std::atomic<int> ctrl;       //// extern int ctrl; // control mode status
+extern std::atomic<int> pre_ctrl;   //// extern int pre_ctrl; // previous control mode status
 extern char message_status[32]; // message status;
 extern int pause_cnt;
 extern int speedmode;
