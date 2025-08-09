@@ -897,8 +897,13 @@ void JointControl::CalculateAndPublishJoint()
                                 RArm.qd(4) = Joint_path_start(4) + ((double)(mjoint_cmd[0]==5))*J_single.Final_pos(path_exe_counter,1);
                                 RArm.qd(5) = Joint_path_start(5) + ((double)(mjoint_cmd[0]==6))*J_single.Final_pos(path_exe_counter,1);
 
+                                //// fprintf(path_recording_joint,"%10f %10f %10f %10f %10f %10f \n",
+                                //// RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
+                                // (A) ctrl==1, joint path 기록
+                                if (path_recording_joint) {
                                 fprintf(path_recording_joint,"%10f %10f %10f %10f %10f %10f \n",
-                                RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
+                                        RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
+}
                             }
 
                             /***** The case of EE posture control *****/
@@ -920,8 +925,14 @@ void JointControl::CalculateAndPublishJoint()
                                 #elif TCP_standard == 1
                                 AKin.Ycontact_InverseK_min(&RArm);
                                 #endif
-                                fprintf(path_recording_joint,"%10f %10f %10f %10f %10f %10f \n",
-                                RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
+                                //// fprintf(path_recording_joint,"%10f %10f %10f %10f %10f %10f \n",
+                                //// RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
+                                // (B) ctrl==3, path_recording_pos 기록
+                                if (path_recording_pos) {
+                                fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
+                                        PPB_RTinput.PFd, Contact_Rot_force(2),
+                                        Power_PB.PTankE, Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
+                                }
                             }
 
                             path_exe_counter++;
@@ -1151,9 +1162,15 @@ void JointControl::CalculateAndPublishJoint()
                     /* Recording(Desired posture & Contact force) start */
                     if(path_recording_flag == true)
                     {
+                        //// fprintf(hand_g_recording,"%10f %10f %10f %10f %10f %10f %10f %10f %10f \n",
+                        //// Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2),
+                        //// Contact_Rot_force(0),Contact_Rot_force(1),Contact_Rot_force(2));
+                        // (C) ctrl==3, EXPdata1 기록들
+                        if (EXPdata1 && EXPdata1_switch == 1) {
                         fprintf(hand_g_recording,"%10f %10f %10f %10f %10f %10f %10f %10f %10f \n",
                         Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2),
                         Contact_Rot_force(0),Contact_Rot_force(1),Contact_Rot_force(2));
+                        }
                     }
                     /* Recording(Desired posture & Contact force) end */
 
@@ -1483,16 +1500,31 @@ void JointControl::CalculateAndPublishJoint()
                                 }
 
                                 /* Data recording */
-                                if((PPB_RTinput.PFd >= 0.01) || (Contact_Rot_force.norm() >= 2.0)) // In the case of over the force threshold
-                                {
-                                    if(EXPdata1_switch == 1) // 1: Recording
-                                    {
-                                        fprintf(EXPdata1,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+                                // force threshold 넘을 때만 기록 시도
+                                if ((PPB_RTinput.PFd >= 0.01) || (Contact_Rot_force.norm() >= 2.0)) {
+                                if (EXPdata1_switch == 1) {  // 1: Recording
+                                    if (EXPdata1) {
+                                    int wrote = std::fprintf(
+                                        EXPdata1,
+                                        "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
                                         PPB_RTinput.PFd, PPB_surfN_Fext, DB_AVA_Xc_dot, Power_PB.PRamK[2],
-                                        Power_PB.PU1(0),Power_PB.PU1(1),Power_PB.PU1(2),
-                                        Power_PB.PU3(0),Power_PB.PU3(1),Power_PB.PU3(2),
-                                        Desired_rot(0,2),Desired_rot(1,2),Desired_rot(2,2));
+                                        Power_PB.PU1(0), Power_PB.PU1(1), Power_PB.PU1(2),
+                                        Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2),
+                                        Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2)
+                                    );
+                                    if (wrote < 0) {
+                                        RCLCPP_ERROR_THROTTLE(
+                                        node_->get_logger(), *node_->get_clock(), 2000,
+                                        "EXPdata1 write failed: %s", std::strerror(errno));
                                     }
+                                    // 필요하면 버퍼 즉시 내리고 싶을 때만:
+                                    // std::fflush(EXPdata1);
+                                    } else {
+                                    RCLCPP_WARN_THROTTLE(
+                                        node_->get_logger(), *node_->get_clock(), 5000,
+                                        "EXPdata1 is null; skipping record (file not opened).");
+                                    }
+                                }
                                 }
                             }
 
@@ -1518,13 +1550,28 @@ void JointControl::CalculateAndPublishJoint()
                                     {Power_PB.PRamK[2] = DB_AVA_Ksature[0];}
 
                                     /* Data recording */
-                                    if(EXPdata1_switch == 1) // 1: Recording
-                                    {
-                                        fprintf(EXPdata1,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+                                    if (EXPdata1_switch == 1) {  // 1: Recording
+                                    if (EXPdata1) {
+                                        int wrote = std::fprintf(
+                                        EXPdata1,
+                                        "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
                                         PPB_RTinput.PFd, PPB_surfN_Fext, DB_AVA_Xc, DB_AVA_Xc_dot, Power_PB.PRamK[2],
-                                        Power_PB.PU1(0),Power_PB.PU1(1),Power_PB.PU1(2),
-                                        Power_PB.PU3(0),Power_PB.PU3(1),Power_PB.PU3(2),
-                                        Desired_rot(0,2),Desired_rot(1,2),Desired_rot(2,2));
+                                        Power_PB.PU1(0), Power_PB.PU1(1), Power_PB.PU1(2),
+                                        Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2),
+                                        Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2)
+                                        );
+                                        if (wrote < 0) {
+                                        RCLCPP_ERROR_THROTTLE(
+                                            node_->get_logger(), *node_->get_clock(), 2000,
+                                            "EXPdata1 write failed: %s", std::strerror(errno));
+                                        }
+                                        // 필요 시 버퍼 강제 플러시:
+                                        // std::fflush(EXPdata1);
+                                    } else {
+                                        RCLCPP_WARN_THROTTLE(
+                                        node_->get_logger(), *node_->get_clock(), 5000,
+                                        "EXPdata1 is null; skipping record (file not opened).");
+                                    }
                                     }
                                 }
                                 std::vector<double> Mon1_input_data = {Power_PB.PRamM[2], Power_PB.PRamD[2], Power_PB.PRamK[2]};
@@ -1580,13 +1627,29 @@ void JointControl::CalculateAndPublishJoint()
                                     {Power_PB.PRamK[2] = DB_AVA_Ksature[0];}
 
                                     /* Data recording */
-                                    if(EXPdata1_switch == 1) // 1: Recording
-                                    {
-                                        fprintf(EXPdata1,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+                                    if (EXPdata1_switch == 1) {  // 1: Recording
+                                    if (EXPdata1) {
+                                        int wrote = std::fprintf(
+                                        EXPdata1,
+                                        "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
                                         PPB_RTinput.PFd, PPB_surfN_Fext, DB_AVA_Xc_dot, Power_PB.PRamK[2],
-                                        Power_PB.PU1(0),Power_PB.PU1(1),Power_PB.PU1(2),
-                                        Power_PB.PU3(0),Power_PB.PU3(1),Power_PB.PU3(2),
-                                        Desired_rot(0,2),Desired_rot(1,2),Desired_rot(2,2));
+                                        Power_PB.PU1(0), Power_PB.PU1(1), Power_PB.PU1(2),
+                                        Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2),
+                                        Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2)
+                                        );
+
+                                        if (wrote < 0) {
+                                        RCLCPP_ERROR_THROTTLE(
+                                            node_->get_logger(), *node_->get_clock(), 2000,
+                                            "EXPdata1 write failed: %s", std::strerror(errno));
+                                        }
+                                        // 필요하다면 즉시 플러시:
+                                        // std::fflush(EXPdata1);
+                                    } else {
+                                        RCLCPP_WARN_THROTTLE(
+                                        node_->get_logger(), *node_->get_clock(), 5000,
+                                        "EXPdata1 is null; skipping record (file not opened).");
+                                    }
                                     }
                                 }
                             }
@@ -1610,14 +1673,29 @@ void JointControl::CalculateAndPublishJoint()
                                 if(PPB_RTinput.PFd >= 0.01) // In the case of over the force threshold
                                 {
                                     /* Data recording */
-                                    if(EXPdata1_switch == 1) // 1: Recording
-                                    {
-                                        fprintf(EXPdata1,"%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
+                                    if (EXPdata1_switch == 1) {  // 1: Recording
+                                    if (EXPdata1) {
+                                        int wrote = std::fprintf(
+                                        EXPdata1,
+                                        "%10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f %10f\n",
                                         PPB_RTinput.PFd, PPB_surfN_Fext, DB_AVA_Xc_dot,
-                                        Power_PB.PRamM[2],Power_PB.PRamD[2],Power_PB.PRamK[2],
-                                        Power_PB.PU1(0),Power_PB.PU1(1),Power_PB.PU1(2),
-                                        Power_PB.PU3(0),Power_PB.PU3(1),Power_PB.PU3(2),
-                                        Desired_rot(0,2),Desired_rot(1,2),Desired_rot(2,2));
+                                        Power_PB.PRamM[2], Power_PB.PRamD[2], Power_PB.PRamK[2],
+                                        Power_PB.PU1(0), Power_PB.PU1(1), Power_PB.PU1(2),
+                                        Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2),
+                                        Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2)
+                                        );
+                                        if (wrote < 0) {
+                                        RCLCPP_ERROR_THROTTLE(
+                                            node_->get_logger(), *node_->get_clock(), 2000,
+                                            "EXPdata1 write failed: %s", std::strerror(errno));
+                                        }
+                                        // 필요 시 즉시 플러시:
+                                        // std::fflush(EXPdata1);
+                                    } else {
+                                        RCLCPP_WARN_THROTTLE(
+                                        node_->get_logger(), *node_->get_clock(), 5000,
+                                        "EXPdata1 is null; skipping record (file not opened).");
+                                    }
                                     }
                                 }
 
@@ -1674,9 +1752,27 @@ void JointControl::CalculateAndPublishJoint()
                             // Power_PB.PX(0),Power_PB.PX(1),Power_PB.PX(2),
                             // Power_PB.PXr(0),Power_PB.PXr(1),Power_PB.PXr(2),Power_PB.PTankE,
                             // Contact_Rot_force(0),Contact_Rot_force(1),Contact_Rot_force(2));
-                            fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
-                            PPB_RTinput.PFd,Contact_Rot_force(2),
-                            Power_PB.PTankE,Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
+                            if (path_recording_pos) {
+                            int wrote = std::fprintf(
+                                path_recording_pos,
+                                "%10f %10f %10f %10f %10f %10f\n",
+                                PPB_RTinput.PFd,
+                                Contact_Rot_force(2),
+                                Power_PB.PTankE,
+                                Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2)
+                            );
+                            if (wrote < 0) {
+                                RCLCPP_ERROR_THROTTLE(
+                                node_->get_logger(), *node_->get_clock(), 2000,
+                                "path_recording_pos write failed: %s", std::strerror(errno));
+                            }
+                            // 필요하다면 바로 플러시:
+                            // std::fflush(path_recording_pos);
+                            } else {
+                            RCLCPP_WARN_THROTTLE(
+                                node_->get_logger(), *node_->get_clock(), 5000,
+                                "path_recording_pos is null; skipping record (file not opened).");
+                            }
 
                             #if 0
                             // Final output monitoring
