@@ -701,10 +701,8 @@ void JointControl::CalculateAndPublishJoint()
     #endif
 
     // cmdModeCallback();
-    // ctrl = 3;
-    //// ctrl debugger ////
-    // printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
-    // printf("mode_cmd: %d \n", mode_cmd);
+    int c  = ctrl.load(std::memory_order_relaxed);
+    int pc = pre_ctrl.load(std::memory_order_relaxed);
     ///////////////////////
 
     // spring mode control parameter
@@ -724,10 +722,10 @@ void JointControl::CalculateAndPublishJoint()
 
     /* Recording file open */
     auto test_path_joint_path = NRS_recording["test_path_joint"].as<std::string>();
-    path_recording_joint = fopen(test_path_joint_path.c_str(),"wt");
+    // path_recording_joint = fopen(test_path_joint_path.c_str(),"wt"); // Delete on 2025.08.09 (data 누수 방지)
 
     auto EXPdata1_path = NRS_recording["EXPdata1_path"].as<std::string>();
-    EXPdata1 = fopen(EXPdata1_path.c_str(),"wt");
+    // EXPdata1 = fopen(EXPdata1_path.c_str(),"wt"); // Delete on 2025.08.09 (data 누수 방지)
 
     /*==================== Main control loop ==================*/
     try
@@ -735,8 +733,8 @@ void JointControl::CalculateAndPublishJoint()
         // switch (key_MODE)
         // {
         // case '1':
-            // ctrl = 0;
-            ctrl.store(0, std::memory_order_release); 
+            // // ctrl = 0;
+            // ctrl.store(0, std::memory_order_release); 
             pause_cnt = 0;
             //// while (running)
             // while (rclcpp::ok() && running) // Add on 2025.08.03 00:10
@@ -760,7 +758,7 @@ void JointControl::CalculateAndPublishJoint()
                 {
                     #if RT_printing
                     printf("======================================== \n");
-                    printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,ctrl,pre_ctrl,path_exe_counter,Path_point_num); //show the current mode data
+                    printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,c,pc,path_exe_counter,Path_point_num); //show the current mode data
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("milisec: %.2f \n", milisec); // t 값을 디버깅하기 위해 출력
@@ -859,7 +857,7 @@ void JointControl::CalculateAndPublishJoint()
                 /*====== Control modes ======*/
 
                 /* Inital state (stay at the inital pose) */
-                if (ctrl == 0) {
+                if (ctrl.load(std::memory_order_acquire) == 0) {
                     speedmode = 0;
                     //RArm.qd = RArm.qc;
                     RArm.qt = RArm.qc;
@@ -882,7 +880,7 @@ void JointControl::CalculateAndPublishJoint()
                 }
 
                 /* Cartesian position control mode */
-                else if (ctrl == 1) {
+                else if (ctrl.load(std::memory_order_acquire) == 1) {
 
                     // Path execution
                     if(path_done_flag == true)
@@ -954,7 +952,7 @@ void JointControl::CalculateAndPublishJoint()
 
 
                 /* Hand-guiding control mode */
-                else if (ctrl == 2) {
+                else if (ctrl.load(std::memory_order_acquire) == 2) {
                     speedmode = 0;
                     //RArm.qd = RArm.qc;
                     RArm.qt = RArm.qc;
@@ -1182,7 +1180,7 @@ void JointControl::CalculateAndPublishJoint()
                 }
 
                 /* Posture/Power playback control mode */
-                else if (ctrl == 3)
+                else if (ctrl.load(std::memory_order_acquire) == 3)
                 {
                     speedmode = 0;
                     //RArm.qd = RArm.qc;
@@ -1725,7 +1723,8 @@ void JointControl::CalculateAndPublishJoint()
                     joint_q = {Init_qc(0), Init_qc(1), Init_qc(2), Init_qc(3), Init_qc(4), Init_qc(5)};
                     #elif Actual_mode == 1 // actual control mode
 
-                    printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
+                    // printf("ctrl: %d, pre_ctrl: %d \n", ctrl, pre_ctrl);
+                    printf("ctrl: %d, pre_ctrl: %d \n", c, pc);
                     // joint_q = {RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5)};
 
                     /////////////////////////////////////////////////////
