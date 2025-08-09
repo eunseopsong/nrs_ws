@@ -30,13 +30,12 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     // Publishers
     YSurfN_Fext_pub_ = node_->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
     UR10e_mode_pub_  = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
-    // UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
+    //// UR10_Jangle_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_Jangle", 20);
     UR10_pose_pub_   = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
     UR10_wrench_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
-    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20); // Add on 2025.07.09
-
 
     //// Add on 2025.07.09
+    joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20);
     joint_state_.name = {
       "shoulder_pan_joint",
       "shoulder_lift_joint",
@@ -397,8 +396,6 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
 
 
 
-
-
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     PB_iter_cmd = msg->data;
@@ -596,9 +593,10 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
     // std::cout << std::endl;
 }
 
+
 void JointControl::CalculateAndPublishJoint()
 {
-    milisec += 50; // to get the published time
+    milisec += 20; // to get the published time
 
 
     // std::string hand_g_recording_path = NRS_recording["hand_g_recording"].as<std::string>();
