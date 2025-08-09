@@ -757,6 +757,7 @@ void JointControl::CalculateAndPublishJoint()
                     printf("Current status: %s \n",message_status); //show the status message
                     printf("Selected force controller: %d \n",Contact_Fcon_mode);
                     printf("milisec: %.2f \n", milisec); // t 값을 디버깅하기 위해 출력
+                    printf("control mode: %d \n", ctrl); // 디버깅용 모드 출력
                     // printf("[DEBUG] hand_g_recording path: %s \n", hand_g_recording_path.c_str());
 
 
