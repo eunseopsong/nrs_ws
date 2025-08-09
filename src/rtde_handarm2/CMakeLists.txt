@@ -20,6 +20,20 @@ include_directories(
   src
   yaml
 )
+# 외부 모듈 소스 직접 추가
+# set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Yoon_force_control Text_loader Yoon_communication)
+set(Yoon_LIB
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Armtraj/Armtraj.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Arm_guide/ArmGuide.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/Kinematics.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_force_control/Yoon_force_control.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_path/Yoon_path.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_filters/Yoon_filters.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_FT_sensor/Yoon_FT_sensor.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_data_loader/Text_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_communication/Yoon_communi.cpp
+)
+
 
 # 의존 패키지
 find_package(ament_cmake REQUIRED)
@@ -64,22 +78,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # 메시지 지원 추가
 # rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
 # target_link_libraries(${cpp_typesupport_target} yaml-cpp)
-
-
-# 외부 모듈 소스 직접 추가
-# set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Yoon_force_control Text_loader Yoon_communication)
-set(Yoon_LIB
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Armtraj/Armtraj.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Arm_guide/ArmGuide.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/Kinematics.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_force_control/Yoon_force_control.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_path/Yoon_path.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_filters/Yoon_filters.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_FT_sensor/Yoon_FT_sensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_data_loader/Text_loader.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_communication/Yoon_communi.cpp
-)
-
 
 set(COMMON_DEPENDENCIES
   rclcpp

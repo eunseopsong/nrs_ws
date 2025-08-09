@@ -22,8 +22,7 @@ public:
 private:
     void fileCallback(const std_msgs::msg::String::SharedPtr msg)
     {
-        //// std::string output_file_path = "/home/nrsur10/catkin_ws/src/rtde_handarm/src/Control_data/hand_g_recording.txt";
-        std::string output_file_path = "/home/eunseop/nrs_ws/src/rtde_handarm2/src/Control_data/hand_g_recording.txt";
+        std::string output_file_path = "/home/eunseop/nrs_ws/src/rtde_handarm2/data/Control_data/hand_g_recording.txt";
         std::ofstream output_file(output_file_path);
         if (!output_file.is_open())
         {
