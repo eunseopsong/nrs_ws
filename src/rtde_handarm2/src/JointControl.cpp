@@ -866,7 +866,9 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
                     //// rtde_control.waitPeriod(t_start);
 
-                    pre_ctrl = ctrl; // for ctrl mode switching detection
+                    // pre_ctrl = ctrl; // for ctrl mode switching detection
+                    pre_ctrl.store( ctrl.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed );
                     // continue;
                 }
 
@@ -934,7 +936,9 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
                     //// rtde_control.waitPeriod(t_start);
 
-                    pre_ctrl = ctrl; // for ctrl mode switching detection
+                    // pre_ctrl = ctrl; // for ctrl mode switching detection
+                    pre_ctrl.store( ctrl.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed );
                     // continue;
                 }
 
@@ -1162,7 +1166,9 @@ void JointControl::CalculateAndPublishJoint()
 
                     //// rtde_control.waitPeriod(t_start);
 
-                    pre_ctrl = ctrl; // for ctrl mode switching detection
+                    // pre_ctrl = ctrl; // for ctrl mode switching detection
+                    pre_ctrl.store( ctrl.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed );
                     // continue;
                 }
 
@@ -1732,7 +1738,9 @@ void JointControl::CalculateAndPublishJoint()
                     //// rtde_control.servoJ(joint_q, velocity, acceleration, dt, lookahead_time, gain);
                     //// rtde_control.waitPeriod(t_start);
 
-                    pre_ctrl = ctrl; // for ctrl mode switching detection
+                    // pre_ctrl = ctrl; // for ctrl mode switching detection
+                    pre_ctrl.store( ctrl.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed );
                     // continue;
                 }
 
