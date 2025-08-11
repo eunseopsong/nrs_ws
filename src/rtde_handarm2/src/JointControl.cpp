@@ -529,17 +529,37 @@ void JointControl::CalculateAndPublishJoint()
     UR10_pose_pub_->publish(UR10_pose_msg_);
     UR10_wrench_pub_->publish(UR10_wrench_msg_);
 
-    // ====== 모드별 제어 ======
+    //* ====== Control modes ====== *//
 
-    // 0) 정지/유지
+    // Initial state (hold the fixed home pose: 0 -90 -90 -90 90 0 deg)
     if (control_mode == 0) {
         speedmode = 0;
-        RArm.qt = RArm.qc;
-        RArm.dqc << 0,0,0,0,0,0;
-        pause_cnt=0;
 
+        // Fixed home pose in radians
+        static const double HOME_Q[6] = {
+            0.0,
+            -M_PI/2.0,
+            -M_PI/2.0,
+            -M_PI/2.0,
+            +M_PI/2.0,
+            0.0
+        };
+
+        // Command the home pose every cycle
+        for (int i = 0; i < 6; ++i) {
+            RArm.qd(i) = HOME_Q[i];
+        }
+        RArm.qt  = RArm.qd;
+        RArm.dqc << 0,0,0,0,0,0;
+        pause_cnt = 0;
+
+        // Publish to Isaac
         joint_state_.header.stamp = node_->now();
-        for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
+        joint_state_.position.resize(6);
+        for (int i = 0; i < 6; ++i) {
+            joint_state_.position[i] = RArm.qd(i);
+        }
+
         joint_commands_pub_->publish(joint_state_);
 
         pre_ctrl.store(control_mode, std::memory_order_relaxed);
