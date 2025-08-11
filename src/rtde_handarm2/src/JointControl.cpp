@@ -567,7 +567,7 @@ void JointControl::CalculateAndPublishJoint()
     }
 
     // 1) Cartesian position control mode
-    else if (control_mode == 1) {
+    if (control_mode == 1) {
         if(path_done_flag == true) {
             if(path_exe_counter<Path_point_num) {
 
@@ -630,15 +630,14 @@ void JointControl::CalculateAndPublishJoint()
         return;
     }
 
-    // 2) 핸드가이딩 (기존 유지 가정)
-    else if (control_mode == 2) {
+    // 2) Hand-guiding control mode
+    if (control_mode == 2) {
         pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
 
-    //* Posture/Power playback control mode *//
-    //  Playback : InitMove(linear interpolation) → txt line tracking
-    else if (control_mode == 3)
+    // 3) Posture/Power playback control mode
+    if (control_mode == 3)
     {
         // ====== 이 블록 안에서만 유지되는 상태들 (콜백 간 유지) ======
         static bool   pb_inited = false;           // ctrl==3 최초 진입 처리용
@@ -646,7 +645,8 @@ void JointControl::CalculateAndPublishJoint()
         static double initmove_elapsed = 0.0;      // [s]
         static double initmove_duration = 0.0;     // [s]
         static Eigen::Vector3d init_start_xyz, init_goal_xyz;
-        static Eigen::Vector3d init_start_rpy, init_goal_rpy;
+        // 회전 보간용 (SLERP)
+        static Eigen::Matrix3d  init_start_rot, init_goal_rot;
 
         // ====== 최초 진입시 설정 (pre_control_mode != control_mode) ======
         if (pre_control_mode != control_mode)
@@ -671,9 +671,9 @@ void JointControl::CalculateAndPublishJoint()
 
             // 파일에서 **첫 유효 라인(9 float)** 읽기
             auto read_first_valid_9f = [&](FILE* fp,
-                                           float& x,float& y,float& z,
-                                           float& r,float& p,float& yaw,
-                                           float& fx,float& fy,float& fz)->bool {
+                                          float& x,float& y,float& z,
+                                          float& r,float& p,float& yaw,
+                                          float& fx,float& fy,float& fz)->bool {
                 std::rewind(fp);
                 char buf[2048];
                 while (std::fgets(buf, sizeof(buf), fp)) {
@@ -699,16 +699,20 @@ void JointControl::CalculateAndPublishJoint()
 
             // InitMove 목표/시작 설정
             init_start_xyz = Eigen::Vector3d(RArm.xc(0), RArm.xc(1), RArm.xc(2));
-            init_start_rpy = Eigen::Vector3d(RArm.thc(0),RArm.thc(1),RArm.thc(2));
             init_goal_xyz  = Eigen::Vector3d((double)x,(double)y,(double)z);
-            init_goal_rpy  = Eigen::Vector3d((double)r,(double)p,(double)yw);
+
+            // 회전행렬 준비 (start는 현재 Tc에서, goal은 RPY로부터)
+            init_start_rot = RArm.Tc.block<3,3>(0,0);
+            Eigen::Vector3d goal_rpy;
+            goal_rpy << (double)r, (double)p, (double)yw;
+            AKin.EulerAngle2Rotation(init_goal_rot, goal_rpy);
 
             // 이동시간 계산 (선형거리/속도, 최소 3초)
             double Linear_travel_vel = 0.05; // m/s
             double dist = (init_goal_xyz - init_start_xyz).norm();
             initmove_duration = std::max(3.0, dist / std::max(1e-6, Linear_travel_vel));
 
-            initmove_active = true;
+            initmove_active  = true;
             initmove_elapsed = 0.0;
 
             // 디버그 파일 (선택)
@@ -725,34 +729,38 @@ void JointControl::CalculateAndPublishJoint()
         // ====== 실행 ======
         if (!pb_inited) {
             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 3000,
-                                 "[PB] not initialized.");
+                                "[PB] not initialized.");
             pre_ctrl.store(control_mode, std::memory_order_relaxed);
             return;
         }
 
-        // 3-1) InitMove: 현재 → txt 첫 행, 선형 보간
+        // 3-1) InitMove: 현재 → txt 첫 행, (XYZ: 선형보간 / R: SLERP)
         if (initmove_active)
         {
             initmove_elapsed += dt_s;
             double alpha = std::clamp(initmove_elapsed / std::max(1e-6, initmove_duration), 0.0, 1.0);
 
-            // lerp
+            // 위치: 선형 보간
             Eigen::Vector3d xyz = (1.0 - alpha) * init_start_xyz + alpha * init_goal_xyz;
-            Eigen::Vector3d rpy = (1.0 - alpha) * init_start_rpy + alpha * init_goal_rpy;
-
             Desired_XYZ << xyz(0), xyz(1), xyz(2);
-            Desired_RPY << rpy(0), rpy(1), rpy(2);
 
-            // 프린트
+            // 자세: 쿼터니언 SLERP (최단 경로)
+            Eigen::Quaterniond q0(init_start_rot);
+            Eigen::Quaterniond q1(init_goal_rot);
+            if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0;            // 최단 경로 강제
+            Eigen::Quaterniond q = q0.slerp(alpha, q1).normalized();
+            Eigen::Matrix3d Desired_rot = q.toRotationMatrix();
+
+            // (로그용) 보간된 RPY
+            Eigen::Vector3d rpy_print = Desired_rot.eulerAngles(0,1,2);
             printf("[PB][INITMOVE] alpha=%.3f | XYZ:(%.4f %.4f %.4f) RPY:(%.4f %.4f %.4f)\n",
-                   alpha, xyz(0),xyz(1),xyz(2), rpy(0),rpy(1),rpy(2));
+                  alpha, xyz(0),xyz(1),xyz(2), rpy_print[0],rpy_print[1],rpy_print[2]);
 
             // IK & 커맨드
-            AKin.EulerAngle2Rotation(Desired_rot,Desired_RPY);
             RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ(0),
-                       Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
-                       Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
-                       0,0,0,1;
+                      Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
+                      Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
+                      0,0,0,1;
             #if TCP_standard == 0
             AKin.InverseK_min(&RArm);
             #else
@@ -765,7 +773,7 @@ void JointControl::CalculateAndPublishJoint()
 
             // 종료 판정
             if (alpha >= 1.0 - 1e-6) {
-                initmove_active = false;
+                initmove_active  = false;
                 initmove_elapsed = 0.0;
 
                 // 본격 추종을 위해 파일을 처음으로 되감기
@@ -777,7 +785,7 @@ void JointControl::CalculateAndPublishJoint()
             return;
         }
 
-        // 3-2) TXT 라인 추종
+        // 3-2) TXT 라인 추종 (라인 단위로 그대로 명령)
         if (!Hand_G_playback) {
             RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
             ctrl.store(0, std::memory_order_release);
@@ -787,8 +795,8 @@ void JointControl::CalculateAndPublishJoint()
         }
 
         int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
-                               &LD_X,&LD_Y,&LD_Z,&LD_Roll,&LD_Pitch,&LD_Yaw,
-                               &LD_CFx,&LD_CFy,&LD_CFz);
+                              &LD_X,&LD_Y,&LD_Z,&LD_Roll,&LD_Pitch,&LD_Yaw,
+                              &LD_CFx,&LD_CFy,&LD_CFz);
         if (reti != 9) {
             // 파일 끝 or 에러 → 종료
             std::fclose(Hand_G_playback); Hand_G_playback = nullptr;
@@ -800,22 +808,23 @@ void JointControl::CalculateAndPublishJoint()
         }
 
         Desired_XYZ << (double)LD_X, (double)LD_Y, (double)LD_Z;
-        Desired_RPY << (double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw;
+        Eigen::Vector3d Desired_RPY_vec((double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw);
+        Eigen::Matrix3d Desired_rot;
+        AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY_vec);
 
         // 디버깅: TXT값/Desired
         printf("[PB][TXT ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f | Fz:%.4f\n",
-               (double)LD_X,(double)LD_Y,(double)LD_Z,
-               (double)LD_Roll,(double)LD_Pitch,(double)LD_Yaw,(double)LD_CFz);
+              (double)LD_X,(double)LD_Y,(double)LD_Z,
+              (double)LD_Roll,(double)LD_Pitch,(double)LD_Yaw,(double)LD_CFz);
         printf("[PB][DES ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f\n",
-               Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
-               Desired_RPY(0),Desired_RPY(1),Desired_RPY(2));
+              Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
+              Desired_RPY_vec(0),Desired_RPY_vec(1),Desired_RPY_vec(2));
 
         // IK & 커맨드
-        AKin.EulerAngle2Rotation(Desired_rot,Desired_RPY);
         RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ(0),
-                   Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
-                   Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
-                   0,0,0,1;
+                  Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
+                  Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
+                  0,0,0,1;
 
         #if TCP_standard == 0
         AKin.InverseK_min(&RArm);
@@ -836,6 +845,7 @@ void JointControl::CalculateAndPublishJoint()
         pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
+
 
     // 그 외
     speedmode = 0;
