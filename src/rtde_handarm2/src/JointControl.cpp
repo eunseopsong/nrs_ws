@@ -129,7 +129,7 @@ JointControl::~JointControl() {
     if (EXPdata1)             std::fclose(EXPdata1);
 }
 
-// ===================== 모드 콜백 =====================
+// ===================== Mode Callback =====================
 void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
 {
   std::lock_guard<std::mutex> lk(g_cmdmode_mtx);
@@ -337,7 +337,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg)
   }
 }
 
-// ===================== 기타 콜백 =====================
+// ===================== Other Callback =====================
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg)
 {
     PB_iter_cmd = msg->data;
@@ -441,7 +441,7 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
     }
 }
 
-// ===================== 메인 제어 루프 =====================
+// ===================== Main Control Loop =====================
 void JointControl::CalculateAndPublishJoint()
 {
     // timer는 100ms 가정
@@ -469,15 +469,15 @@ void JointControl::CalculateAndPublishJoint()
     int path_exe_counter = 0;
 
     // 상태 로드
-    int c  = ctrl.load(std::memory_order_relaxed);
-    int pc = pre_ctrl.load(std::memory_order_relaxed);
+    int control_mode  = ctrl.load(std::memory_order_relaxed);
+    int pre_control_mode = pre_ctrl.load(std::memory_order_relaxed);
 
     // ====== Printing ======
     if(printer_counter >= print_period)
     {
         #if RT_printing
         printf("======================================== \n");
-        printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,c,pc,path_exe_counter,Path_point_num);
+        printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",Actual_mode,control_mode,pre_control_mode,path_exe_counter,Path_point_num);
         printf("Current status: %s \n",message_status);
         printf("Selected force controller: %d \n",Contact_Fcon_mode);
         printf("milisec: %.2f \n", milisec);
@@ -532,7 +532,7 @@ void JointControl::CalculateAndPublishJoint()
     // ====== 모드별 제어 ======
 
     // 0) 정지/유지
-    if (c == 0) {
+    if (control_mode == 0) {
         speedmode = 0;
         RArm.qt = RArm.qc;
         RArm.dqc << 0,0,0,0,0,0;
@@ -542,12 +542,12 @@ void JointControl::CalculateAndPublishJoint()
         for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
         joint_commands_pub_->publish(joint_state_);
 
-        pre_ctrl.store(c, std::memory_order_relaxed);
+        pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
 
     // 1) 경로(조인트/EE) 실행 (기존 유지)
-    if (c == 1) {
+    if (control_mode == 1) {
         if(path_done_flag == true) {
             if(path_exe_counter<Path_point_num) {
                 if(mode_cmd == Joint_control_mode_cmd) {
@@ -597,18 +597,18 @@ void JointControl::CalculateAndPublishJoint()
         for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
         joint_commands_pub_->publish(joint_state_);
 
-        pre_ctrl.store(c, std::memory_order_relaxed);
+        pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
 
     // 2) 핸드가이딩 (기존 유지 가정)
-    if (c == 2) {
-        pre_ctrl.store(c, std::memory_order_relaxed);
+    if (control_mode == 2) {
+        pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
 
     // 3) Playback : InitMove(선형보간) → txt 라인 추종
-    if (c == 3)
+    if (control_mode == 3)
     {
         // ====== 이 블록 안에서만 유지되는 상태들 (콜백 간 유지) ======
         static bool   pb_inited = false;           // ctrl==3 최초 진입 처리용
@@ -618,8 +618,8 @@ void JointControl::CalculateAndPublishJoint()
         static Eigen::Vector3d init_start_xyz, init_goal_xyz;
         static Eigen::Vector3d init_start_rpy, init_goal_rpy;
 
-        // ====== 최초 진입시 설정 (pc != c) ======
-        if (pc != c)
+        // ====== 최초 진입시 설정 (pre_control_mode != control_mode) ======
+        if (pre_control_mode != control_mode)
         {
             pb_inited = true;
             initmove_active = false;
@@ -635,7 +635,7 @@ void JointControl::CalculateAndPublishJoint()
                 RCLCPP_ERROR(node_->get_logger(), "[PB] playback file not opened.");
                 ctrl.store(0, std::memory_order_release);
                 set_status(message_status, "Playback file not opened");
-                pre_ctrl.store(c, std::memory_order_relaxed);
+                pre_ctrl.store(control_mode, std::memory_order_relaxed);
                 return;
             }
 
@@ -663,7 +663,7 @@ void JointControl::CalculateAndPublishJoint()
                 RCLCPP_ERROR(node_->get_logger(), "[PB] no valid first line in txt.");
                 ctrl.store(0, std::memory_order_release);
                 set_status(message_status, "Playback txt invalid");
-                pre_ctrl.store(c, std::memory_order_relaxed);
+                pre_ctrl.store(control_mode, std::memory_order_relaxed);
                 return;
             }
 
@@ -696,7 +696,7 @@ void JointControl::CalculateAndPublishJoint()
         if (!pb_inited) {
             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 3000,
                                  "[PB] not initialized.");
-            pre_ctrl.store(c, std::memory_order_relaxed);
+            pre_ctrl.store(control_mode, std::memory_order_relaxed);
             return;
         }
 
@@ -743,7 +743,7 @@ void JointControl::CalculateAndPublishJoint()
                 printf("[PB][INITMOVE] done. start following TXT lines.\n");
             }
 
-            pre_ctrl.store(c, std::memory_order_relaxed);
+            pre_ctrl.store(control_mode, std::memory_order_relaxed);
             return;
         }
 
@@ -752,7 +752,7 @@ void JointControl::CalculateAndPublishJoint()
             RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
             ctrl.store(0, std::memory_order_release);
             set_status(message_status, "Playback file closed");
-            pre_ctrl.store(c, std::memory_order_relaxed);
+            pre_ctrl.store(control_mode, std::memory_order_relaxed);
             return;
         }
 
@@ -765,7 +765,7 @@ void JointControl::CalculateAndPublishJoint()
             printf("[PB] End of file (reti=%d). Stop playback.\n", reti);
             ctrl.store(0, std::memory_order_release);
             set_status(message_status, "Playback finished");
-            pre_ctrl.store(c, std::memory_order_relaxed);
+            pre_ctrl.store(control_mode, std::memory_order_relaxed);
             return;
         }
 
@@ -803,7 +803,7 @@ void JointControl::CalculateAndPublishJoint()
         for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
         joint_commands_pub_->publish(joint_state_);
 
-        pre_ctrl.store(c, std::memory_order_relaxed);
+        pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
 
@@ -813,5 +813,5 @@ void JointControl::CalculateAndPublishJoint()
     RArm.qt = RArm.qc;
     RArm.dqc << 0,0,0,0,0,0;
     pause_cnt=0;
-    pre_ctrl.store(c, std::memory_order_relaxed);
+    pre_ctrl.store(control_mode, std::memory_order_relaxed);
 }
