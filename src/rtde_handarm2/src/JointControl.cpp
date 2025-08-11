@@ -607,7 +607,8 @@ void JointControl::CalculateAndPublishJoint()
         return;
     }
 
-    // 3) Playback : InitMove(선형보간) → txt 라인 추종
+    //* Posture/Power playback control mode *//
+    //  Playback : InitMove(linear interpolation) → txt line tracking
     if (control_mode == 3)
     {
         // ====== 이 블록 안에서만 유지되는 상태들 (콜백 간 유지) ======
