@@ -531,7 +531,7 @@ void JointControl::CalculateAndPublishJoint()
 
     //* ====== Control modes ====== *//
 
-    // Initial state (hold the fixed home pose: 0 -90 -90 -90 90 0 deg)
+    // 0) Initial state (hold the fixed home pose: 0 -90 -90 -90 90 0 deg)
     if (control_mode == 0) {
         speedmode = 0;
 
@@ -566,11 +566,14 @@ void JointControl::CalculateAndPublishJoint()
         return;
     }
 
-    // 1) 경로(조인트/EE) 실행 (기존 유지)
+    // 1) Cartesian position control mode
     if (control_mode == 1) {
         if(path_done_flag == true) {
             if(path_exe_counter<Path_point_num) {
-                if(mode_cmd == Joint_control_mode_cmd) {
+
+                /* The case of joint position control */
+                if(mode_cmd == Joint_control_mode_cmd)
+                {
                     RArm.qd(0) = Joint_path_start(0) + ((double)(mjoint_cmd[0]==1))*J_single.Final_pos(path_exe_counter,1);
                     RArm.qd(1) = Joint_path_start(1) + ((double)(mjoint_cmd[0]==2))*J_single.Final_pos(path_exe_counter,1);
                     RArm.qd(2) = Joint_path_start(2) + ((double)(mjoint_cmd[0]==3))*J_single.Final_pos(path_exe_counter,1);
@@ -582,7 +585,11 @@ void JointControl::CalculateAndPublishJoint()
                         std::fprintf(path_recording_joint,"%10f %10f %10f %10f %10f %10f \n",
                             RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
                     }
-                } else if (mode_cmd == EE_Posture_control_mode_cmd) {
+                }
+                
+                /***** The case of EE posture control *****/
+                else if (mode_cmd == EE_Posture_control_mode_cmd)
+                {
                     Desired_XYZ << TCP_path_start(0), TCP_path_start(1), TCP_path_start(2);
                     Desired_RPY << TCP_path_start(3)+path_planning.Final_pos(path_exe_counter,1),
                                     TCP_path_start(4), TCP_path_start(5);
@@ -594,7 +601,7 @@ void JointControl::CalculateAndPublishJoint()
                                0,0,0,1;
 
                     #if TCP_standard == 0
-                    AKin.InverseK_min(&RArm);
+                    AKin.InverseK_min(&RArm); // input: Td , output : qd
                     #else
                     AKin.Ycontact_InverseK_min(&RArm);
                     #endif
@@ -606,7 +613,9 @@ void JointControl::CalculateAndPublishJoint()
                     }
                 }
                 path_exe_counter++;
-            } else {
+            } 
+            else
+            {
                 path_done_flag = false;
                 path_exe_counter = 0;
             }
