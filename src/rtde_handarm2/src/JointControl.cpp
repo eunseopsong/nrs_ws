@@ -28,7 +28,6 @@
 constexpr int DOF = 6;
 using Vector6d = Eigen::Matrix<double, 6, 1>;
 
-// push from LAB
 // ===================== 외부에서 선언/정의된 타입/인스턴스 가정 =====================
 // - AKin                              : kinematics helper (ForwardK_T, InverseK_min, Rotation2EulerAngle, …)
 // - RArm                              : robot state holder (qc, qd, xc, thc, Tc, Td, …)
@@ -497,7 +496,7 @@ void JointControl::CalculateAndPublishJoint()
         printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
         RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
 
-        printf("Des_X: %.3f, Des_Y: %.3f, Des_Z: %.3f, Des_R: %.3f(%.1f), Des_P: %.3f(%.1f), Des_Y: %.3f(%.1f) \n",
+        printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
         Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
         Desired_RPY(0),Desired_RPY(0)*(180/PI),Desired_RPY(1),Desired_RPY(1)*(180/PI),Desired_RPY(2),Desired_RPY(2)*(180/PI));
 
