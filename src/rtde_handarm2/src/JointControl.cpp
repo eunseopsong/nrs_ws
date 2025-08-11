@@ -567,7 +567,7 @@ void JointControl::CalculateAndPublishJoint()
     }
 
     // 1) Cartesian position control mode
-    if (control_mode == 1) {
+    else if (control_mode == 1) {
         if(path_done_flag == true) {
             if(path_exe_counter<Path_point_num) {
 
@@ -631,14 +631,14 @@ void JointControl::CalculateAndPublishJoint()
     }
 
     // 2) 핸드가이딩 (기존 유지 가정)
-    if (control_mode == 2) {
+    else if (control_mode == 2) {
         pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
     }
 
     //* Posture/Power playback control mode *//
     //  Playback : InitMove(linear interpolation) → txt line tracking
-    if (control_mode == 3)
+    else if (control_mode == 3)
     {
         // ====== 이 블록 안에서만 유지되는 상태들 (콜백 간 유지) ======
         static bool   pb_inited = false;           // ctrl==3 최초 진입 처리용
