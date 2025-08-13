@@ -813,12 +813,12 @@ void JointControl::CalculateAndPublishJoint()
         AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY_vec);
 
         // 디버깅: TXT값/Desired
-        printf("[PB][TXT ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f | Fz:%.4f\n",
-              (double)LD_X,(double)LD_Y,(double)LD_Z,
-              (double)LD_Roll,(double)LD_Pitch,(double)LD_Yaw,(double)LD_CFz);
-        printf("[PB][DES ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f\n",
-              Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
-              Desired_RPY_vec(0),Desired_RPY_vec(1),Desired_RPY_vec(2));
+        // printf("[PB][TXT ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f | Fz:%.4f\n",
+        //       (double)LD_X,(double)LD_Y,(double)LD_Z,
+        //       (double)LD_Roll,(double)LD_Pitch,(double)LD_Yaw,(double)LD_CFz);
+        // printf("[PB][DES ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f\n",
+        //       Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
+        //       Desired_RPY_vec(0),Desired_RPY_vec(1),Desired_RPY_vec(2));
 
         // IK & 커맨드
         RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ(0),
@@ -833,9 +833,9 @@ void JointControl::CalculateAndPublishJoint()
         #endif
 
         if (path_recording_pos) {
-            std::fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
-                PPB_RTinput.PFd, (double)ftS2(2),
-                Power_PB.PTankE, Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
+            // std::fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
+            //     PPB_RTinput.PFd, (double)ftS2(2),
+            //     Power_PB.PTankE, Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
         }
 
         joint_state_.header.stamp = node_->now();
