@@ -497,8 +497,8 @@ void JointControl::CalculateAndPublishJoint()
         RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
 
         printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
-        Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
-        Desired_RPY(0),Desired_RPY(0)*(180/PI),Desired_RPY(1),Desired_RPY(1)*(180/PI),Desired_RPY(2),Desired_RPY(2)*(180/PI));
+        Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2),
+        Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
 
         printf("PB_PMx: %.3f, PB_PMy: %.3f, PB_PMz: %.4f\n",Power_PB.PRamM[0],Power_PB.PRamM[1],Power_PB.PRamM[2]);
         printf("PB_PDx: %.3f, PB_PDy: %.3f, PB_PDz: %.4f\n",Power_PB.PRamD[0],Power_PB.PRamD[1],Power_PB.PRamD[2]);
@@ -751,8 +751,10 @@ void JointControl::CalculateAndPublishJoint()
             Eigen::Quaterniond q = q0.slerp(alpha, q1).normalized();
             Eigen::Matrix3d Desired_rot = q.toRotationMatrix();
 
-            // (로그용) 보간된 RPY
+            // (로그/프린트용) 보간된 RPY → Desired_RPY도 동기화
             Eigen::Vector3d rpy_print = Desired_rot.eulerAngles(0,1,2);
+            Desired_RPY << rpy_print[0], rpy_print[1], rpy_print[2];
+
             printf("[PB][INITMOVE] alpha=%.3f | XYZ:(%.4f %.4f %.4f) RPY:(%.4f %.4f %.4f)\n",
                   alpha, xyz(0),xyz(1),xyz(2), rpy_print[0],rpy_print[1],rpy_print[2]);
 
@@ -807,20 +809,13 @@ void JointControl::CalculateAndPublishJoint()
             return;
         }
 
+        // TXT의 1~3열은 위치, 4~6열은 RPY → 그대로 반영
         Desired_XYZ << (double)LD_X, (double)LD_Y, (double)LD_Z;
-        Eigen::Vector3d Desired_RPY_vec((double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw);
-        Eigen::Matrix3d Desired_rot;
-        AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY_vec);
-
-        // 디버깅: TXT값/Desired
-        // printf("[PB][TXT ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f | Fz:%.4f\n",
-        //       (double)LD_X,(double)LD_Y,(double)LD_Z,
-        //       (double)LD_Roll,(double)LD_Pitch,(double)LD_Yaw,(double)LD_CFz);
-        // printf("[PB][DES ] X:%.4f Y:%.4f Z:%.4f | R:%.4f P:%.4f Y:%.4f\n",
-        //       Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
-        //       Desired_RPY_vec(0),Desired_RPY_vec(1),Desired_RPY_vec(2));
+        Desired_RPY << (double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw;
 
         // IK & 커맨드
+        Eigen::Matrix3d Desired_rot;
+        AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
         RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ(0),
                   Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
                   Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
@@ -855,3 +850,4 @@ void JointControl::CalculateAndPublishJoint()
     pause_cnt=0;
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
 }
+
