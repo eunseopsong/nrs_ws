@@ -22,7 +22,6 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
-#include <std_msgs/msg/u_int16.hpp>   // ROS 2에서는 UInt16 → u_int16.hpp (배포에 따라 경로가 다르면 기존 걸로 유지)
 #include <yaml-cpp/yaml.h>
 
 constexpr int DOF = 6;
