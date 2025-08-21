@@ -25,7 +25,6 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr  VR_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
-    //// rclcpp::Subscription<rtde_handarm::msg::FtsensorMsg>::SharedPtr ft_sub_;
 
     //////// Publishers ////////
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           YSurfN_Fext_pub_;
@@ -38,14 +37,6 @@ private:
     // for isaac_joint_commands
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr     joint_commands_pub_;
     sensor_msgs::msg::JointState joint_state_;
-
-
-    // bool LoadFirstTrajectory();  // ← 이것도 추가
-    // bool LoadFirstTrajectory(
-    //     const std::string& filepath,
-    //     float& LD_X, float& LD_Y, float& LD_Z,
-    //     float& LD_Roll, float& LD_Pitch, float& LD_Yaw,
-    //     float& LD_CFx, float& LD_CFy, float& LD_CFz);
 
 
     std_msgs::msg::UInt16 UR10e_mode_msg_;
@@ -62,7 +53,6 @@ private:
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-    // void JointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);  // <-- Isaac Sim에서 /isaac_joint_states
 
     //////// 상태 변수 및 제어 파라미터 ////////
     bool running = true;
