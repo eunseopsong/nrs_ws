@@ -447,7 +447,8 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 }
 void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 {
-    contact_force_mag_.store(msg->data, std::memory_order_relaxed);
+    // contact_force_mag_.store(msg->data, std::memory_order_relaxed);
+    contact_force_mag_ = msg->data;
 
     // 필요시 바로 퍼블리시(옵션)
     // YSurfN_Fext_msg_.data = msg->data;
@@ -504,7 +505,7 @@ void JointControl::CalculateAndPublishJoint()
         RArm.qd(3),RArm.qd(3)*(180/PI), RArm.qd(4),RArm.qd(4)*(180/PI), RArm.qd(5),RArm.qd(5)*(180/PI));
 
         // FtCallback
-        // printf("CFz: %.2f \n", contact_force_mag_);
+        printf("Contact force value: %.2f \n", contact_force_mag_);
         //// printf("HFx: %.2f, HFy: %.2f, HFz: %.2f | CFx: %.2f, CFy: %.2f, CFz: %.2f \n",
         //// ftS1(0),ftS1(1),ftS1(2), ftS2(0),ftS2(1),ftS2(2));
 
