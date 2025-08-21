@@ -59,7 +59,8 @@ private:
     //////// 상태 변수 및 제어 파라미터 ////////
     bool running = true;
 
-    std::atomic<double> contact_force_mag_{0.0};  // 최신 값 저장 (2025.08.21)
+    // std::atomic<double> contact_force_mag_{0.0};  // 최신 값 저장 (2025.08.21)
+    double contact_force_mag_;  // 최신 값 저장 (2025.08.21)
 
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> AdaptiveK_msg_;
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> FAAC3step_msg_;
