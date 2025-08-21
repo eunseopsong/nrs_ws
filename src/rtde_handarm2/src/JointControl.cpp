@@ -98,8 +98,6 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         "/isaac_joint_states", rclcpp::QoS(10),
         std::bind(&JointControl::getActualQ, this, std::placeholders::_1));
 
-        
-
     // Timer (100 ms로 동작 가정)
     timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(50),

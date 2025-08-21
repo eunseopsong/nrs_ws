@@ -1,7 +1,8 @@
 #ifndef JOINTCONTROL_H
 #define JOINTCONTROL_H
-
 #include "var_ur10e_main.h"
+
+// 2025.08.21
 
 class JointControl : public std::enable_shared_from_this<JointControl>
 {
@@ -24,7 +25,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr  VR_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
-    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr           ft_sub_;
+    //// rclcpp::Subscription<rtde_handarm::msg::FtsensorMsg>::SharedPtr ft_sub_;
 
     //////// Publishers ////////
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           YSurfN_Fext_pub_;
