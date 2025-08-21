@@ -100,7 +100,7 @@ file(GLOB_RECURSE sources
 # 2. 제외할 main 파일 명시
 set(EXCLUDE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_ur10e_main.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/node_Hbutton.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/node_hbutton.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_cmd.cpp"      # Add on 2025.07.07
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_path_receiver.cpp"  # Add on 2025.07.08
 )
@@ -123,7 +123,7 @@ ament_target_dependencies(ur10e_mode_cmd ${COMMON_DEPENDENCIES})
 install(TARGETS ur10e_mode_cmd DESTINATION lib/${PROJECT_NAME})
 
 # -------- Hbutton node dependencies --------- #
-add_executable(hbutton src/node_Hbutton.cpp ${sources} ${Yoon_LIB})
+add_executable(hbutton src/node_hbutton.cpp ${sources} ${Yoon_LIB})
 target_include_directories(hbutton PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(hbutton yaml-cpp Eigen3::Eigen)
 ament_target_dependencies(hbutton ${COMMON_DEPENDENCIES})
