@@ -450,9 +450,9 @@ public:
     plane_path_file_path_ = this->declare_parameter<std::string>("plane_path_file_path",
                               "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt");
     rpy_file_path_      = this->declare_parameter<std::string>("rpy_output_path",
-                              "/home/nrs/catkin_ws/src/nrs_path/data/final_waypoints_RPY.txt");   // 필요시 수정
+                              "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints_RPY.txt");   // 필요시 수정
     visual_file_path_   = this->declare_parameter<std::string>("visual_output_path",
-                              "/home/nrs/catkin_ws/src/nrs_path/data/visual_final_waypoints.txt");
+                              "/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt");
 
     // ---- 퍼블리셔 ----
     using QoS = rclcpp::QoS;
