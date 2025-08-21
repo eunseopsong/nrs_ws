@@ -100,7 +100,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
     ft_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
         "/contact/force_magnitude",
-        rclcpp::SensorDataQoS(),  // 또는 rclcpp::QoS(10)
+        rclcpp::SensorDataQoS(),  // or rclcpp::QoS(10)
         std::bind(&JointControl::FtCallback, this, std::placeholders::_1)
     );
 
