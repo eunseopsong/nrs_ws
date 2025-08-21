@@ -1,6 +1,8 @@
 #ifndef JOINTCONTROL_H
 #define JOINTCONTROL_H
 #include "var_ur10e_main.h"
+#include <std_msgs/msg/float64.hpp>
+#include <atomic>
 
 // 2025.08.21
 
@@ -26,6 +28,10 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr  VR_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
 
+    // NEW: force magnitude subscriber (2025.08.21)
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr           ft_sub_;
+    std::atomic<double> contact_force_mag_{0.0};  // 최신 값 저장
+
     //////// Publishers ////////
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           YSurfN_Fext_pub_;
     rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_pub_;
@@ -33,11 +39,9 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_wrench_pub_;
 
-
     // for isaac_joint_commands
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr     joint_commands_pub_;
     sensor_msgs::msg::JointState joint_state_;
-
 
     std_msgs::msg::UInt16 UR10e_mode_msg_;
     // std_msgs::msg::Float64MultiArray UR10_Jangle_msg_;
@@ -53,6 +57,9 @@ private:
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+
+    // NEW: force magnitude 콜백
+    void FtCallback(const std_msgs::msg::Float64::SharedPtr msg);
 
     //////// 상태 변수 및 제어 파라미터 ////////
     bool running = true;
@@ -70,11 +77,9 @@ private:
     VectorXd qc_pre;
     VectorXd dqd_pre;
 
-
     int path_exe_counter = 0;
     // trajectory 저장을 위한 벡터
     std::vector<std::vector<double>> joint_trajectory_;
-
 
     Eigen::Matrix<double, 6, 1> Hadmit_M;
     Eigen::Matrix<double, 6, 1> Hadmit_D;
