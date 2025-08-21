@@ -98,6 +98,12 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
         "/isaac_joint_states", rclcpp::QoS(10),
         std::bind(&JointControl::getActualQ, this, std::placeholders::_1));
 
+    ft_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
+        "/contact/force_magnitude",
+        rclcpp::SensorDataQoS(),  // 또는 rclcpp::QoS(10)
+        std::bind(&JointControl::FtCallback, this, std::placeholders::_1)
+    );
+
     // Timer (100 ms로 동작 가정)
     timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(50),
@@ -438,6 +444,14 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
     for (int i = 0; i < 6 && i < (int)msg->position.size(); ++i){
         RArm.qc[i] = msg->position[i];
     }
+}
+void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
+{
+    contact_force_mag_.store(msg->data, std::memory_order_relaxed);
+
+    // 필요시 바로 퍼블리시(옵션)
+    // YSurfN_Fext_msg_.data = msg->data;
+    // YSurfN_Fext_pub_->publish(YSurfN_Fext_msg_);
 }
 
 // ===================== Main Control Loop =====================
