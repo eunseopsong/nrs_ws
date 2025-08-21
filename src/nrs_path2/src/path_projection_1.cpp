@@ -85,8 +85,8 @@ double g_projection_z = 0.5;
 
 
 // to fix this path
-std::string g_mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
-std::string g_plane_path_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt";
+std::string g_mesh_file_path = "/home/nrs/catkin_ws/src/nrs_path/mesh/workpiece.stl";
+std::string g_plane_path_file_path = "/home/nrs/catkin_ws/src/nrs_path/data/Ori_path_transformed.txt";
 
 
 // Basic Profiler Class
