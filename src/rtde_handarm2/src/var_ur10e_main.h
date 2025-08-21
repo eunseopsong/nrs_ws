@@ -27,7 +27,7 @@
 #include "nrs_forcecon2/nrs_3step_faac.h"
 
 /* MSG headers */
-//// #include "rtde_handarm2/msg/ArmMsg.hpp"
+//// #include "rtde_handarm2/msg/ArmMsg.hpp"#include <std_msgs/msg/uint16.hpp>
 //// #include "rtde_handarm2/msg/FTsensorMsg.msg"
 
 #include "std_msgs/msg/multi_array_layout.hpp"
