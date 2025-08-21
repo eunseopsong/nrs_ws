@@ -27,10 +27,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr  VR_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
-
-    // NEW: force magnitude subscriber (2025.08.21)
-    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr           ft_sub_;
-    std::atomic<double> contact_force_mag_{0.0};  // 최신 값 저장
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr           ft_sub_;           // Add on 2025.08.21
 
     //////// Publishers ////////
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           YSurfN_Fext_pub_;
@@ -63,6 +60,8 @@ private:
 
     //////// 상태 변수 및 제어 파라미터 ////////
     bool running = true;
+
+    std::atomic<double> contact_force_mag_{0.0};  // 최신 값 저장 (2025.08.21)
 
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> AdaptiveK_msg_;
     std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> FAAC3step_msg_;
