@@ -66,9 +66,12 @@ find_package(yaml-cpp REQUIRED)
 #       EXPORT SETTINGS      #
 ##############################
 ament_export_dependencies(
-  rclcpp std_msgs sensor_msgs nrs_path2
-  image_transport cv_bridge image_geometry
-  VTK PCL OpenCV CGAL geometry_msgs
+  rclcpp rclcpp_action std_msgs std_srvs sensor_msgs geometry_msgs
+  tf2 tf2_ros tf2_geometry_msgs tf2_eigen
+  image_transport image_geometry cv_bridge
+  pcl_conversions pcl_msgs pluginlib
+  moveit_ros_planning_interface realsense2 visualization_msgs
+  VTK PCL OpenCV CGAL
 )
 
 ament_export_dependencies(rosidl_default_runtime)
@@ -129,7 +132,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 ## nrs_node_path_generation ##
 add_executable(nrs_node_path_generation
   src/nrs_node_path_generation.cpp
-
   src/nrs_geodesic.cpp
   src/nrs_vec3d.cpp
   src/nrs_interpolation.cpp
@@ -144,11 +146,9 @@ target_include_directories(nrs_node_path_generation PUBLIC $<BUILD_INTERFACE:${C
 add_dependencies(nrs_node_path_generation ${PROJECT_NAME}__rosidl_generator_cpp)
 target_link_libraries(nrs_node_path_generation ${LINK_LIBS})
 
-
 ## nrs_node_visualization ##
 add_executable(nrs_node_visualization
   src/nrs_node_visualization.cpp
-
   src/nrs_geodesic.cpp
   src/nrs_vec3d.cpp
   src/nrs_interpolation.cpp
@@ -163,6 +163,18 @@ target_include_directories(nrs_node_visualization PUBLIC $<BUILD_INTERFACE:${CMA
 add_dependencies(nrs_node_visualization ${PROJECT_NAME}__rosidl_generator_cpp)
 target_link_libraries(nrs_node_visualization ${LINK_LIBS})
 
+## path_projection ##
+add_executable(path_projection
+  src/path_projection.cpp
+)
+ament_target_dependencies(path_projection ${COMMON_DEPENDENCIES} rosidl_typesupport_cpp)
+rosidl_target_interfaces(path_projection ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_include_directories(path_projection PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
+)
+add_dependencies(path_projection ${PROJECT_NAME}__rosidl_generator_cpp)
+target_link_libraries(path_projection ${LINK_LIBS})
+
 ##############################
 #       INSTALL TARGETS      #
 ##############################
@@ -176,6 +188,7 @@ install(DIRECTORY mesh/ DESTINATION share/${PROJECT_NAME}/mesh)
 install(TARGETS
   nrs_node_path_generation
   nrs_node_visualization
+  path_projection
   DESTINATION lib/${PROJECT_NAME}
 )
 
