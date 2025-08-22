@@ -30,12 +30,13 @@ public:
     };
     joint_state_.position.resize(6, 0.0);
 
-    load_waypoints("/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
+    // load_waypoints("/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
+    load_waypoints("/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt");
 
     start_time_ = last_time_ = std::chrono::high_resolution_clock::now();
 
     timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(200),
+      std::chrono::milliseconds(10),
       std::bind(&TxtTrajectoryExecutor::publish_next_point, this));
   }
 
