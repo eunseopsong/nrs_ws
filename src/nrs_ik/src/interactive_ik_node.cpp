@@ -28,14 +28,15 @@ public:
     duration_s_   = this->declare_parameter<double>("duration_s", 2.0);
     use_degrees_  = this->declare_parameter<bool>("use_degrees", false);
     interactive_  = this->declare_parameter<bool>("interactive", true);
+    tool_z_       = this->declare_parameter<double>("tool_z", 0.239);  // ✅ 기본값 고정(EE +Z 기준, m)
 
-    // target pose params (⚠️ yaw는 'yaw'로!)
+    // target pose params (TCP 목표)
     x_   = this->declare_parameter<double>("x", 0.0);
-    y_   = this->declare_parameter<double>("y", 0.0);     // position Y
+    y_   = this->declare_parameter<double>("y", 0.0);
     z_   = this->declare_parameter<double>("z", 0.0);
     r_   = this->declare_parameter<double>("r", 0.0);
     p_   = this->declare_parameter<double>("p", 0.0);
-    yaw_ = this->declare_parameter<double>("yaw", 0.0);   // ✅ was "y" → "yaw"
+    yaw_ = this->declare_parameter<double>("yaw", 0.0);
 
     pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
       "/isaac_joint_commands", rclcpp::QoS(10).reliable());
@@ -65,8 +66,8 @@ public:
     }
 
     RCLCPP_INFO(this->get_logger(),
-      "Target (x y z r p yaw) = [%.6f %.6f %.6f %.6f %.6f %.6f] (rad)",
-      x_, y_, z_, r_, p_, yaw_);
+      "Target (x y z r p yaw) = [%.6f %.6f %.6f %.6f %.6f %.6f] (rad), tool_z=%.3f m",
+      x_, y_, z_, r_, p_, yaw_, tool_z_);
 
     if (!compute_once_and_prepare()) {
       RCLCPP_ERROR(this->get_logger(), "IK failed. Not publishing.");
@@ -85,8 +86,9 @@ private:
   // Params
   double hz_, duration_s_;
   bool use_degrees_, interactive_;
+  double tool_z_;  // EE->TCP z 오프셋 (m)
 
-  // target pose
+  // target pose (TCP 목표)
   double x_, y_, z_, r_, p_, yaw_;
 
   // ROS
@@ -114,16 +116,26 @@ private:
   }
 
   bool compute_once_and_prepare() {
+    // 1) RPY -> Rotation
     Vector3d th; th << r_, p_, yaw_;
     Matrix3d R;
     kin_.EulerAngle2Rotation(R, th);
 
-    arm_.Td.setIdentity();
-    arm_.Td.block<3,3>(0,0) = R;
-    arm_.Td(0,3) = x_;
-    arm_.Td(1,3) = y_;
-    arm_.Td(2,3) = z_;
+    // 2) TCP 기준 목표 변환 Td_tcp
+    Matrix4d Td_tcp = Matrix4d::Identity();
+    Td_tcp.block<3,3>(0,0) = R;
+    Td_tcp(0,3) = x_;
+    Td_tcp(1,3) = y_;
+    Td_tcp(2,3) = z_;
 
+    // 3) EE→TCP (EE 프레임 +Z로 tool_z_)
+    Matrix4d EE2TCP = Matrix4d::Identity();
+    EE2TCP(2,3) = tool_z_;
+
+    // 4) IK는 EE 기준: Td_ee = Td_tcp * (EE2TCP)^(-1)
+    arm_.Td = Td_tcp * EE2TCP.inverse();
+
+    // 5) 근접해 선택
     arm_.qc = arm_.qd;
     int nsol = kin_.InverseK_min(&arm_);
     if (nsol <= 0) {
@@ -141,6 +153,13 @@ private:
     RCLCPP_INFO(this->get_logger(),
       "IK q = [%.6f %.6f %.6f %.6f %.6f %.6f]",
       arm_.qd(0), arm_.qd(1), arm_.qd(2), arm_.qd(3), arm_.qd(4), arm_.qd(5));
+
+    // (옵션) TCP FK 검증
+    // kin_.ForwardK_T(&arm_);
+    // Matrix4d Tc_tcp = arm_.Tc * EE2TCP;
+    // RCLCPP_INFO(this->get_logger(), "TCP FK pos = [%.6f %.6f %.6f]",
+    //   Tc_tcp(0,3), Tc_tcp(1,3), Tc_tcp(2,3));
+
     return true;
   }
 
@@ -166,7 +185,8 @@ int main(int argc, char* argv[]) {
     RCLCPP_INFO(rclcpp::get_logger("main"), "Memory locked.");
   }
 
-  struct sched_param sp{ .sched_priority = 80 };
+  struct sched_param sp;
+  sp.sched_priority = 80;
   if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
     RCLCPP_WARN(rclcpp::get_logger("main"), "Failed to set real-time scheduling");
   }
