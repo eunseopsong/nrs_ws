@@ -699,7 +699,8 @@ private:
 
     // 모든 시각화 웨이포인트의 fz를 10으로 고정 (2025.08.22)
     for (auto& wp : visual_final.waypoints) {
-    wp.fz = 10.0;
+        wp.z = 0.1;   // z 좌표(3번째 열) 고정
+        wp.fz = 10.0; // fz 값 고정
     }
 
     clearFile(visual_file_path_);
