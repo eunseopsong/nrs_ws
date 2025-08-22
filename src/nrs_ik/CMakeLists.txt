@@ -64,6 +64,12 @@ add_executable(txt_ik_executor src/txt_ik_executor.cpp)
 ament_target_dependencies(txt_ik_executor rclcpp sensor_msgs)
 target_link_libraries(txt_ik_executor ur10e_kinematics)
 
+add_executable(interactive_ik_node src/interactive_ik_node.cpp)
+ament_target_dependencies(interactive_ik_node rclcpp sensor_msgs)
+target_link_libraries(interactive_ik_node ur10e_kinematics)
+install(TARGETS interactive_ik_node DESTINATION lib/${PROJECT_NAME})
+
+
 # ------------------------------
 # Install
 # ------------------------------
