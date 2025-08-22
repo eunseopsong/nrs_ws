@@ -709,22 +709,22 @@ if (control_mode == 3) {
 
   // 🔧 스핀들 보정값 (TCP가 실제로 Z축으로 이만큼 내려가 있음)
 
-
   // constexpr double TOOL_Z = -0.25; // [m] contact_force = 0N
-
   // constexpr double TOOL_Z = -0.24; // [m] contact_force = 0N
-
   constexpr double TOOL_Z = -0.238; // [m] contact_force = 5N
-
   // constexpr double TOOL_Z = -0.237; // [m] contact_force = 23N
-
   // constexpr double TOOL_Z = -0.2365; // [m] contact_force = 50N
-  
   // constexpr double TOOL_Z = -0.236; // [m] contact_force = 20N
-  
   // constexpr double TOOL_Z = -0.235; // [m] contact_force = 100N
-
   // constexpr double TOOL_Z = -0.23; // [m] contact_force = 300N
+
+  // ====== (추가) 재생 종료 후 홈 복귀 상태 ======
+  static bool return_active = false;            // TXT 끝난 뒤 홈 복귀 중?
+  static double return_elapsed = 0.0;           // [s]
+  static double return_duration = 0.0;          // [s]
+  static Vector6d return_start_q;               // 시작 관절각
+  static const Vector6d HOME_Q = (Vector6d() << 
+      0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0).finished(); // 0 -90 -90 -90 90 0 [rad]
 
   // ====== 최초 진입시 설정 (pre_control_mode != control_mode) ======
   if (pre_control_mode != control_mode) {
@@ -732,6 +732,10 @@ if (control_mode == 3) {
     initmove_active = false;
     initmove_elapsed = 0.0;
     initmove_duration = 0.0;
+
+    return_active = false;       // 복귀 상태 초기화
+    return_elapsed = 0.0;
+    return_duration = 0.0;
 
     // 파일 핸들 확인
     if (!Hand_G_playback) {
@@ -902,6 +906,32 @@ if (control_mode == 3) {
     return;
   }
 
+  // ---------- (추가) TXT 재생 종료 후 '홈 복귀' 처리 ----------
+  if (return_active) {
+    return_elapsed += dt_s;
+    double alpha = std::clamp(return_elapsed / std::max(1e-6, return_duration), 0.0, 1.0);
+
+    // 관절 선형보간 (슬로우 무빙)
+    Vector6d q_cmd = (1.0 - alpha) * return_start_q + alpha * HOME_Q;
+    for (int i = 0; i < 6; ++i) RArm.qd(i) = q_cmd(i);
+
+    // 퍼블리시
+    joint_state_.header.stamp = node_->now();
+    for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
+    joint_commands_pub_->publish(joint_state_);
+
+    if (alpha >= 1.0 - 1e-6) {
+      return_active = false;
+      printf("[PB] Return-to-home done.\n");
+      ctrl.store(0, std::memory_order_release);
+      set_status(message_status, "Playback finished");
+    }
+
+    pre_ctrl.store(control_mode, std::memory_order_relaxed);
+    return;
+  }
+  // -------------------------------------------------------
+
   // 3-1) InitMove: 현재 → txt 첫 행, (XYZ: 선형보간 / R: SLERP)
   if (initmove_active) {
     initmove_elapsed += dt_s;
@@ -971,11 +1001,15 @@ if (control_mode == 3) {
                          &LD_X,&LD_Y,&LD_Z,&LD_Roll,&LD_Pitch,&LD_Yaw,
                          &LD_CFx,&LD_CFy,&LD_CFz);
   if (reti != 9) {
-    // 파일 끝 or 에러 → 종료
-    std::fclose(Hand_G_playback); Hand_G_playback = nullptr;
-    printf("[PB] End of file (reti=%d). Stop playback.\n", reti);
-    ctrl.store(0, std::memory_order_release);
-    set_status(message_status, "Playback finished");
+    // 파일 끝 or 에러 → 홈 복귀 시퀀스 시작
+    if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
+    printf("[PB] End of file (reti=%d). Start return-to-home.\n", reti);
+
+    return_active   = true;
+    return_elapsed  = 0.0;
+    return_duration = 4.0;            // 천천히 4초에 걸쳐 복귀 (필요시 조정)
+    for (int i = 0; i < 6; ++i) return_start_q(i) = RArm.qc(i);
+
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
@@ -1169,6 +1203,7 @@ if (control_mode == 3) {
   pre_ctrl.store(control_mode, std::memory_order_relaxed);
   return;
 }
+
 
 
 
