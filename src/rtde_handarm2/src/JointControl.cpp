@@ -151,7 +151,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // Timer (100 ms로 동작 가정)
   timer_ = node_->create_wall_timer(
-    std::chrono::milliseconds(50),
+    std::chrono::milliseconds(10),
     std::bind(&JointControl::CalculateAndPublishJoint, this));
 
   // 파일 핸들/상태 초기화
