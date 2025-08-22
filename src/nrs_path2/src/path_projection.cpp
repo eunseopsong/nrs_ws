@@ -380,7 +380,9 @@ public:
     last_resting_time_  = this->declare_parameter<double>("last_resting_time", 3.0);
     acceleration_time_  = this->declare_parameter<double>("acceleration_time", 1.0);
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl");
-    mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
+    // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
+    // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/convex_surface_2.stl");
+    mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/concave_surface_2.stl");
     plane_path_file_path_ = this->declare_parameter<std::string>("plane_path_file_path",
                               "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt");
     rpy_file_path_      = this->declare_parameter<std::string>("rpy_output_path",
@@ -699,7 +701,7 @@ private:
 
     // 모든 시각화 웨이포인트의 fz를 10으로 고정 (2025.08.22)
     for (auto& wp : visual_final.waypoints) {
-        wp.z = 0.1;   // z 좌표(3번째 열) 고정
+        // wp.z = 0.1;   // z 좌표(3번째 열) 고정
         wp.fz = 10.0; // fz 값 고정
     }
 
