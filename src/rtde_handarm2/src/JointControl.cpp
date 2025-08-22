@@ -559,43 +559,43 @@ void JointControl::CalculateAndPublishJoint() {
 
   // ====== Printing ======
   if(printer_counter >= print_period) {
-#if RT_printing
-    printf("======================================== \n");
-    printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",
-      Actual_mode,control_mode,pre_control_mode,path_exe_counter,Path_point_num);
-    printf("Current status: %s \n",message_status);
-    printf("Selected force controller: %d \n",Contact_Fcon_mode);
-    printf("milisec: %.2f \n", milisec);
-    printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
-      RArm.qc(0),RArm.qc(0)*(180/PI), RArm.qc(1),RArm.qc(1)*(180/PI), RArm.qc(2),RArm.qc(2)*(180/PI),
-      RArm.qc(3),RArm.qc(3)*(180/PI), RArm.qc(4),RArm.qc(4)*(180/PI), RArm.qc(5),RArm.qc(5)*(180/PI));
-    printf("D_q1: %.3f(%.1f), D_q2: %.3f(%.1f), D_q3: %.3f(%.1f), D_q4: %.3f(%.1f), D_q5: %.3f(%.1f), D_q6: %.3f(%.1f)\n",
-      RArm.qd(0),RArm.qd(0)*(180/PI), RArm.qd(1),RArm.qd(1)*(180/PI), RArm.qd(2),RArm.qd(2)*(180/PI),
-      RArm.qd(3),RArm.qd(3)*(180/PI), RArm.qd(4),RArm.qd(4)*(180/PI), RArm.qd(5),RArm.qd(5)*(180/PI));
-    // FtCallback
-    printf("Contact force value: %.2f \n", contact_force);
-    //// printf("HFx: %.2f, HFy: %.2f, HFz: %.2f | CFx: %.2f, CFy: %.2f, CFz: %.2f \n",
-    //// ftS1(0),ftS1(1),ftS1(2), ftS2(0),ftS2(1),ftS2(2));
-    printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
-      RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
-    printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
-      Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
-    printf("PB_PMx: %.3f, PB_PMy: %.3f, PB_PMz: %.4f\n",
-      Power_PB.PRamM[0],Power_PB.PRamM[1],Power_PB.PRamM[2]);
-    printf("PB_PDx: %.3f, PB_PDy: %.3f, PB_PDz: %.4f\n",
-      Power_PB.PRamD[0],Power_PB.PRamD[1],Power_PB.PRamD[2]);
-    printf("PB_PKx: %.3f, PB_PKy: %.3f, PB_PKz: %.4f\n",
-      Power_PB.PRamK[0],Power_PB.PRamK[1],Power_PB.PRamK[2]);
-    printf("DB_AVA_sigma: %0.3f, DB_AVA_phi: %0.3f\n",DB_AVA_sigma,DB_AVA_phi);
-    printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n",
-      Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2));
-    printf("Surf. normal Fd: %.3f, Fext: %.3f \n",PPB_RTinput.PFd, PPB_surfN_Fext);
-    printf("VR_x: %.4f, VR_y: %.4f, VR_z: %.4f, VR_R: %.4f(%.2f), VR_P: %.4f(%.2f), VR_Y: %.4f(%.2f) \n",
-      VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
-      VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),
-      VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),
-      VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
-#endif
+  #if RT_printing
+      printf("======================================== \n");
+      printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",
+        Actual_mode,control_mode,pre_control_mode,path_exe_counter,Path_point_num);
+      printf("Current status: %s \n",message_status);
+      printf("Selected force controller: %d \n",Contact_Fcon_mode);
+      printf("milisec: %.2f \n", milisec);
+      printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
+        RArm.qc(0),RArm.qc(0)*(180/PI), RArm.qc(1),RArm.qc(1)*(180/PI), RArm.qc(2),RArm.qc(2)*(180/PI),
+        RArm.qc(3),RArm.qc(3)*(180/PI), RArm.qc(4),RArm.qc(4)*(180/PI), RArm.qc(5),RArm.qc(5)*(180/PI));
+      printf("D_q1: %.3f(%.1f), D_q2: %.3f(%.1f), D_q3: %.3f(%.1f), D_q4: %.3f(%.1f), D_q5: %.3f(%.1f), D_q6: %.3f(%.1f)\n",
+        RArm.qd(0),RArm.qd(0)*(180/PI), RArm.qd(1),RArm.qd(1)*(180/PI), RArm.qd(2),RArm.qd(2)*(180/PI),
+        RArm.qd(3),RArm.qd(3)*(180/PI), RArm.qd(4),RArm.qd(4)*(180/PI), RArm.qd(5),RArm.qd(5)*(180/PI));
+      // FtCallback
+      printf("Contact force value: %.2f \n", contact_force);
+      //// printf("HFx: %.2f, HFy: %.2f, HFz: %.2f | CFx: %.2f, CFy: %.2f, CFz: %.2f \n",
+      //// ftS1(0),ftS1(1),ftS1(2), ftS2(0),ftS2(1),ftS2(2));
+      printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
+        RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
+      printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
+        Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
+      printf("PB_PMx: %.3f, PB_PMy: %.3f, PB_PMz: %.4f\n",
+        Power_PB.PRamM[0],Power_PB.PRamM[1],Power_PB.PRamM[2]);
+      printf("PB_PDx: %.3f, PB_PDy: %.3f, PB_PDz: %.4f\n",
+        Power_PB.PRamD[0],Power_PB.PRamD[1],Power_PB.PRamD[2]);
+      printf("PB_PKx: %.3f, PB_PKy: %.3f, PB_PKz: %.4f\n",
+        Power_PB.PRamK[0],Power_PB.PRamK[1],Power_PB.PRamK[2]);
+      printf("DB_AVA_sigma: %0.3f, DB_AVA_phi: %0.3f\n",DB_AVA_sigma,DB_AVA_phi);
+      printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n",
+        Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2));
+      printf("Surf. normal Fd: %.3f, Fext: %.3f \n",PPB_RTinput.PFd, PPB_surfN_Fext);
+      printf("VR_x: %.4f, VR_y: %.4f, VR_z: %.4f, VR_R: %.4f(%.2f), VR_P: %.4f(%.2f), VR_Y: %.4f(%.2f) \n",
+        VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
+        VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),
+        VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),
+        VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
+  #endif
     printer_counter = 0;
   } else {
     printer_counter++;
@@ -619,6 +619,7 @@ void JointControl::CalculateAndPublishJoint() {
     speedmode = 0;
     // Fixed home pose in radians
     static const double HOME_Q[6] = { 0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0 };
+
     // Command the home pose every cycle
     for (int i = 0; i < 6; ++i) { RArm.qd(i) = HOME_Q[i]; }
     RArm.qt = RArm.qd;
