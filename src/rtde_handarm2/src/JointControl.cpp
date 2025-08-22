@@ -709,18 +709,19 @@ if (control_mode == 3) {
 
   // 🔧 스핀들 보정값 (TCP가 실제로 Z축으로 이만큼 내려가 있음)
 
-  constexpr double TOOL_Z = -0.29; // [m] contact_force = 0N (for concave test)
+  // constexpr double TOOL_Z = -0.29; // [m] contact_force = 0N (for concave test)
   // constexpr double TOOL_Z = -0.27; // [m] contact_force = 0N (success in convex & concave surface)
   // constexpr double TOOL_Z = -0.265; // [m] contact_force = 0N
   // constexpr double TOOL_Z = -0.26; // [m] contact_force = 0N
   // constexpr double TOOL_Z = -0.25; // [m] contact_force = 0N
   // constexpr double TOOL_Z = -0.24; // [m] contact_force = 0N
-  // constexpr double TOOL_Z = -0.238; // [m] contact_force = 5N (success in flat surface)
+  constexpr double TOOL_Z = -0.238; // [m] contact_force = 5N (success in flat surface)
   // constexpr double TOOL_Z = -0.237; // [m] contact_force = 23N
   // constexpr double TOOL_Z = -0.2365; // [m] contact_force = 50N
   // constexpr double TOOL_Z = -0.236; // [m] contact_force = 20N
   // constexpr double TOOL_Z = -0.235; // [m] contact_force = 100N
   // constexpr double TOOL_Z = -0.23; // [m] contact_force = 300N
+  // constexpr double TOOL_Z = -0.2; // [m] contact_force = 0N (for concave test)
 
   // ====== (추가) 재생 종료 후 홈 복귀 상태 ======
   static bool return_active = false;            // TXT 끝난 뒤 홈 복귀 중?
