@@ -697,6 +697,11 @@ private:
     double accel_for_visual = 0.05;
     visual_final = ACCProfiling(visual_final, sampling_time_, starting_time_, last_resting_time_, accel_for_visual, time_counter_);
 
+    // 모든 시각화 웨이포인트의 fz를 10으로 고정 (2025.08.22)
+    for (auto& wp : visual_final.waypoints) {
+    wp.fz = 10.0;
+    }
+
     clearFile(visual_file_path_);
     saveWaypointsToFile(visual_final, visual_file_path_);
 
