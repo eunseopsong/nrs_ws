@@ -580,21 +580,21 @@ void JointControl::CalculateAndPublishJoint() {
         RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
       printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
         Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
-      printf("PB_PMx: %.3f, PB_PMy: %.3f, PB_PMz: %.4f\n",
-        Power_PB.PRamM[0],Power_PB.PRamM[1],Power_PB.PRamM[2]);
-      printf("PB_PDx: %.3f, PB_PDy: %.3f, PB_PDz: %.4f\n",
-        Power_PB.PRamD[0],Power_PB.PRamD[1],Power_PB.PRamD[2]);
-      printf("PB_PKx: %.3f, PB_PKy: %.3f, PB_PKz: %.4f\n",
-        Power_PB.PRamK[0],Power_PB.PRamK[1],Power_PB.PRamK[2]);
-      printf("DB_AVA_sigma: %0.3f, DB_AVA_phi: %0.3f\n",DB_AVA_sigma,DB_AVA_phi);
-      printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n",
-        Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2));
-      printf("Surf. normal Fd: %.3f, Fext: %.3f \n",PPB_RTinput.PFd, PPB_surfN_Fext);
-      printf("VR_x: %.4f, VR_y: %.4f, VR_z: %.4f, VR_R: %.4f(%.2f), VR_P: %.4f(%.2f), VR_Y: %.4f(%.2f) \n",
-        VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
-        VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),
-        VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),
-        VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
+      // printf("PB_PMx: %.3f, PB_PMy: %.3f, PB_PMz: %.4f\n",
+      //   Power_PB.PRamM[0],Power_PB.PRamM[1],Power_PB.PRamM[2]);
+      // printf("PB_PDx: %.3f, PB_PDy: %.3f, PB_PDz: %.4f\n",
+      //   Power_PB.PRamD[0],Power_PB.PRamD[1],Power_PB.PRamD[2]);
+      // printf("PB_PKx: %.3f, PB_PKy: %.3f, PB_PKz: %.4f\n",
+      //   Power_PB.PRamK[0],Power_PB.PRamK[1],Power_PB.PRamK[2]);
+      // printf("DB_AVA_sigma: %0.3f, DB_AVA_phi: %0.3f\n",DB_AVA_sigma,DB_AVA_phi);
+      // printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n",
+      //   Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2));
+      // printf("Surf. normal Fd: %.3f, Fext: %.3f \n",PPB_RTinput.PFd, PPB_surfN_Fext);
+      // printf("VR_x: %.4f, VR_y: %.4f, VR_z: %.4f, VR_R: %.4f(%.2f), VR_P: %.4f(%.2f), VR_Y: %.4f(%.2f) \n",
+      //   VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
+      //   VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),
+      //   VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),
+      //   VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
   #endif
     printer_counter = 0;
   } else {
@@ -709,9 +709,12 @@ if (control_mode == 3) {
 
   // 🔧 스핀들 보정값 (TCP가 실제로 Z축으로 이만큼 내려가 있음)
 
+  constexpr double TOOL_Z = -0.27; // [m] contact_force = 0N (success in convex surface)
+  // constexpr double TOOL_Z = -0.265; // [m] contact_force = 0N
+  // constexpr double TOOL_Z = -0.26; // [m] contact_force = 0N
   // constexpr double TOOL_Z = -0.25; // [m] contact_force = 0N
   // constexpr double TOOL_Z = -0.24; // [m] contact_force = 0N
-  constexpr double TOOL_Z = -0.238; // [m] contact_force = 5N
+  // constexpr double TOOL_Z = -0.238; // [m] contact_force = 5N (success in flat surface)
   // constexpr double TOOL_Z = -0.237; // [m] contact_force = 23N
   // constexpr double TOOL_Z = -0.2365; // [m] contact_force = 50N
   // constexpr double TOOL_Z = -0.236; // [m] contact_force = 20N
@@ -723,7 +726,7 @@ if (control_mode == 3) {
   static double return_elapsed = 0.0;           // [s]
   static double return_duration = 0.0;          // [s]
   static Vector6d return_start_q;               // 시작 관절각
-  static const Vector6d HOME_Q = (Vector6d() << 
+  static const Vector6d HOME_Q = (Vector6d() <<
       0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0).finished(); // 0 -90 -90 -90 90 0 [rad]
 
   // ====== 최초 진입시 설정 (pre_control_mode != control_mode) ======
