@@ -530,7 +530,7 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg) {
 void JointControl::CalculateAndPublishJoint() {
   // timer는 100ms 가정
   const double dt_s = 0.1;
-  milisec += 100;
+  milisec += 10;
 
   for(int i=0;i<6;i++){
     RArm.ddqd(i) = 0;
