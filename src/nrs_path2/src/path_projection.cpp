@@ -386,11 +386,14 @@ public:
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/complex_surface_2.stl");
     mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/non_continuous_surface_2.stl");
     plane_path_file_path_ = this->declare_parameter<std::string>("plane_path_file_path",
-                              "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt");
+                              // "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt");
+                              "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
+
     rpy_file_path_      = this->declare_parameter<std::string>("rpy_output_path",
                               "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints_RPY.txt");   // 필요시 수정
     visual_file_path_   = this->declare_parameter<std::string>("visual_output_path",
-                              "/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt");
+                              // "/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt");
+                              "/home/eunseop/nrs_ws/src/rtde_handarm2/data/hand_g_recording.txt");
 
     // ---- 퍼블리셔 ----
     using QoS = rclcpp::QoS;
