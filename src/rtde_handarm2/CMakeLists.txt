@@ -49,7 +49,7 @@ find_package(yaml-cpp REQUIRED)
 find_package(nrs_forcecon2 REQUIRED)
 find_package(nrs_msgmonitoring2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED) # 사용자 정의 메시지
-
+find_package(HDF5 REQUIRED COMPONENTS C CXX) # Add on 2025.09.18
 
 ament_export_dependencies(
   rclcpp
@@ -137,6 +137,8 @@ install(TARGETS path_receiver DESTINATION lib/${PROJECT_NAME})
 
 # -------- joint_recorder node dependencies --------- #
 add_executable(joint_recorder src/node_joint_recorder.cpp)
+target_include_directories(joint_recorder PUBLIC ${HDF5_INCLUDE_DIRS})
+target_link_libraries(joint_recorder ${HDF5_LIBRARIES})
 ament_target_dependencies(joint_recorder rclcpp sensor_msgs)
 
 install(TARGETS
