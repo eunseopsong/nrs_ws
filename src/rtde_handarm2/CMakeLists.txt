@@ -101,8 +101,9 @@ file(GLOB_RECURSE sources
 set(EXCLUDE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_ur10e_main.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_hbutton.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_cmd.cpp"      # Add on 2025.07.07
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/node_path_receiver.cpp"  # Add on 2025.07.08
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_cmd.cpp"       # Add on 2025.07.07
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/node_path_receiver.cpp"   # Add on 2025.07.08
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/node_joint_recorder.cpp"  # Add on 2025.09.18
 )
 
 # 3. 리스트에서 제외
@@ -134,7 +135,14 @@ add_executable(path_receiver src/node_path_receiver.cpp)
 ament_target_dependencies(path_receiver rclcpp std_msgs)
 install(TARGETS path_receiver DESTINATION lib/${PROJECT_NAME})
 
+# -------- joint_recorder node dependencies --------- #
+add_executable(joint_recorder src/node_joint_recorder.cpp)
+ament_target_dependencies(joint_recorder rclcpp sensor_msgs)
 
+install(TARGETS
+  joint_recorder
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 # install 설정
 install(DIRECTORY include/ DESTINATION include)
