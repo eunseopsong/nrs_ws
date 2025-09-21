@@ -18,7 +18,8 @@ int main(int argc, char **argv)
 
     // === Path Generation ===
     // callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
-    callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl";
+    // callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl";
+    callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/concave_surface_2.stl";
     callback_handler.geodesic_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt";
     callback_handler.geodesic_waypoints_pub =
         node->create_publisher<nrs_path2::msg::Waypoints>("geodesic_path", 10);
