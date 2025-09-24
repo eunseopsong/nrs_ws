@@ -389,6 +389,8 @@ public:
                               // "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt");
                               "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
 
+
+                              
     rpy_file_path_      = this->declare_parameter<std::string>("rpy_output_path",
                               "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints_RPY.txt");   // 필요시 수정
     visual_file_path_   = this->declare_parameter<std::string>("visual_output_path",
