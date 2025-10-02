@@ -36,7 +36,7 @@ public:
     // --- Parameters ---
     txt_path_       = this->declare_parameter<std::string>(
                         "txt_path",
-                        "/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt");
+                        "/home/eunseop/nrs_ws/src/rtde_handarm2/data/hand_g_recording.txt");
     hz_             = this->declare_parameter<double>("hz", 100.0);
     use_degrees_    = this->declare_parameter<bool>("use_degrees", false);
     tool_z_         = this->declare_parameter<double>("tool_z", 0.239); // ✅ EE +Z 기준 TCP 오프셋(m)
