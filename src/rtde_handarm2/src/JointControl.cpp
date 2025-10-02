@@ -709,8 +709,8 @@ if (control_mode == 3) {
 
   // 🔧 스핀들 보정값 (TCP가 실제로 Z축으로 이만큼 내려가 있음)
 
-  constexpr double TOOL_Z = -0.35; // ntact_force = 0N (for concave test)
-  // constexpr double TOOL_Z = -0.269; // [m] contact_force = 0N (success in convex & concave surface)
+  // constexpr double TOOL_Z = -0.35; // ntact_force = 0N (for concave test)
+  constexpr double TOOL_Z = -0.269; // [m] contact_force = 0N (success in convex & concave surface)
   // constexpr double TOOL_Z = -0.265; // [m] contact_force = 0N
   // constexpr double TOOL_Z = -0.2615; // ntact_force = 0N
   // constexpr double TOOL_Z = -0.25; // [m] contact_force = 0N
