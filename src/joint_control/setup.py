@@ -26,7 +26,8 @@ setup(
             'fk_control = src.fk_control:main',
             'ik_control = src.ik_control:main',
             'pub_effort = src.pub_effort:main',
-            'sub_joint_states = src.sub_joint_states:main'
+            'sub_joint_states = src.sub_joint_states:main',
+            'ur10e_gain_tuner_node = src.ur10e_gain_tuner_node:main',
         ],
     },
 )
