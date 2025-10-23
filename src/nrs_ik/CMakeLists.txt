@@ -69,6 +69,13 @@ ament_target_dependencies(interactive_ik_node rclcpp sensor_msgs)
 target_link_libraries(interactive_ik_node ur10e_kinematics)
 install(TARGETS interactive_ik_node DESTINATION lib/${PROJECT_NAME})
 
+add_executable(ik_control src/ik_control.cpp)
+ament_target_dependencies(ik_control rclcpp sensor_msgs)
+target_link_libraries(ik_control ur10e_kinematics)
+
+# 개별 설치 (원하면 아래가 아니라 Install 묶음에 포함해도 됨)
+install(TARGETS ik_control DESTINATION lib/${PROJECT_NAME})
+
 
 # ------------------------------
 # Install
@@ -80,6 +87,7 @@ install(TARGETS
   txt_trajectory_executor
   file_reader_node
   txt_ik_executor
+  ik_control
   DESTINATION lib/${PROJECT_NAME}
 )
 
