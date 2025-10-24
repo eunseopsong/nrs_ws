@@ -1,8 +1,8 @@
-#include "rtde_handarm2/UR10/Forward.h"
+#include "rtde_handarm2/UR10/ur10e_forward.h"
 
 using Eigen::Matrix4d;
 
-Eigen::Matrix4d Forward(const Eigen::VectorXd& q, double tcp_offset)
+Eigen::Matrix4d ur10e_forward(const Eigen::VectorXd& q, double tcp_offset)
 {
     // ---- Base → EE ----
     CArm arm;
