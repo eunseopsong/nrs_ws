@@ -594,6 +594,225 @@ void JointControl::ControlForce()
 }
 
 
+bool JointControl::InitMove(double dt_s)
+{
+    // --- 내부 상태 ---
+    static bool active = false;
+    static bool initialized = false;
+    static double elapsed = 0.0, duration = 0.0;
+    static Eigen::Vector3d start_xyz, goal_xyz_raw;
+    static Eigen::Matrix3d start_rot, goal_rot;
+
+    constexpr double TOOL_Z = 0.248;
+
+    // --- 최초 진입 시 ---
+    if (!initialized) {
+        // playback 파일 열기
+        if (!Hand_G_playback) {
+            auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
+            if (!hand_path.empty())
+                Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
+        }
+        if (!Hand_G_playback) {
+            RCLCPP_ERROR(node_->get_logger(), "[PB] playback file not opened.");
+            ctrl.store(0, std::memory_order_release);
+            return false;
+        }
+
+        // 첫 행 읽기
+        float x,y,z,r,p,yw,fx,fy,fz;
+        char buf[2048];
+        while (std::fgets(buf, sizeof(buf), Hand_G_playback)) {
+            if (buf[0]=='#' || std::isspace(buf[0])) continue;
+            int n = std::sscanf(buf,"%f %f %f %f %f %f %f %f %f",&x,&y,&z,&r,&p,&yw,&fx,&fy,&fz);
+            if (n==9) break;
+        }
+
+        // init move 설정
+        start_xyz << RArm.xc(0), RArm.xc(1), RArm.xc(2);
+        goal_xyz_raw << x, y, z;
+        start_rot = RArm.Tc.block<3,3>(0,0);
+        Eigen::Vector3d goal_rpy(r,p,yw);
+        AKin.EulerAngle2Rotation(goal_rot, goal_rpy);
+
+        double v = 0.05;
+        double dist = (goal_xyz_raw - start_xyz).norm();
+        duration = std::max(3.0, dist / std::max(1e-6, v));
+        elapsed = 0.0;
+
+        initialized = true;
+        active = true;
+
+        std::rewind(Hand_G_playback);
+        set_status(message_status, ST_path_gen_done);
+        return true; // 첫 루프는 여기서 종료
+    }
+
+    // --- 활성 상태 ---
+    if (active) {
+        elapsed += dt_s;
+        double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
+
+        Eigen::Vector3d xyz_raw = (1.0 - alpha)*start_xyz + alpha*goal_xyz_raw;
+        Desired_XYZ = xyz_raw;
+
+        Eigen::Quaterniond q0(start_rot), q1(goal_rot);
+        if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0;
+        Eigen::Quaterniond q = q0.slerp(alpha, q1).normalized();
+        Eigen::Matrix3d Desired_rot = q.toRotationMatrix();
+        Desired_RPY = Desired_rot.eulerAngles(0,1,2);
+
+        Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
+        Desired_XYZ_cmd(2) -= TOOL_Z;
+
+        RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ_cmd(0),
+                    Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ_cmd(1),
+                    Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ_cmd(2),
+                    0,0,0,1;
+#if TCP_standard==0
+        AKin.InverseK_min(&RArm);
+#else
+        AKin.Ycontact_InverseK_min(&RArm);
+#endif
+        joint_state_.header.stamp = node_->now();
+        for (int i=0;i<6;i++) joint_state_.position[i] = RArm.qd(i);
+        joint_commands_pub_->publish(joint_state_);
+
+        if (alpha >= 1.0 - 1e-6) {
+            active = false;
+            initialized = true;
+            printf("[PB][INITMOVE] done. start following TXT lines.\n");
+        }
+        return true;
+    }
+    return false;
+}
+
+
+bool JointControl::PathFollow(double dt_s)
+{
+    static bool active = true;
+    if (!active)
+        return false;
+
+    // playback 파일 확인
+    if (!Hand_G_playback) {
+        RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
+        ctrl.store(0, std::memory_order_release);
+        set_status(message_status, "Playback file closed");
+        return false;
+    }
+
+    // TXT 파일에서 9개 값 읽기 (x y z r p y fx fy fz)
+    float X, Y, Z, Roll, Pitch, Yaw, Fx, Fy, Fz;
+    int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
+                           &X, &Y, &Z, &Roll, &Pitch, &Yaw, &Fx, &Fy, &Fz);
+
+    // 파일 끝 (EOF) 처리
+    if (reti != 9) {
+        std::fclose(Hand_G_playback);
+        Hand_G_playback = nullptr;
+        active = false;
+
+        // 다음 단계(ReturnHomePose) 준비
+        return_active_ = true;
+        return_elapsed_ = 0.0;
+        return_duration_ = 4.0;
+        for (int i = 0; i < 6; ++i)
+            return_start_q_(i) = RArm.qc(i);
+
+        printf("[PB] End of file. Start return-to-home.\n");
+        return false;
+    }
+
+    // ---- Pose 및 Force 데이터 갱신 ----
+    Desired_XYZ << (double)X, (double)Y, (double)Z;
+    Desired_RPY << (double)Roll, (double)Pitch, (double)Yaw;
+    Contact_Rot_force << (double)Fx, (double)Fy, (double)Fz;
+
+    // ---- IK 변환 ----
+    Eigen::Matrix3d Desired_rot;
+    AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
+
+    Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
+    Desired_XYZ_cmd(2) -= 0.248; // TOOL_Z 오프셋
+
+    RArm.Td << Desired_rot(0, 0), Desired_rot(0, 1), Desired_rot(0, 2), Desired_XYZ_cmd(0),
+                Desired_rot(1, 0), Desired_rot(1, 1), Desired_rot(1, 2), Desired_XYZ_cmd(1),
+                Desired_rot(2, 0), Desired_rot(2, 1), Desired_rot(2, 2), Desired_XYZ_cmd(2),
+                0, 0, 0, 1;
+#if TCP_standard == 0
+    AKin.InverseK_min(&RArm);
+#else
+    AKin.Ycontact_InverseK_min(&RArm);
+#endif
+
+    // ---- Joint 명령 퍼블리시 ----
+    joint_state_.header.stamp = node_->now();
+    for (int i = 0; i < 6; ++i)
+        joint_state_.position[i] = RArm.qd(i);
+    joint_commands_pub_->publish(joint_state_);
+
+    return true;
+}
+
+
+
+
+
+bool JointControl::ReturnHomePose(double dt_s)
+{
+    static bool active = false;
+    static double elapsed = 0.0;
+    static double duration = 0.0;
+    static Vector6d start_q;
+
+    static const Vector6d HOME_Q = (Vector6d() <<
+        0.0, -M_PI / 2.0, -M_PI / 2.0, -M_PI / 2.0, +M_PI / 2.0, 0.0).finished();
+
+    // --- 홈 복귀 활성화 ---
+    if (return_active_ && !active) {
+        active = true;
+        elapsed = 0.0;
+        duration = return_duration_;
+        start_q = return_start_q_;
+    }
+
+    // --- 홈 복귀 중 ---
+    if (active) {
+        elapsed += dt_s;
+        double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
+
+        Vector6d q_cmd = (1.0 - alpha) * start_q + alpha * HOME_Q;
+        for (int i = 0; i < 6; ++i)
+            RArm.qd(i) = q_cmd(i);
+
+        joint_state_.header.stamp = node_->now();
+        for (int i = 0; i < 6; ++i)
+            joint_state_.position[i] = RArm.qd(i);
+        joint_commands_pub_->publish(joint_state_);
+
+        // --- 완료 처리 ---
+        if (alpha >= 1.0 - 1e-6) {
+            active = false;
+            return_active_ = false;
+            printf("[PB] Return-to-home done.\n");
+            ctrl.store(0, std::memory_order_release);
+            set_status(message_status, "Playback finished");
+        }
+        return true;
+    }
+
+    // --- 비활성 상태 ---
+    return false;
+}
+
+
+
+
+
+
+
 
 
 
@@ -794,516 +1013,43 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-// 3) Posture/Power playback control mode
-if (control_mode == 3) {
-  // ====== 이 블록 안에서만 유지되는 상태들 (콜백 간 유지) ======
-  static bool pb_inited = false;            // ctrl==3 최초 진입 처리용
-  static bool initmove_active = false;      // InitMove 단계 활성화
-  static double initmove_elapsed = 0.0;     // [s]
-  static double initmove_duration = 0.0;    // [s]
-  static Eigen::Vector3d init_start_xyz, init_goal_xyz_raw; // 🔸 raw(txt) 기준 목표
-  static Eigen::Matrix3d init_start_rot, init_goal_rot;
-
-  // 🔧 스핀들 보정값 (TCP가 실제로 Z축으로 이만큼 내려가 있음)
-  constexpr double TOOL_Z = -0.248; // [m] contact_force = 19N (success in flat surface)
 
 
-  // ====== (추가) 재생 종료 후 홈 복귀 상태 ======
-  static bool return_active = false;            // TXT 끝난 뒤 홈 복귀 중?
-  static double return_elapsed = 0.0;           // [s]
-  static double return_duration = 0.0;          // [s]
-  static Vector6d return_start_q;               // 시작 관절각
-  static const Vector6d HOME_Q = (Vector6d() <<
-      0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0).finished(); // 0 -90 -90 -90 90 0 [rad]
+  // ===================================================
+  // 3) Posture / Power Playback Control Mode
+  // ===================================================
+  if (control_mode == 3) {
+      // ✅ 안전 초기화
+      if (Desired_XYZ.size() != 3) Desired_XYZ.setZero(3);
+      if (Desired_RPY.size() != 3) Desired_RPY.setZero(3);
+      if (Contact_Rot_force.size() != 3) Contact_Rot_force.setZero(3);
 
-  // ====== 최초 진입시 설정 (pre_control_mode != control_mode) ======
-  if (pre_control_mode != control_mode) {
-    pb_inited = true;
-    initmove_active = false;
-    initmove_elapsed = 0.0;
-    initmove_duration = 0.0;
+      // ✅ 순서: InitMove → PathFollow → ReturnHomePose
+      if (InitMove(dt_s)) {
+          pre_ctrl.store(control_mode, std::memory_order_relaxed);
+          return;
+      }
 
-    return_active = false;       // 복귀 상태 초기화
-    return_elapsed = 0.0;
-    return_duration = 0.0;
+      if (PathFollow(dt_s)) {
+          pre_ctrl.store(control_mode, std::memory_order_relaxed);
+          return;
+      }
 
-    // 파일 핸들 확인
-    if (!Hand_G_playback) {
-      auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
-      if (!hand_path.empty())
-        Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
-    }
-    if (!Hand_G_playback) {
-      RCLCPP_ERROR(node_->get_logger(), "[PB] playback file not opened.");
-      ctrl.store(0, std::memory_order_release);
-      set_status(message_status, "Playback file not opened");
+      ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
-    }
-
-    // 파일에서 **첫 유효 라인(9 float)** 읽기
-    auto read_first_valid_9f = [&](FILE* fp, float& x,float& y,float& z,
-                                   float& r,float& p,float& yaw,
-                                   float& fx,float& fy,float& fz)->bool {
-      std::rewind(fp);
-      char buf[2048];
-      while (std::fgets(buf, sizeof(buf), fp)) {
-        bool only_space=true;
-        for (char* t=buf; *t; ++t){
-          if(!std::isspace((unsigned char)*t)){ only_space=false; break; }
-        }
-        if (only_space || buf[0]=='#') continue;
-
-        float tx,ty,tz,tr,tp,tw,tfx,tfy,tfz;
-        int n = std::sscanf(buf, " %f %f %f %f %f %f %f %f %f ",
-                            &tx,&ty,&tz,&tr,&tp,&tw,&tfx,&tfy,&tfz);
-        if (n==9){
-          x=tx; y=ty; z=tz; r=tr; p=tp; yaw=tw; fx=tfx; fy=tfy; fz=tfz;
-          return true;
-        }
-      }
-      return false;
-    };
-
-    float fx,fy,fz, x,y,z,r,p,yw;
-    if (!read_first_valid_9f(Hand_G_playback, x,y,z, r,p,yw, fx,fy,fz)) {
-      RCLCPP_ERROR(node_->get_logger(), "[PB] no valid first line in txt.");
-      ctrl.store(0, std::memory_order_release);
-      set_status(message_status, "Playback txt invalid");
-      pre_ctrl.store(control_mode, std::memory_order_relaxed);
-      return;
-    }
-
-    // InitMove 목표/시작 설정
-    init_start_xyz = Eigen::Vector3d(RArm.xc(0), RArm.xc(1), RArm.xc(2));
-    init_goal_xyz_raw  = Eigen::Vector3d((double)x,(double)y,(double)z); // 🔸 raw(txt)
-
-    // 회전행렬 준비 (start는 현재 Tc에서, goal은 RPY로부터)
-    init_start_rot = RArm.Tc.block<3,3>(0,0);
-    Eigen::Vector3d goal_rpy; goal_rpy << (double)r, (double)p, (double)yw;
-    AKin.EulerAngle2Rotation(init_goal_rot, goal_rpy);
-
-    // 이동시간 계산 (선형거리/속도, 최소 3초)
-    double Linear_travel_vel = 0.05; // m/s
-    double dist = (init_goal_xyz_raw - init_start_xyz).norm(); // 🔸 raw 기준 거리
-    initmove_duration = std::max(3.0, dist / std::max(1e-6, Linear_travel_vel));
-    initmove_active = true;
-    initmove_elapsed = 0.0;
-
-#if Adm_mode == 1
-    for(int i=0;i<6;i++) {
-      // Isaac에서는 접촉모멘트 원자료가 없으므로 0 사용
-      if(i<3) Cadmit_playback[i].adm_1D_init((double)0, 0.0, dt_s);
-      else    Cadmit_playback[i].adm_1D_init((double)0, 0.0, dt_s);
-    }
-#endif
-
-    // Contact region 파라미터 초기화
-    KdToZero_flag = false;
-    ZeroToKd_flag = false;
-    KTZ_Fd_flag = false;
-    Kd_change_dist = 0.005;       // Kd changed distance, Unit: m
-    KTZ_Kd_init = Power_PB.PRamK[2]; // Save the initial contact stiffness
-    KTZ_update_par = Power_PB.Ts/2;  // Kd to Z, Z to Kd upadte parameter (half-Ts is proper)
-    KTZ_Kd_threshold = 3;
-    KTZ_Kd_h = KTZ_Kd_init;
-
-    // Contact region 계산 (discrete 기록 파일 사용)
-    {
-      auto Discre_P_recording_path = yaml_get_path(NRS_recording, "Discre_P_recording", node_->get_logger());
-      if (!Discre_P_recording_path.empty()) {
-        FILE* fp_cr = std::fopen(Discre_P_recording_path.c_str(),"rt");
-        if (fp_cr) {
-          int CR_reti = 0;
-          int CR_reti_counter = 0;
-          double CR_LD_histoty[100] = {0,};
-          while(true) {
-            CR_reti = std::fscanf(fp_cr, "%f %f %f %f %f %f %f\n",
-                      &LD_X, &LD_Y, &LD_Z, &LD_Roll, &LD_Pitch, &LD_Yaw, &LD_resi);
-            if (CR_reti == EOF || CR_reti == -1) break;
-            CR_LD_histoty[CR_reti_counter] = LD_Z;
-            if(CR_reti_counter == 1) {CR_start<< LD_X,LD_Y,LD_Z;}
-            CR_reti_counter++;
-            if (CR_reti_counter >= 100) break;
-          }
-          std::fclose(fp_cr);
-          if (CR_reti_counter >= 3) {
-            CR_startZP = CR_LD_histoty[1];
-            CR_endZP = CR_LD_histoty[CR_reti_counter-3]; // Do not change the num 3!!
-          } else {
-            CR_startZP = init_goal_xyz_raw(2);
-            CR_endZP = init_goal_xyz_raw(2);
-          }
-          printf("CR_startZP : %f \n",CR_startZP);
-          printf("CR_endZP   : %f \n",CR_endZP);
-        }
-      }
-    }
-
-    // DS / Fuzzy / 3-step FAAC 보조 변수 초기화
-    if(Contact_Fcon_mode == 1) {
-      DB_AVA_phi = 0;
-      DB_AVA_Dd_init = Power_PB.PRamD[2]; // Save the initial Z-damping
-      DB_AVA_Xc = Power_PB.PXc_0(2);
-      DB_AVA_Xc_pre = Power_PB.PXc_0(2);
-      DB_AVA_Xc_dot = 0;
-      // Step 0 : Update rate calculation of damping variation
-      DB_AVA_sigma = DB_AVA_Rd*(dt_s*Power_PB.PRamD[2])/((double)1.0 + dt_s*Power_PB.PRamD[2]);
-    }
-    else if(Contact_Fcon_mode == 2) {
-      DB_AVA_phi = 0;
-      DB_AVA_Kd_init = Power_PB.PRamK[2]; // Save the initial Z-stiffness
-      DB_AVA_Xc = Power_PB.PXc_0(2);
-      DB_AVA_Xr = Power_PB.PXc_0(2);
-      DB_AVA_sigma = 0.5;
-    }
-    else if(Contact_Fcon_mode == 3) {
-      DB_AVA_phi = 0;
-      DB_AVA_Kd_init = Power_PB.PRamK[2];
-      DB_AVA_Xc = Power_PB.PXc_0(2);
-      DB_AVA_Xr = Power_PB.PXc_0(2);
-      Fuzzy_F_error = 0;
-      Fuzzy_F_Perror = 0;
-      Fuzzy_F_error_dot = 0;
-      DB_AVA_sigma = 0.5; // Sigma initialization
-    }
-    else if(Contact_Fcon_mode == 4) {
-      DB_AVA_Xc = Power_PB.PXc_0(2);
-      DB_AVA_Xr = Power_PB.PXc_0(2);
-      DB_AVA_X  = Power_PB.PXc_0(2);
-      FAAC3step.FAAC_Init();
-    }
-
-    // 디버그 파일 (선택)
-    auto test_path = yaml_get_path(NRS_recording, "test_path", node_->get_logger());
-    if (path_recording_pos) { std::fclose(path_recording_pos); path_recording_pos = nullptr; }
-    if (!test_path.empty()) {
-      ensure_parent_dir(test_path, node_->get_logger());
-      path_recording_pos = std::fopen(test_path.c_str(), "wt");
-      if (!path_recording_pos) {
-        RCLCPP_WARN(node_->get_logger(), "open for write failed: '%s' (%s)",
-                    test_path.c_str(), std::strerror(errno));
-      }
-    }
-
-    set_status(message_status, ST_path_gen_done);
   }
 
-  // ====== 실행 ======
-  if (!pb_inited) {
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 3000, "[PB] not initialized.");
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
-  }
 
-  // ---------- (추가) TXT 재생 종료 후 '홈 복귀' 처리 ----------
-  if (return_active) {
-    return_elapsed += dt_s;
-    double alpha = std::clamp(return_elapsed / std::max(1e-6, return_duration), 0.0, 1.0);
 
-    // 관절 선형보간 (슬로우 무빙)
-    Vector6d q_cmd = (1.0 - alpha) * return_start_q + alpha * HOME_Q;
-    for (int i = 0; i < 6; ++i) RArm.qd(i) = q_cmd(i);
 
-    // 퍼블리시
-    joint_state_.header.stamp = node_->now();
-    for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
-    joint_commands_pub_->publish(joint_state_);
 
-    if (alpha >= 1.0 - 1e-6) {
-      return_active = false;
-      printf("[PB] Return-to-home done.\n");
-      ctrl.store(0, std::memory_order_release);
-      set_status(message_status, "Playback finished");
-    }
+    // 그 외
+    speedmode = 0;
+    RArm.qd = RArm.qc;
+    RArm.qt = RArm.qc;
+    RArm.dqc << 0,0,0,0,0,0;
+    pause_cnt=0;
 
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
   }
-  // -------------------------------------------------------
-
-  // 3-1) InitMove: 현재 → txt 첫 행, (XYZ: 선형보간 / R: SLERP)
-  if (initmove_active) {
-    initmove_elapsed += dt_s;
-    double alpha = std::clamp(initmove_elapsed / std::max(1e-6, initmove_duration), 0.0, 1.0);
-
-    // 위치: 선형 보간 (🔸 raw로 보간하고 로그에도 raw를 사용)
-    Eigen::Vector3d xyz_raw = (1.0 - alpha) * init_start_xyz + alpha * init_goal_xyz_raw;
-    Desired_XYZ << xyz_raw(0), xyz_raw(1), xyz_raw(2);
-
-    // 자세: 쿼터니언 SLERP (최단 경로)
-    Eigen::Quaterniond q0(init_start_rot);
-    Eigen::Quaterniond q1(init_goal_rot);
-    if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0; // 최단 경로 강제
-    Eigen::Quaterniond q = q0.slerp(alpha, q1).normalized();
-    Eigen::Matrix3d Desired_rot = q.toRotationMatrix();
-
-    // (로그/프린트용) 보간된 RPY → Desired_RPY도 동기화 (raw)
-    Eigen::Vector3d rpy_print = Desired_rot.eulerAngles(0,1,2);
-    Desired_RPY << rpy_print[0], rpy_print[1], rpy_print[2];
-
-    // ✅ 디버깅: TXT 기준 목표값 출력
-    printf("[PB][INITMOVE] alpha=%.3f | Des_XYZ(raw):(%.4f %.4f %.4f) Des_RPY(raw):(%.4f %.4f %.4f)\n",
-      alpha, Desired_XYZ(0),Desired_XYZ(1),Desired_XYZ(2),
-      Desired_RPY(0),Desired_RPY(1),Desired_RPY(2));
-
-    // IK용 명령 좌표 (Z 오프셋 적용)
-    Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-    Desired_XYZ_cmd(2) -= TOOL_Z;
-
-    // IK & 커맨드
-    RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ_cmd(0),
-                Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ_cmd(1),
-                Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ_cmd(2),
-                0,0,0,1;
-#if TCP_standard == 0
-    AKin.InverseK_min(&RArm);
-#else
-    AKin.Ycontact_InverseK_min(&RArm);
-#endif
-    joint_state_.header.stamp = node_->now();
-    for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
-    joint_commands_pub_->publish(joint_state_);
-
-    // 종료 판정
-    if (alpha >= 1.0 - 1e-6) {
-      initmove_active = false;
-      initmove_elapsed = 0.0;
-      // 본격 추종을 위해 파일을 처음으로 되감기
-      std::rewind(Hand_G_playback);
-      printf("[PB][INITMOVE] done. start following TXT lines.\n");
-    }
-
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
-  }
-
-  // 3-2) TXT 라인 추종 (라인 단위로 그대로 명령)
-  if (!Hand_G_playback) {
-    RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
-    ctrl.store(0, std::memory_order_release);
-    set_status(message_status, "Playback file closed");
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
-  }
-
-  int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
-                         &LD_X,&LD_Y,&LD_Z,&LD_Roll,&LD_Pitch,&LD_Yaw,
-                         &LD_CFx,&LD_CFy,&LD_CFz);
-  if (reti != 9) {
-    // 파일 끝 or 에러 → 홈 복귀 시퀀스 시작
-    if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
-    printf("[PB] End of file (reti=%d). Start return-to-home.\n", reti);
-
-    return_active   = true;
-    return_elapsed  = 0.0;
-    return_duration = 4.0;            // 천천히 4초에 걸쳐 복귀 (필요시 조정)
-    for (int i = 0; i < 6; ++i) return_start_q(i) = RArm.qc(i);
-
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
-  }
-
-  // TXT의 1~3열은 위치, 4~6열은 RPY → 그대로 반영 (🔸 raw 저장: 로그용/모니터링용)
-  Desired_XYZ << (double)LD_X, (double)LD_Y, (double)LD_Z;
-  Desired_RPY << (double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw;
-
-  // ✅ 디버깅: 현재 TXT 행의 목표값을 즉시 출력
-  // printf("Des_XYZ(raw): %.3f %.3f %.3f | Des_RPY(raw): %.3f %.3f %.3f\n",
-  //        Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2),
-  //        Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
-
-  // Isaac에서는 접촉 힘을 Fz 단일 값으로 사용: 나머지 성분은 0
-  Contact_Rot_force(0) = 0.0;
-  Contact_Rot_force(1) = 0.0;
-  Contact_Rot_force(2) = contact_force; // <- /contact/force_magnitude
-
-  Contact_Rot_moment(0) = 0.0;
-  Contact_Rot_moment(1) = 0.0;
-  Contact_Rot_moment(2) = 0.0;
-
-  // (필요: RPY → 회전행렬)
-  Eigen::Matrix3d Desired_rot;
-  AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
-
-  // ===== Playback_mode / Contact_Fcon_mode 분기 (원본 스타일) =====
-#if Playback_mode == 0
-  // --- Position playback mode (+ 1D admittance) ---
-  for(int i=0;i<6;i++) {
-    if(i<3) Desired_XYZ(i)   = Cadmit_playback[i].adm_1D_control((double)Desired_XYZ(i),   (double)0, (double)Contact_Rot_force(i));
-    else    Desired_RPY(i-3) = Cadmit_playback[i].adm_1D_control((double)Desired_RPY(i-3), (double)0, (double)Contact_Rot_moment(i-3));
-  }
-  // RPY가 변했을 수 있으니 다시 회전행렬 계산
-  AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
-
-#elif Playback_mode == 1
-  // --- Power playback mode ---
-  if((Contact_Fcon_mode == 0) || (Contact_Fcon_mode == 1)) {
-    // ===== (예시) 가변 강성 Kd->0 / 0->Kd 로직 (원본 방식)
-#if 1
-    // For 2024 NIST 스타일 유지
-    if(KdToZero_flag == true) {
-      CR_start_dist = RArm.xc-CR_start;
-      if(CR_start_dist.norm() <= fabs(Kd_change_dist)) {
-        Power_PB.PRamK[2] = Power_PB.PRamK[2]*exp(-KTZ_update_par* (CR_start_dist.norm()+fabs(Kd_change_dist))/(CR_start_dist.norm()));
-      }
-      if((Power_PB.PRamK[2] <= KTZ_Kd_threshold)) {
-        Power_PB.PRamK[2] = 0;
-        KTZ_Kd_h = KTZ_Kd_init;
-        KdToZero_flag = false;
-        ZeroToKd_flag = true;
-        KTZ_Fd_flag = false;
-      }
-    }
-    if((KTZ_Fd_flag == false) && (PPB_RTinput.PFd >= 0.01)) {KTZ_Fd_flag = true;}
-    if((ZeroToKd_flag == true) && (PPB_RTinput.PFd < 0.01) && (KTZ_Fd_flag == true)) {
-      CR_start_dist = RArm.xc-CR_start;
-      if(CR_start_dist.norm() <= fabs(Kd_change_dist)) {
-        KTZ_Kd_h = KTZ_Kd_h*exp(-KTZ_update_par* CR_start_dist.norm()/(CR_start_dist.norm()+fabs(Kd_change_dist)));
-        Power_PB.PRamK[2] = KTZ_Kd_init - KTZ_Kd_h;
-      }
-      if(fabs(KTZ_Kd_init-Power_PB.PRamK[2]) <= KTZ_Kd_threshold) {
-        Power_PB.PRamK[2] = KTZ_Kd_init;
-        KdToZero_flag = false;
-        ZeroToKd_flag = false;
-        KTZ_Fd_flag = false;
-      }
-    }
-#endif
-    // ===== (Contact_Fcon_mode == 1) DS 기반 가변 감쇠 =====
-    if(Contact_Fcon_mode == 1) {
-      DB_AVA_Xc = Power_PB.PU3.transpose()*Power_PB.PXc_0;
-      DB_AVA_Xc_dot = (DB_AVA_Xc - DB_AVA_Xc_pre)/dt_s;
-      DB_AVA_Xc_pre = DB_AVA_Xc;
-      if(PPB_RTinput.PFd >= 0.01) {
-        DB_AVA_phi += DB_AVA_sigma*(PPB_RTinput.PFd - PPB_surfN_Fext)/DB_AVA_Dd_init;
-        if (fabs(DB_AVA_Xc_dot) > 1e-9)
-          Power_PB.PRamD[2] = DB_AVA_Dd_init + DB_AVA_phi*DB_AVA_Dd_init/DB_AVA_Xc_dot;
-
-        if(Power_PB.PRamD[2] >= DB_AVA_Dsature[1]) Power_PB.PRamD[2] = DB_AVA_Dsature[1];
-        else if(Power_PB.PRamD[2] <= DB_AVA_Dsature[0]) Power_PB.PRamD[2] = DB_AVA_Dsature[0];
-      } else {
-        Power_PB.PRamD[2] = DB_AVA_Dd_init;
-      }
-    }
-  }
-  else if(Contact_Fcon_mode == 2) {
-    // DS 기반 가변 강성
-    DB_AVA_Xc = Power_PB.PU3.transpose()*Power_PB.PXc_0;
-    DB_AVA_Xr = Power_PB.PU3.transpose()*Desired_XYZ;    // 🔸 raw 사용 (원래 코드 유지)
-    if((PPB_RTinput.PFd >= 0.01) || (Contact_Rot_force.norm() >= 2.0)) {
-      DB_AVA_phi += DB_AVA_sigma*(PPB_RTinput.PFd - PPB_surfN_Fext)/DB_AVA_Kd_init;
-      if (fabs(DB_AVA_Xc - DB_AVA_Xr) > 1e-9)
-        Power_PB.PRamK[2] = DB_AVA_Kd_init + DB_AVA_phi*DB_AVA_Kd_init/(DB_AVA_Xc - DB_AVA_Xr);
-
-      if(Power_PB.PRamK[2] >= DB_AVA_Ksature[1]) Power_PB.PRamK[2] = DB_AVA_Ksature[1];
-      else if(Power_PB.PRamK[2] <= DB_AVA_Ksature[0]) Power_PB.PRamK[2] = DB_AVA_Ksature[0];
-    }
-
-    // 모니터링 메시지 (원본 스타일)
-    std::vector<double> Mon1_input_data = {Power_PB.PRamM[2], Power_PB.PRamD[2], Power_PB.PRamK[2]};
-    std::vector<double> Mon2_input_data = {PPB_RTinput.PFd, PPB_surfN_Fext};
-    std::string Mon1_description = "Mass, Damping, Stiffness";
-    std::string Mon2_description = "Contact force, Surface normal force";
-    AdaptiveK_msg_->Mon1_publish(Mon1_input_data,Mon1_description,true);
-    AdaptiveK_msg_->Mon2_publish(Mon2_input_data,Mon2_description,true);
-  }
-  else if(Contact_Fcon_mode == 3) {
-    // 퍼지 기반 가변 강성
-    DB_AVA_Xc = Power_PB.PU3.transpose()*Power_PB.PXc_0; // Surf. normal
-    DB_AVA_Xr = Power_PB.PU3.transpose()*Desired_XYZ;    // Surf. normal (raw 유지)
-    Fuzzy_F_error = PPB_RTinput.PFd - PPB_surfN_Fext;
-    Fuzzy_F_error_dot = (Fuzzy_F_error - Fuzzy_F_Perror)/dt_s;
-    Fuzzy_F_Perror = Fuzzy_F_error;
-
-    if((PPB_RTinput.PFd >= 0.01) || (Contact_Rot_force.norm() >= 2.0)) {
-      DB_AVA_sigma += FAK.FAAC_DelSigma_Cal(Fuzzy_F_error,Fuzzy_F_error_dot);
-      DB_AVA_Kd_init += FAK.FAAC_DelK_Cal(Fuzzy_F_error,Fuzzy_F_error_dot);
-      // saturation
-      if(DB_AVA_Kd_init >= DB_AVA_Ksature[1]) DB_AVA_Kd_init = DB_AVA_Ksature[1];
-      else if(DB_AVA_Kd_init <= 10.0)         DB_AVA_Kd_init = 10.0;
-      if(DB_AVA_sigma >= 1.0) DB_AVA_sigma = 1.0;
-      else if(DB_AVA_sigma <= 0.001) DB_AVA_sigma = 0.001;
-
-      DB_AVA_phi += DB_AVA_sigma*(PPB_RTinput.PFd - PPB_surfN_Fext)/DB_AVA_Kd_init;
-      if (fabs(DB_AVA_Xc - DB_AVA_Xr) > 1e-9)
-        Power_PB.PRamK[2] = DB_AVA_Kd_init + DB_AVA_phi*DB_AVA_Kd_init/(DB_AVA_Xc - DB_AVA_Xr);
-
-      if(Power_PB.PRamK[2] >= DB_AVA_Ksature[1]) Power_PB.PRamK[2] = DB_AVA_Ksature[1];
-      else if(Power_PB.PRamK[2] <= DB_AVA_Ksature[0]) Power_PB.PRamK[2] = DB_AVA_Ksature[0];
-    }
-  }
-  else if(Contact_Fcon_mode == 4) {
-    // Three-Step FAAC (MDK)
-    DB_AVA_Xc = Power_PB.PU3.transpose()*Power_PB.PXc_0; // Surf. normal
-    DB_AVA_Xr = Power_PB.PU3.transpose()*Desired_XYZ;    // Surf. normal (raw 유지)
-    DB_AVA_X  = Power_PB.PU3.transpose()*PPB_RTinput.PX; // Surf. normal
-
-    auto TSFAAC_MDK = FAAC3step.FAAC_MDKob_RUN(Power_PB.PTankE, PPB_surfN_Fext, PPB_RTinput.PFd, DB_AVA_Xc, DB_AVA_X);
-    Power_PB.PRamM[2] = TSFAAC_MDK.Mass;
-    Power_PB.PRamD[2] = TSFAAC_MDK.Damping;
-    Power_PB.PRamK[2] = TSFAAC_MDK.Stiffness;
-
-    if(PPB_RTinput.PFd >= 0.01) {
-      std::vector<double> Mon1_input_data = {TSFAAC_MDK.Mass, TSFAAC_MDK.Damping, TSFAAC_MDK.Stiffness};
-      std::vector<double> Mon2_input_data = {FAAC3step.FAAC_Ferr, FAAC3step.FAAC_FDot_Err, FAAC3step.FAAC_Epsilon, FAAC3step.FAAC_XeSTD};
-      std::vector<double> Mon3_input_data = {PPB_RTinput.PFd, PPB_surfN_Fext};
-      std::string Mon1_description = "Mass, Damping, Stiffness";
-      std::string Mon2_description = "Force error, Force error dot, Epsilon, XeSTD";
-      std::string Mon3_description = "Contact force, Surface normal force";
-      FAAC3step_msg_->Mon1_publish(Mon1_input_data,Mon1_description,true);
-      FAAC3step_msg_->Mon2_publish(Mon2_input_data,Mon2_description,true);
-      FAAC3step_msg_->Mon3_publish(Mon3_input_data,Mon3_description,true);
-    }
-  }
-  else {
-    printf("Wrong control mode was selected \n");
-    printf("Check the 'NRS_Fcon_setting.yaml' \n");
-    //// raiseFlag(0); // Stop the servo & program
-  }
-#endif // Playback_mode
-
-  // ===== IK & 커맨드 (원본 흐름 유지 + Z 보정만 적용) =====
-  // IK용 명령 좌표 (Z 오프셋 적용)
-  Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-  Desired_XYZ_cmd(2) -= TOOL_Z;
-
-  RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ_cmd(0),
-              Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ_cmd(1),
-              Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ_cmd(2),
-              0,0,0,1;
-#if TCP_standard == 0
-  AKin.InverseK_min(&RArm);
-#else
-  AKin.Ycontact_InverseK_min(&RArm);
-#endif
-
-  // (선택) 기록
-  if (path_recording_pos) {
-    // fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
-    // PPB_RTinput.PFd, (double)ftS2(2),
-    // Power_PB.PTankE, Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
-  }
-
-  // 퍼블리시
-  joint_state_.header.stamp = node_->now();
-  for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
-  joint_commands_pub_->publish(joint_state_);
-
-  pre_ctrl.store(control_mode, std::memory_order_relaxed);
-  return;
-}
-
-
-
-
-
-  // 그 외
-  speedmode = 0;
-  RArm.qd = RArm.qc;
-  RArm.qt = RArm.qc;
-  RArm.dqc << 0,0,0,0,0,0;
-  pause_cnt=0;
-
-  pre_ctrl.store(control_mode, std::memory_order_relaxed);
-}
