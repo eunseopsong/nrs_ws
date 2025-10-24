@@ -53,6 +53,14 @@ public:
     // ✅ FK 기반 현재 로봇 상태(pose, orientation 등) 갱신
     void UpdateState();
 
+    /**
+     * @brief Admittance/Force control main function
+     *
+     * Implements Cartesian admittance control or FAAC 
+     * based on external contact force feedback.
+     */
+    void ControlForce();
+
 private:
     // --------------------------- //
     // ROS2 Node 및 기본 구성요소
