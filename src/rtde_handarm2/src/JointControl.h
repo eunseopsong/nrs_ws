@@ -46,6 +46,12 @@
 #include "var_ur10e_main.h"
 
 
+
+// ForceControl (admittance & FAAC)
+#include "rtde_handarm2/ForceControl/admittance_control.hpp"
+
+
+
 // ============================================================================
 //  JointControl Class
 //  ---------------------------------------------------------------------------
