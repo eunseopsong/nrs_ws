@@ -431,7 +431,7 @@ void JointControl::UpdateState()
 
     // 2️⃣ TCP offset 포함 Forward 계산
     constexpr double TOOL_Z = 0.248;  // [m]
-    T_current = Forward(q, TOOL_Z);
+    T_current = ur10e_forward(q, TOOL_Z);
 
     // 3️⃣ 위치, 자세 계산
     pos_current = T_current.block<3, 1>(0, 3);
@@ -443,14 +443,14 @@ void JointControl::UpdateState()
     rpy_current = rpy;
 
     // 4️⃣ 조인트 각도 문자열로 변환
-    std::ostringstream q_str;
-    q_str << std::fixed << std::setprecision(3);
-    q_str << "[";
-    for (int i = 0; i < 6; ++i) {
-        q_str << q(i);
-        if (i < 5) q_str << ", ";
-    }
-    q_str << "]";
+    // std::ostringstream q_str;
+    // q_str << std::fixed << std::setprecision(3);
+    // q_str << "[";
+    // for (int i = 0; i < 6; ++i) {
+    //     q_str << q(i);
+    //     if (i < 5) q_str << ", ";
+    // }
+    // q_str << "]";
 
     // 5️⃣ 디버그 출력
     // RCLCPP_INFO(node_->get_logger(),
@@ -461,14 +461,35 @@ void JointControl::UpdateState()
 }
 
 
+void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
+{
+    // 1️⃣ TCP 기준의 접촉 힘 (F_TCP = [0, 0, Fz])
+    contact_force = msg->data;
+    Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
 
-void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg) {
-  // contact_force.store(msg->data, std::memory_order_relaxed);
-  contact_force = msg->data;
-  // 필요시 바로 퍼블리시(옵션)
-  // YSurfN_Fext_msg_.data = msg->data;
-  // YSurfN_Fext_pub_->publish(YSurfN_Fext_msg_);
+    // 2️⃣ 현재 조인트 각도로 Inverse 행렬 계산 (TCP → Base)
+    Eigen::VectorXd q(6);
+    for (int i = 0; i < 6; ++i)
+        q(i) = joint_pos[i];
+
+    constexpr double TOOL_Z = 0.248; // EE +Z → TCP offset [m]
+    Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
+    Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3, 3>(0, 0);
+
+    // 3️⃣ Base 좌표계 기준 힘 계산
+    Eigen::Vector3d F_base = R_TCP_base * F_TCP;
+
+    // 4️⃣ 디버깅 출력
+    // RCLCPP_INFO(node_->get_logger(),
+    //             "[FtCallback] F_TCP = [0, 0, %.3f] → F_base = [%.3f, %.3f, %.3f]",
+    //             contact_force, F_base(0), F_base(1), F_base(2));
+
+    // (선택) F_base 퍼블리시 가능
+    // std_msgs::msg::Float64MultiArray F_base_msg;
+    // F_base_msg.data = {F_base(0), F_base(1), F_base(2)};
+    // UR10_wrench_pub_->publish(F_base_msg);
 }
+
 
 // ===================== Main Control Loop =====================
 void JointControl::CalculateAndPublishJoint() {
@@ -516,29 +537,33 @@ void JointControl::CalculateAndPublishJoint() {
       printf("D_q1: %.3f(%.1f), D_q2: %.3f(%.1f), D_q3: %.3f(%.1f), D_q4: %.3f(%.1f), D_q5: %.3f(%.1f), D_q6: %.3f(%.1f)\n",
         RArm.qd(0),RArm.qd(0)*(180/PI), RArm.qd(1),RArm.qd(1)*(180/PI), RArm.qd(2),RArm.qd(2)*(180/PI),
         RArm.qd(3),RArm.qd(3)*(180/PI), RArm.qd(4),RArm.qd(4)*(180/PI), RArm.qd(5),RArm.qd(5)*(180/PI));
+
       // FtCallback
       printf("Contact force value: %.2f \n", contact_force);
+
+      // ---- Base Frame 변환 (TCP → Base) ----
+      {
+          Eigen::VectorXd q(6);
+          for (int i = 0; i < 6; ++i)
+              q(i) = RArm.qc(i);
+
+          constexpr double TOOL_Z = 0.248;  // EE +Z offset [m]
+          Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
+          Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3,3>(0,0);
+
+          Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
+          Eigen::Vector3d F_base = R_TCP_base * F_TCP;
+
+          printf("→ Base Frame Force: CFx=%.3f  CFy=%.3f  CFz=%.3f\n",
+                 F_base(0), F_base(1), F_base(2));
+      }
+
       //// printf("HFx: %.2f, HFy: %.2f, HFz: %.2f | CFx: %.2f, CFy: %.2f, CFz: %.2f \n",
       //// ftS1(0),ftS1(1),ftS1(2), ftS2(0),ftS2(1),ftS2(2));
       printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
         RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
       printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
         Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
-      // printf("PB_PMx: %.3f, PB_PMy: %.3f, PB_PMz: %.4f\n",
-      //   Power_PB.PRamM[0],Power_PB.PRamM[1],Power_PB.PRamM[2]);
-      // printf("PB_PDx: %.3f, PB_PDy: %.3f, PB_PDz: %.4f\n",
-      //   Power_PB.PRamD[0],Power_PB.PRamD[1],Power_PB.PRamD[2]);
-      // printf("PB_PKx: %.3f, PB_PKy: %.3f, PB_PKz: %.4f\n",
-      //   Power_PB.PRamK[0],Power_PB.PRamK[1],Power_PB.PRamK[2]);
-      // printf("DB_AVA_sigma: %0.3f, DB_AVA_phi: %0.3f\n",DB_AVA_sigma,DB_AVA_phi);
-      // printf("DB_PU3_x: %.3f, DB_PU3_y: %.3f, DB_PU3_z: %.3f\n",
-      //   Power_PB.PU3(0), Power_PB.PU3(1), Power_PB.PU3(2));
-      // printf("Surf. normal Fd: %.3f, Fext: %.3f \n",PPB_RTinput.PFd, PPB_surfN_Fext);
-      // printf("VR_x: %.4f, VR_y: %.4f, VR_z: %.4f, VR_R: %.4f(%.2f), VR_P: %.4f(%.2f), VR_Y: %.4f(%.2f) \n",
-      //   VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
-      //   VR_CalPoseRPY(3),VR_CalPoseRPY(3)*(180/PI),
-      //   VR_CalPoseRPY(4),VR_CalPoseRPY(4)*(180/PI),
-      //   VR_CalPoseRPY(5),VR_CalPoseRPY(5)*(180/PI));
   #endif
     printer_counter = 0;
   } else {

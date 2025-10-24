@@ -16,8 +16,8 @@
 /* Custom library headers */
 #include "Kinematics.h"
 #include "Armtraj.h"
-#include "Forward.h"
-#include "Inverse.h"
+#include "ur10e_forward.h"
+#include "ur10e_inverse.h"
 
 #include "ArmGuide.h"
 #include "Yoon_path.h"
