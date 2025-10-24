@@ -246,6 +246,14 @@ private:
         continue;
       }
 
+      // ✅ 입력 pose 및 결과 joint를 소수점 6째 자리까지 출력
+      RCLCPP_INFO(this->get_logger(),
+                  "[POSE]   x=%.6f  y=%.6f  z=%.6f  r=%.6f  p=%.6f  y=%.6f",
+                  x, y, z, r, p, yaw);
+      RCLCPP_INFO(this->get_logger(),
+                  "[JOINTS] q1=%.6f  q2=%.6f  q3=%.6f  q4=%.6f  q5=%.6f  q6=%.6f",
+                  q_sol(0), q_sol(1), q_sol(2), q_sol(3), q_sol(4), q_sol(5));
+
       RCLCPP_INFO(this->get_logger(),
                   "IK OK → q = [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f] (interp_s=%.2f)",
                   q_sol(0), q_sol(1), q_sol(2), q_sol(3), q_sol(4), q_sol(5), interp_s_);
