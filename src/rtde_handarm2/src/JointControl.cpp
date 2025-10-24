@@ -695,7 +695,7 @@ bool JointControl::PathFollow(double dt_s)
     if (!active)
         return false;
 
-    // playback 파일 확인
+    // playback 파일 존재 확인
     if (!Hand_G_playback) {
         RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
         ctrl.store(0, std::memory_order_release);
@@ -703,12 +703,17 @@ bool JointControl::PathFollow(double dt_s)
         return false;
     }
 
-    // TXT 파일에서 9개 값 읽기 (x y z r p y fx fy fz)
-    float X, Y, Z, Roll, Pitch, Yaw, Fx, Fy, Fz;
-    int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
-                           &X, &Y, &Z, &Roll, &Pitch, &Yaw, &Fx, &Fy, &Fz);
+    // ---- TXT 파일에서 (x y z r p y fx fy fz) 읽기 ----
+    float LD_X, LD_Y, LD_Z;
+    float LD_Roll, LD_Pitch, LD_Yaw;
+    float LD_CFx, LD_CFy, LD_CFz;
 
-    // 파일 끝 (EOF) 처리
+    int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
+                           &LD_X, &LD_Y, &LD_Z,
+                           &LD_Roll, &LD_Pitch, &LD_Yaw,
+                           &LD_CFx, &LD_CFy, &LD_CFz);
+
+    // ---- 파일 끝(EOF) ----
     if (reti != 9) {
         std::fclose(Hand_G_playback);
         Hand_G_playback = nullptr;
@@ -725,29 +730,35 @@ bool JointControl::PathFollow(double dt_s)
         return false;
     }
 
-    // ---- Pose 및 Force 데이터 갱신 ----
-    Desired_XYZ << (double)X, (double)Y, (double)Z;
-    Desired_RPY << (double)Roll, (double)Pitch, (double)Yaw;
-    Contact_Rot_force << (double)Fx, (double)Fy, (double)Fz;
+    // ---- 목표 pose 업데이트 ----
+    Desired_XYZ << (double)LD_X, (double)LD_Y, (double)LD_Z;
+    Desired_RPY << (double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw;
 
-    // ---- IK 변환 ----
+    // ---- Force 값 업데이트 ----
+    Contact_Rot_force(0) = (double)LD_CFx;
+    Contact_Rot_force(1) = (double)LD_CFy;
+    Contact_Rot_force(2) = (double)LD_CFz;
+
+    // ---- IK 계산 ----
     Eigen::Matrix3d Desired_rot;
     AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
 
     Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-    Desired_XYZ_cmd(2) -= 0.248; // TOOL_Z 오프셋
+    constexpr double TOOL_Z = -0.248;  // 기존과 동일한 오프셋 방향
+    Desired_XYZ_cmd(2) -= TOOL_Z;
 
-    RArm.Td << Desired_rot(0, 0), Desired_rot(0, 1), Desired_rot(0, 2), Desired_XYZ_cmd(0),
-                Desired_rot(1, 0), Desired_rot(1, 1), Desired_rot(1, 2), Desired_XYZ_cmd(1),
-                Desired_rot(2, 0), Desired_rot(2, 1), Desired_rot(2, 2), Desired_XYZ_cmd(2),
-                0, 0, 0, 1;
+    RArm.Td << Desired_rot(0,0), Desired_rot(0,1), Desired_rot(0,2), Desired_XYZ_cmd(0),
+                Desired_rot(1,0), Desired_rot(1,1), Desired_rot(1,2), Desired_XYZ_cmd(1),
+                Desired_rot(2,0), Desired_rot(2,1), Desired_rot(2,2), Desired_XYZ_cmd(2),
+                0,0,0,1;
+
 #if TCP_standard == 0
     AKin.InverseK_min(&RArm);
 #else
     AKin.Ycontact_InverseK_min(&RArm);
 #endif
 
-    // ---- Joint 명령 퍼블리시 ----
+    // ---- 퍼블리시 ----
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < 6; ++i)
         joint_state_.position[i] = RArm.qd(i);
@@ -755,6 +766,7 @@ bool JointControl::PathFollow(double dt_s)
 
     return true;
 }
+
 
 
 
@@ -1019,26 +1031,13 @@ void JointControl::CalculateAndPublishJoint() {
   // 3) Posture / Power Playback Control Mode
   // ===================================================
   if (control_mode == 3) {
-      // ✅ 안전 초기화
-      if (Desired_XYZ.size() != 3) Desired_XYZ.setZero(3);
-      if (Desired_RPY.size() != 3) Desired_RPY.setZero(3);
-      if (Contact_Rot_force.size() != 3) Contact_Rot_force.setZero(3);
-
-      // ✅ 순서: InitMove → PathFollow → ReturnHomePose
-      if (InitMove(dt_s)) {
-          pre_ctrl.store(control_mode, std::memory_order_relaxed);
-          return;
-      }
-
-      if (PathFollow(dt_s)) {
-          pre_ctrl.store(control_mode, std::memory_order_relaxed);
-          return;
-      }
-
+      if (InitMove(dt_s)) return;
+      if (PathFollow(dt_s)) return;
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
+
 
 
 
