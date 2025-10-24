@@ -56,12 +56,25 @@ public:
     /**
      * @brief Admittance/Force control main function
      *
-     * Implements Cartesian admittance control or FAAC 
+     * Implements Cartesian admittance control or FAAC
      * based on external contact force feedback.
      */
     void ControlForce();
 
+    bool InitMove(double dt_s);
+    bool PathFollow(double dt_s);
+    bool ReturnHomePose(double dt_s);
+
 private:
+
+
+    bool return_active_ = false;
+    double return_elapsed_ = 0.0;
+    double return_duration_ = 0.0;
+    Eigen::Matrix<double,6,1> return_start_q_;
+
+
+
     // --------------------------- //
     // ROS2 Node 및 기본 구성요소
     // --------------------------- //
