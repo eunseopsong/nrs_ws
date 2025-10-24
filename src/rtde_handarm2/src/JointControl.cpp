@@ -421,6 +421,47 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
   }
 }
 
+// ===================== UpdateState() =====================
+void JointControl::UpdateState()
+{
+    // 1️⃣ joint_pos → Eigen::VectorXd 변환
+    Eigen::VectorXd q(6);
+    for (int i = 0; i < 6; ++i)
+        q(i) = joint_pos[i];
+
+    // 2️⃣ TCP offset 포함 HTM 계산
+    constexpr double TOOL_Z = -0.248;  // [m]
+    T_current = HTM(q, TOOL_Z);
+
+    // 3️⃣ 위치, 자세 계산
+    pos_current = T_current.block<3, 1>(0, 3);
+    Eigen::Matrix3d R_TCP = T_current.block<3, 3>(0, 0);
+    Eigen::Vector3d rpy;
+    rpy(0) = std::atan2(R_TCP(2,1), R_TCP(2,2));   // Roll
+    rpy(1) = std::asin(-R_TCP(2,0));               // Pitch
+    rpy(2) = std::atan2(R_TCP(1,0), R_TCP(0,0));   // Yaw
+    rpy_current = rpy;
+
+    // 4️⃣ 조인트 각도 문자열로 변환
+    std::ostringstream q_str;
+    q_str << std::fixed << std::setprecision(3);
+    q_str << "[";
+    for (int i = 0; i < 6; ++i) {
+        q_str << q(i);
+        if (i < 5) q_str << ", ";
+    }
+    q_str << "]";
+
+    // 5️⃣ 디버그 출력
+    RCLCPP_INFO(node_->get_logger(),
+                "[UpdateState] q=%s → TCP Pose: x=%.4f y=%.4f z=%.4f | r=%.3f p=%.3f y=%.3f",
+                q_str.str().c_str(),
+                pos_current(0), pos_current(1), pos_current(2),
+                rpy_current(0), rpy_current(1), rpy_current(2));
+}
+
+
+
 void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg) {
   // contact_force.store(msg->data, std::memory_order_relaxed);
   contact_force = msg->data;
