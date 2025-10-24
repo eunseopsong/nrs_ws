@@ -5,15 +5,59 @@
 constexpr int DOF = 6;
 using Vector6d = Eigen::Matrix<double, 6, 1>;
 
-// ===================== 외부에서 선언/정의된 타입/인스턴스 가정 =====================
-// - AKin                              : kinematics helper (ForwardK_T, InverseK_min, Rotation2EulerAngle, …)
-// - RArm                              : robot state holder (qc, qd, xc, thc, Tc, Td, …)
-// - Posture_PB, Power_PB              : path/Playback 관련 객체 (이번 버전에서는 PTP_* 미사용)
-// - J_single, path_planning           : path generator들
-// - NRS_recording, NRS_VR_setting     : YAML::Node
-// - Contact_Fcon_mode, Playback_mode  : 설정값
-// - 다양한 상수/문자열: Hand_guiding_mode, Motion_stop_mode, …
 // ================================================================================
+// ===================== 외부에서 선언·정의된 타입 및 인스턴스 가정 =====================
+// ================================================================================
+//
+// [1] 로봇 및 운동학 관련 객체
+// -------------------------------------------------------------------------------
+// - AKin                : Kinematics helper
+//                         - ForwardK_T(), InverseK_min(), Rotation2EulerAngle() 등 제공
+//                         - EE 좌표계 계산 및 역기구학 수행
+//
+// - RArm                : Robot arm state holder
+//                         - qc : 현재 조인트 위치 [rad]
+//                         - qd : 목표 조인트 위치 [rad]
+//                         - xc : 현재 EE 위치 (x, y, z)
+//                         - thc : 현재 EE 자세 (roll, pitch, yaw)
+//                         - Tc, Td : Homogeneous Transform (현재/목표)
+//
+// [2] Trajectory 및 Playback 관련 객체
+// -------------------------------------------------------------------------------
+// - Posture_PB, Power_PB : path / playback 관련 구조체
+//                          - 예전 버전에서는 PTP_* 함수에 사용되었으나
+//                            현재 버전(v2025)에서는 InitMove(), PathFollow(), ReturnHomePose()로 통합됨
+//
+// - joint_trajectory_    : TXT 파일 기반 EE 또는 Joint trajectory 저장용 벡터
+// - path_exe_counter     : trajectory 실행 단계 인덱스 관리
+//
+// [3] 외력 및 제어 관련 파라미터
+// -------------------------------------------------------------------------------
+// - Contact_Fcon_mode    : 외력 제어 모드 선택값 (ex. 4 → Force Control 모드)
+// - contact_force        : F/T 센서에서 측정된 접촉 힘 [N]
+// - ControlForce()       : Admittance / FAAC 제어 메인 함수
+//
+// [4] 설정 및 환경 관련 객체
+// -------------------------------------------------------------------------------
+// - NRS_recording        : YAML::Node, trajectory 기록 및 설정 관리
+// - NRS_VR_setting       : YAML::Node, VR Teaching 관련 설정
+//
+// [5] 제어 모드 상수 (Yoon_UR10e_cmd.h에 정의됨)
+// -------------------------------------------------------------------------------
+// - Hand_guiding_mode    : 핸드가이딩 제어 모드
+// - Motion_stop_mode     : 정지 상태
+// - Cartesian_mode_cmd   : Cartesian 위치 제어 모드
+// - Joint_control_mode_cmd : Joint 위치 제어 모드
+// - Contact_Fcon_mode    : Force/Admittance 제어 모드
+//
+// [6] 기타 유틸리티
+// -------------------------------------------------------------------------------
+// - J_single, path_planning : Path generator (이전 버전에서 사용)
+// - txt trajectory 파일 : x y z r p y fx fy fz (9열 형식)
+//                         → 현재 버전에서는 1~6열만 position/orientation 추종에 사용
+// ================================================================================
+// ================================================================================
+
 
 static std::mutex g_cmdmode_mtx;
 
@@ -689,8 +733,6 @@ bool JointControl::InitMove(double dt_s)
 }
 
 
-
-
 bool JointControl::PathFollow(double dt_s)
 {
     static bool active = true;
@@ -770,10 +812,6 @@ bool JointControl::PathFollow(double dt_s)
 }
 
 
-
-
-
-
 bool JointControl::ReturnHomePose(double dt_s)
 {
     static bool active = false;
@@ -820,13 +858,6 @@ bool JointControl::ReturnHomePose(double dt_s)
     // --- 비활성 상태 ---
     return false;
 }
-
-
-
-
-
-
-
 
 
 
