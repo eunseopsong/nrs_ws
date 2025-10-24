@@ -605,16 +605,13 @@ bool JointControl::InitMove(double dt_s)
 
 
 // ===================== PathFollow() =====================
-// TXT 한 줄 → Xd/Rd 읽기 → (접촉일 때만) XYZ에 어드미턴스 적용 → IK → joints publish
+// TXT 한 줄 → Xd/Rd 읽기 → (접촉 시) FAAC로 MDK 갱신 → AC 실행 → IK → joints publish
 bool JointControl::PathFollow(double /*dt_s*/)
 {
     // 파일 핸들 변경되면 재활성화
     static bool active = true;
     static FILE* last_handle = nullptr;
-    if (Hand_G_playback != last_handle) {
-        active = true;
-        last_handle = Hand_G_playback;
-    }
+    if (Hand_G_playback != last_handle) { active = true; last_handle = Hand_G_playback; }
     if (!active) return false;
 
     if (!Hand_G_playback) {
@@ -650,65 +647,95 @@ bool JointControl::PathFollow(double /*dt_s*/)
 
     // ── 1) TXT 목표 (TCP 기준)
     Eigen::Vector3d Xd, Rd_rpy, Fd;
-    Xd      << (double)des_x,   (double)des_y,   (double)des_z;
-    Rd_rpy  << (double)des_roll,(double)des_pitch,(double)des_yaw;
-    Fd      << (double)des_cfx, (double)des_cfy, (double)des_cfz;
+    Xd      << (double)des_x,    (double)des_y,    (double)des_z;
+    Rd_rpy  << (double)des_roll, (double)des_pitch,(double)des_yaw;
+    Fd      << (double)des_cfx,  (double)des_cfy,  (double)des_cfz;
 
-    // ── 2) 측정 외력 (기본: Z만 사용, 필요시 벡터로 교체)
-    // 예: 벡터가 있으면 Eigen::Vector3d Fext = Rot_Cforce2;
+    // ── 2) 측정 외력 (Z축만 사용: 필요시 전체 벡터로 교체 가능)
     static double fz_lp = 0.0;
-    const double fc = 15.0;                      // 1차 LPF 컷오프(Hz) — 필요시 조정
-    const double Ts = (dt>0.0)? dt : 0.002;      // 전역 주기
+    const double fc = 15.0;                           // 1차 LPF 컷오프(Hz)
+    const double Ts = (dt>0.0)? dt : 0.002;           // 샘플링
     const double alpha_lpf = (2*M_PI*fc*Ts) / (1.0 + 2*M_PI*fc*Ts);
-    fz_lp = fz_lp + alpha_lpf * (contact_force - fz_lp);
-
+    fz_lp += alpha_lpf * (contact_force - fz_lp);
     Eigen::Vector3d Fext(0.0, 0.0, fz_lp);
 
-    // ── 3) 접촉 판단 & 블렌딩 게인
-    const double f_dead = 2.0;   // 데드밴드(절대값 N)
-    const double f_full = 12.0;  // 이 이상이면 완전 어드미턴스
-    double fmag = std::abs(Fext(2)); // Z로만 판단(필요시 ||F||로 변경)
-    double w = 0.0;               // 0=직접 추종, 1=풀 어드미턴스
+    // ── 3) 접촉 블렌딩 게인 (비접촉은 직접추종, 접촉 강할수록 AC 출력 반영)
+    const double f_dead = 2.0;
+    const double f_full = 12.0;
+    const double fmag   = std::abs(Fext(2));
+    double w = 0.0;
     if (fmag <= f_dead)      w = 0.0;
     else if (fmag >= f_full) w = 1.0;
     else                     w = (fmag - f_dead) / (f_full - f_dead);
 
-    // ── 4) 어드미턴스 (XYZ 1D) — 접촉 시에만 영향, 드리프트 방지용 제한 포함
-    static bool adm_init = false;
+    // ── 4) FAAC + AC 준비 (static 1회 초기화)
+    static bool init = false;
     static Yadmittance_control AX(Ts), AY(Ts), AZ(Ts);
     static Eigen::Vector3d Xc_prev = Xd;
 
-    if (!adm_init) {
+    // FAAC 칼만 노이즈 파라미터(전역 값 있으면 사용, 없으면 기본값)
+    auto pn = process_noise;        // extern std::vector<double>
+    auto mn = measurement_noise;    // extern std::vector<double>
+    if (pn.size() != 3) pn = {1e-6, 1e-6, 1e-6};
+    if (mn.size() != 3) mn = {1e-3, 1e-3, 1e-3};
+
+    static Nrs3StepFAAC fX(2.0, 80.0, 0.0, Ts, pn, mn);
+    static Nrs3StepFAAC fY(2.0, 80.0, 0.0, Ts, pn, mn);
+    static Nrs3StepFAAC fZ(2.5,100.0, 0.0, Ts, pn, mn);
+
+    if (!init) {
         auto safe = [](double v, double def){ return (std::isfinite(v)&&fabs(v)>1e-12)? v : def; };
         AX.adm_1D_MDK( safe(Hadmit_M(0),2.0),  safe(Hadmit_D(0),80.0),  safe(Hadmit_K(0),0.0) );
         AY.adm_1D_MDK( safe(Hadmit_M(1),2.0),  safe(Hadmit_D(1),80.0),  safe(Hadmit_K(1),0.0) );
         AZ.adm_1D_MDK( safe(Hadmit_M(2),2.5),  safe(Hadmit_D(2),100.0), safe(Hadmit_K(2),0.0) );
+
+        // FAAC 초기 MDK도 동일하게 세팅
+        fX.Updated_md = AX.adm_MDK_monitor(0); fX.Updated_dd = AX.adm_MDK_monitor(1); fX.Updated_kd = AX.adm_MDK_monitor(2);
+        fY.Updated_md = AY.adm_MDK_monitor(0); fY.Updated_dd = AY.adm_MDK_monitor(1); fY.Updated_kd = AY.adm_MDK_monitor(2);
+        fZ.Updated_md = AZ.adm_MDK_monitor(0); fZ.Updated_dd = AZ.adm_MDK_monitor(1); fZ.Updated_kd = AZ.adm_MDK_monitor(2);
+
         Xc_prev = Xd;
-        adm_init = true;
+        init = true;
     }
 
-    // 어드미턴스 출력
+    // ── 5) FAAC로 MDK 업데이트 (접촉 판단 및 회복 포함)
+    // Tank 에너지는 우선 고정값(필요시 실제 에너지탱크로 교체)
+    const double TankE = 5.0;
+
+    // Xe 계산에 사용할 “현재 명령 위치”는 직전 AC 출력 Xc_prev, 실제 위치는 pos_current(UR 기준, m)
+    // 각 축별 FAAC 실행
+    {
+        auto mdkX = fX.FAAC_MDKob_RUN(TankE, /*F_ext*/ 0.0, /*Fd*/ Fd(0), /*Xc*/ Xc_prev(0), /*X*/ pos_current(0));
+        auto mdkY = fY.FAAC_MDKob_RUN(TankE, /*F_ext*/ 0.0, /*Fd*/ Fd(1), /*Xc*/ Xc_prev(1), /*X*/ pos_current(1));
+        auto mdkZ = fZ.FAAC_MDKob_RUN(TankE, /*F_ext*/ Fext(2), /*Fd*/ Fd(2), /*Xc*/ Xc_prev(2), /*X*/ pos_current(2));
+
+        AX.adm_1D_MDK(mdkX.Mass, mdkX.Damping, mdkX.Stiffness);
+        AY.adm_1D_MDK(mdkY.Mass, mdkY.Damping, mdkY.Stiffness);
+        AZ.adm_1D_MDK(mdkZ.Mass, mdkZ.Damping, mdkZ.Stiffness);
+    }
+
+    // ── 6) 어드미턴스 실행 (AC) → Xa
     Eigen::Vector3d Xa;
     Xa(0) = AX.adm_1D_control(Xd(0), Fd(0), 0.0);
     Xa(1) = AY.adm_1D_control(Xd(1), Fd(1), 0.0);
     Xa(2) = AZ.adm_1D_control(Xd(2), Fd(2), Fext(2));
 
-    // 블렌딩: 접촉 아닐 땐 Xd, 접촉 강할수록 Xa로
+    // 블렌딩: (비접촉)Xd ↔ (접촉)Xa
     Eigen::Vector3d Xc = (1.0 - w) * Xd + w * Xa;
 
-    // 변위/증분 제한(라인 유지용)
-    const double max_offset = 0.010;  // Xd로부터 최대 이탈 (m) — 필요시 축별로
+    // 변위/증분 제한(라인 유지)
+    const double max_offset = 0.010;   // m
     for (int i=0;i<3;i++)
         Xc(i) = std::clamp(Xc(i), Xd(i)-max_offset, Xd(i)+max_offset);
 
-    const double max_step = 0.003;    // 한 스텝 최대 이동 (m)
+    const double max_step = 0.003;     // m/step
     Eigen::Vector3d step = Xc - Xc_prev;
     for (int i=0;i<3;i++)
         step(i) = std::clamp(step(i), -max_step, max_step);
     Xc = Xc_prev + step;
     Xc_prev = Xc;
 
-    // ── 5) IK 입력 (Baseline 동일: 플랜지 Z = TCP Z + TOOL_Z)
+    // ── 7) IK 입력 (BaseLine 동일: 플랜지 Z = TCP Z + TOOL_Z)
     Eigen::Matrix3d Rd_R;
     AKin.EulerAngle2Rotation(Rd_R, Rd_rpy);
 
@@ -726,7 +753,7 @@ bool JointControl::PathFollow(double /*dt_s*/)
     AKin.Ycontact_InverseK_min(&RArm);
 #endif
 
-    // ── 6) joints publish (Baseline 형식 유지)
+    // ── 8) joints publish (BaseLine 형식 유지)
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < DOF; ++i)
         joint_state_.position[i] = RArm.qd(i);
@@ -734,8 +761,6 @@ bool JointControl::PathFollow(double /*dt_s*/)
 
     return true;
 }
-
-
 
 
 
