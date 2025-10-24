@@ -4,7 +4,15 @@
 #include <iostream>
 #include "Kinematics.h"
 
-#define PI 3.141592
+// ---- PI/M_PI 중복 정의 방지 ----
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+#ifndef PI
+#define PI M_PI
+#endif
+// --------------------------------
 using namespace Eigen;
 
 

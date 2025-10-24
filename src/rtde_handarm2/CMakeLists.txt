@@ -17,11 +17,12 @@ include_directories(
   include/rtde_handarm2/Yoon_FT_sensor
   include/rtde_handarm2/Armtraj
   include/rtde_handarm2/Arm_guide
+  include/rtde_handarm2/ForceControl        # ⬅️ 추가
   src
   yaml
 )
+
 # 외부 모듈 소스 직접 추가
-# set(Yoon_LIB ArmGuide Kinematics Armtraj Yoon_filters Yoon_FT_sensor Yoon_path Yoon_force_control Text_loader Yoon_communication)
 set(Yoon_LIB
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Armtraj/Armtraj.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Arm_guide/ArmGuide.cpp
@@ -36,7 +37,9 @@ set(Yoon_LIB
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_FT_sensor/Yoon_FT_sensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_data_loader/Text_loader.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_communication/Yoon_communi.cpp
+  # ForceControl 폴더는 현재 헤더만 사용 → 추가 소스 없음
 )
+
 
 
 # 의존 패키지
