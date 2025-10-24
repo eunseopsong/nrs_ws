@@ -429,9 +429,9 @@ void JointControl::UpdateState()
     for (int i = 0; i < 6; ++i)
         q(i) = joint_pos[i];
 
-    // 2️⃣ TCP offset 포함 HTM 계산
+    // 2️⃣ TCP offset 포함 Forward 계산
     constexpr double TOOL_Z = 0.248;  // [m]
-    T_current = HTM(q, TOOL_Z);
+    T_current = Forward(q, TOOL_Z);
 
     // 3️⃣ 위치, 자세 계산
     pos_current = T_current.block<3, 1>(0, 3);
