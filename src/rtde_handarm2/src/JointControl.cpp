@@ -537,105 +537,6 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 
 
 
-// ========================
-//  Force Control Function
-// ========================
-void JointControl::ControlForce()
-{
-    // --- 1. 기본 설정 ---
-    static bool initialized = false;
-    static Eigen::VectorXd FC_AC_desX(12);  // [0-5]: pose, [6-11]: desired force
-    static Eigen::VectorXd FC_MASS(6), FC_DAMPER(6), FC_STIFFNESS(6);
-    static Eigen::VectorXd AC_pose(6);      // Admittance output
-    static Eigen::VectorXd prev_pose(6);    // 이전 포즈 저장
-    const double dt = 0.001;                // 제어주기 [s]
-    constexpr double TOOL_Z = 0.248;        // TCP offset [m]
-
-    // --- 2. 초기화 (한 번만) ---
-    if (!initialized) {
-        FC_AC_desX.setZero();
-        FC_MASS << 1, 1, 1, 0.05, 0.05, 0.05;       // pos(3), ori(3)
-        FC_DAMPER << 3000, 3000, 3000, 10, 10, 10;
-        FC_STIFFNESS << 2000, 2000, 2000, 20, 20, 20;
-
-        // 현재 EE pose 초기화 (RArm.xc: [x y z r p y])
-        for (int i = 0; i < 6; ++i)
-            FC_AC_desX(i) = RArm.xc(i);
-
-        prev_pose = RArm.xc;
-        initialized = true;
-    }
-
-    // --- 3. 힘 센서 데이터 (Base frame 기준) ---
-    Eigen::VectorXd q(6);
-    for (int i = 0; i < 6; ++i) q(i) = RArm.qc(i);
-
-    Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
-    Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3,3>(0,0);
-    Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
-    Eigen::Vector3d F_base = R_TCP_base * F_TCP;
-
-    // ft1data (측정된 힘)
-    Eigen::VectorXd ft1data(6);
-    ft1data << F_base(0), F_base(1), F_base(2), 0.0, 0.0, 0.0;
-
-    // --- 4. Classical Admittance Control ---
-    for (int i = 0; i < 6; ++i) {
-        double M = FC_MASS(i);
-        double B = FC_DAMPER(i);
-        double K = FC_STIFFNESS(i);
-
-        // 외력 오차 (Fd - Fext)
-        double Fd = (i < 3) ? FC_AC_desX(i + 6) : 0.0;
-        double Fext = ft1data(i);
-        double F_error = Fd - Fext;
-
-        // 1차 시스템 형태의 admittance 업데이트
-        double x = FC_AC_desX(i);      // 이전 목표 (m or rad)
-        double x_dot = (x - prev_pose(i)) / dt;
-        double x_ddot = (F_error - B * x_dot - K * (x - RArm.xc(i))) / M;
-        double new_x = x + x_dot * dt + 0.5 * x_ddot * dt * dt;
-
-        AC_pose(i) = new_x;
-    }
-
-    prev_pose = RArm.xc;
-
-    // --- 5. 목표 Pose 업데이트 ---
-    // (m → mm 변환)
-    Eigen::VectorXd target_pose(6);
-    target_pose = AC_pose;
-    target_pose(0) *= 1000.0;
-    target_pose(1) *= 1000.0;
-    target_pose(2) *= 1000.0;
-
-    // --- 6. Inverse Kinematics 수행 ---
-    Eigen::Matrix4d T_target = Eigen::Matrix4d::Identity();
-    Eigen::Matrix3d R_target;
-    Eigen::AngleAxisd Rx(target_pose(3), Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd Ry(target_pose(4), Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd Rz(target_pose(5), Eigen::Vector3d::UnitZ());
-    R_target = Rz * Ry * Rx;
-    T_target.block<3,3>(0,0) = R_target;
-    T_target(0,3) = target_pose(0);
-    T_target(1,3) = target_pose(1);
-    T_target(2,3) = target_pose(2);
-
-    Eigen::VectorXd q_target = ur10e_inverse(q, TOOL_Z).col(0); // 단일 해 선택
-
-    // --- 7. 결과 저장 ---
-    Desired_XYZ << target_pose(0)/1000.0, target_pose(1)/1000.0, target_pose(2)/1000.0;
-    Desired_RPY << target_pose(3), target_pose(4), target_pose(5);
-    RArm.qt = q_target;
-
-    // --- 8. 디버깅 출력 ---
-#if RT_printing
-    printf("[Force Control]\n");
-    printf("Fx=%.3f Fy=%.3f Fz=%.3f | Xd: %.3f %.3f %.3f\n",
-           F_base(0), F_base(1), F_base(2),
-           target_pose(0), target_pose(1), target_pose(2));
-#endif
-}
 
 
 bool JointControl::InitMove(double dt_s)
@@ -996,7 +897,6 @@ void JointControl::CalculateAndPublishJoint() {
       return;
   }
 
-
   // 1) Cartesian position control mode
   if (control_mode == 1) {
     if(path_done_flag == true) {
@@ -1078,13 +978,7 @@ void JointControl::CalculateAndPublishJoint() {
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
-}
-
-
-
-
-
-
+  }
 
     // 그 외
     speedmode = 0;
