@@ -50,6 +50,9 @@ public:
     // 실제 JointState 수신 콜백
     void getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg);
 
+    // ✅ 현재 로봇 상태 (pose, orientation 등) 갱신
+    void UpdateState();  // FK 기반 current_pose 갱신 함수
+
 private:
     // --------------------------- //
     // ROS2 Node 및 기본 구성요소
