@@ -26,7 +26,7 @@ set(Yoon_LIB
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Armtraj/Armtraj.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Arm_guide/ArmGuide.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/Kinematics.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/HTM.cpp # Add on 2025.10.24
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/Forward.cpp # Add on 2025.10.24
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_force_control/Yoon_force_control.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_path/Yoon_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_filters/Yoon_filters.cpp
