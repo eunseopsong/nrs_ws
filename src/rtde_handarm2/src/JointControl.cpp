@@ -603,17 +603,17 @@ bool JointControl::InitMove(double dt_s)
 
 
 // ===================== PathFollow() =====================
-// 역할: TXT를 한 줄씩 읽어 목표 포즈로 IK → 조인트 명령 퍼블리시
-bool JointControl::PathFollow(double /*dt_s*/)
+// 역할: TXT를 한 줄씩 읽어 '원하는 자세+힘'을 받아 Admittance 제어로 보정한 목표 포즈를 만들고,
+//       IK로 qd를 계산해 퍼블리시한다.
+bool JointControl::PathFollow(double dt_s)
 {
-    // 재생 파일 핸들이 바뀌면 active 재활성화
+    // 파일 핸들 변경 시 active 재활성화
     static bool active = true;
     static FILE* last_handle = nullptr;
     if (Hand_G_playback != last_handle) {
         active = true;
         last_handle = Hand_G_playback;
     }
-
     if (!active) return false;
 
     if (!Hand_G_playback) {
@@ -623,7 +623,27 @@ bool JointControl::PathFollow(double /*dt_s*/)
         return false;
     }
 
-    // TXT: x y z r p y fx fy fz
+    // ---- Admittance Controller (per-axis) ----
+    //  - 단위: position[m], orientation[rad], force[N]
+    //  - 초기 1회만 파라미터 설정(M,D,K) 및 샘플링 주기 적용
+    static bool ac_inited = false;
+    static Yadmittance_control AControl[6];
+    // classical 모드에서 k recovery용 (orientation 포함 6축 모두 감시)
+    static double target_K[6] = {2000,2000,2000, 20,20,20};  // [N/m], [N·m/rad] 상응
+    static double mass_cfg [6] = {   1,   1,   1, 0.05,0.05,0.05};
+    static double damp_cfg [6] = {3000,3000,3000,   10,  10,  10};
+    static double stiff_cfg[6] = {2000,2000,2000,   20,  20,  20};
+
+    if (!ac_inited) {
+        // 샘플링 주기는 내부 클래스가 보유 → 여기서는 MDK만 설정
+        for (int i = 0; i < 6; ++i) {
+            AControl[i].adm_1D_MDK(mass_cfg[i], damp_cfg[i], stiff_cfg[i]);
+        }
+        ac_inited = true;
+        RCLCPP_INFO(node_->get_logger(), "[PB] Admittance init (Classical).");
+    }
+
+    // ---- TXT: x y z r p y fx fy fz ----
     float des_x, des_y, des_z;
     float des_roll, des_pitch, des_yaw;
     float des_cfx, des_cfy, des_cfz;
@@ -638,34 +658,75 @@ bool JointControl::PathFollow(double /*dt_s*/)
         Hand_G_playback = nullptr;
         active = false;
 
-        // Return 준비
-        return_active_  = true;
-        return_elapsed_ = 0.0;
-        return_duration_= 4.0;
+        // Return 준비 (기존 로직 유지)
+        return_active_   = true;
+        return_elapsed_  = 0.0;
+        return_duration_ = 4.0;
         for (int i = 0; i < DOF; ++i) return_start_q_(i) = RArm.qc(i);
 
-        printf("[PB] End of file. Start return-to-home.\n");
+        printf("[PB] EOF -> Return-to-home.\n");
         return false;
     }
 
-    Desired_XYZ << (double)des_x, (double)des_y, (double)des_z;
-    Desired_RPY << (double)des_roll, (double)des_pitch, (double)des_yaw;
+    // ---- Desired pose / force (m,rad,N) ----
+    // (KUKA 코드(mm)와 다르게 우리 시스템은 'm'이 표준)
+    Eigen::Matrix<double,6,1> Xd;
+    Xd << (double)des_x, (double)des_y, (double)des_z,
+          (double)des_roll, (double)des_pitch, (double)des_yaw;
 
-    Contact_Rot_force(0) = (double)des_cfx;
-    Contact_Rot_force(1) = (double)des_cfy;
-    Contact_Rot_force(2) = (double)des_cfz;
+    Eigen::Vector3d Fd((double)des_cfx, (double)des_cfy, (double)des_cfz);
 
-    Eigen::Matrix3d Desired_rot;
-    AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
+    // ---- External force in TCP frame ----
+    // 현재 센서 입력은 TCP +Z 성분(contact_force)만 유효.
+    // 필요 시 확장: 전체 6축 FT 사용 시 여기서 ft_tcp를 채워주면 됨.
+    Eigen::Vector3d Fext_tcp(0.0, 0.0, contact_force);
 
-    // IK용 플랜지 z = TCP z + TOOL_Z
-    Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-    Desired_XYZ_cmd(2) += TOOL_Z;
+    // ---- Classical Force Control (Position axes: force control, Orientation: position control) ----
+    // FC_AC_desX(0..5)=Xd, (6..8)=Fd, (9..11)는 미사용
+    Eigen::Matrix<double,6,1> X_ac = Xd; // 보정된 pose가 들어갈 버퍼
+    for (int i = 0; i < 6; ++i) {
+        if (i < 3) {
+            // --- 위치축: Force control using Admittance ---
+            const double Fd_i   = (i==0)?Fd(0): (i==1)?Fd(1):Fd(2);
+            const double Fext_i = (i==0)?Fext_tcp(0): (i==1)?Fext_tcp(1):Fext_tcp(2);
 
-    RArm.Td << Desired_rot(0,0), Desired_rot(0,1), Desired_rot(0,2), Desired_XYZ_cmd(0),
-                Desired_rot(1,0), Desired_rot(1,1), Desired_rot(1,2), Desired_XYZ_cmd(1),
-                Desired_rot(2,0), Desired_rot(2,1), Desired_rot(2,2), Desired_XYZ_cmd(2),
-                0,0,0,1;
+            // 접촉 중(Fd!=0)에는 k를 0으로, 아니면 목표 k로 서서히 복구
+            if (std::fabs(Fd_i) > 1e-2) {
+                AControl[i].adm_1D_MDK(mass_cfg[i], damp_cfg[i], 0.0);
+            } else {
+                // 1차 저역통과식 복구(약 3초 time-constant)
+                const double k_now = AControl[i].adm_MDK_monitor(2);
+                if (std::fabs(k_now - target_K[i]) > 1e-6) {
+                    const double tau_k = 3.0;                     // [s]
+                    const double alpha = 1.0 - std::exp(-dt_s / std::max(1e-6, tau_k));
+                    const double k_new = k_now + alpha * (target_K[i] - k_now);
+                    AControl[i].adm_1D_MDK(mass_cfg[i], damp_cfg[i], k_new);
+                }
+            }
+
+            // Adm ctrl 출력(보정된 위치): 단위 [m]
+            X_ac(i) = AControl[i].adm_1D_control(Xd(i), Fd_i, Fext_i);
+        } else {
+            // --- 자세축: Position control only (Fd=0) ---
+            X_ac(i) = AControl[i].adm_1D_control(Xd(i), 0.0, 0.0);
+        }
+    }
+
+    // ---- IK 변환 (TCP -> 플랜지), z에 TOOL_Z offset ----
+    Eigen::Vector3d pos_cmd = X_ac.head<3>();
+    Eigen::Vector3d rpy_cmd = X_ac.tail<3>();
+
+    // TCP->Flange 변환: 플랜지 z = TCP z + TOOL_Z
+    Eigen::Vector3d pos_flange = pos_cmd;
+    pos_flange(2) += TOOL_Z;
+
+    Eigen::Matrix3d R_cmd;
+    AKin.EulerAngle2Rotation(R_cmd, rpy_cmd);
+
+    RArm.Td << R_cmd(0,0), R_cmd(0,1), R_cmd(0,2), pos_flange(0),
+               R_cmd(1,0), R_cmd(1,1), R_cmd(1,2), pos_flange(1),
+               R_cmd(2,0), R_cmd(2,1), R_cmd(2,2), pos_flange(2),
+               0,0,0,1;
 
 #if TCP_standard == 0
     AKin.InverseK_min(&RArm);
@@ -673,13 +734,22 @@ bool JointControl::PathFollow(double /*dt_s*/)
     AKin.Ycontact_InverseK_min(&RArm);
 #endif
 
+    // ---- joints publish (형식 유지) ----
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < DOF; ++i)
         joint_state_.position[i] = RArm.qd(i);
     joint_commands_pub_->publish(joint_state_);
 
+    // 내부 상태 갱신(모니터링용)
+    Desired_XYZ = X_ac.head<3>();
+    Desired_RPY = rpy_cmd;
+    Contact_Rot_force(0) = des_cfx;
+    Contact_Rot_force(1) = des_cfy;
+    Contact_Rot_force(2) = des_cfz;
+
     return true;
 }
+
 
 
 
