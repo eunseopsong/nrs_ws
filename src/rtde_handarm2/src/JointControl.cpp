@@ -604,111 +604,137 @@ bool JointControl::InitMove(double dt_s)
 
 
 
-bool JointControl::PathFollow(double dt_s)
+// ===================== PathFollow() =====================
+// TXT 한 줄 → Xd/Rd 읽기 → (접촉일 때만) XYZ에 어드미턴스 적용 → IK → joints publish
+bool JointControl::PathFollow(double /*dt_s*/)
 {
-    constexpr int DOF = 6;
-
-    // 1) TXT/메모리에서 목표 pose 한 줄 꺼내오기 (형식: x y z r p y)
-    if (path_exe_counter >= static_cast<int>(joint_trajectory_.size())) {
-        RCLCPP_INFO(node_->get_logger(), "PathFollow finished: all waypoints consumed.");
-        return true;
+    // 파일 핸들 변경되면 재활성화
+    static bool active = true;
+    static FILE* last_handle = nullptr;
+    if (Hand_G_playback != last_handle) {
+        active = true;
+        last_handle = Hand_G_playback;
     }
+    if (!active) return false;
 
-    const auto& row = joint_trajectory_[path_exe_counter];
-    if (row.size() < 6) {
-        RCLCPP_WARN(node_->get_logger(), "Path row has less than 6 elements. Skipping.");
-        ++path_exe_counter;
+    if (!Hand_G_playback) {
+        RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
+        ctrl.store(0, std::memory_order_release);
+        set_status(message_status, "Playback file closed");
         return false;
     }
 
-    // 필요 시 mm → m 변환(현재 데이터 단위에 맞게 조정)
-    Eigen::Vector3d Xd(row[0], row[1], row[2]);     // [m]
-    Eigen::Vector3d Rd(row[3], row[4], row[5]);     // [rad]
+    // TXT: x y z r p y fx fy fz  (fx~fz는 "원하는" 접촉력)
+    float des_x, des_y, des_z;
+    float des_roll, des_pitch, des_yaw;
+    float des_cfx, des_cfy, des_cfz;
 
-    // 2) 외력/목표힘 (간단 예: z축만 사용)
-    Eigen::Vector3d Fd = Eigen::Vector3d::Zero();
-    Eigen::Vector3d Fext_pos = Eigen::Vector3d::Zero();
-    Fext_pos.z() = contact_force;   // 현재 파이프라인에서 전달되는 접촉 힘(N)
+    int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
+                           &des_x, &des_y, &des_z,
+                           &des_roll, &des_pitch, &des_yaw,
+                           &des_cfx, &des_cfy, &des_cfz);
+    if (reti != 9) {
+        std::fclose(Hand_G_playback);
+        Hand_G_playback = nullptr;
+        active = false;
 
-    // 3) 1D Admittance를 X/Y/Z 독립 적용 (UR10e 기준 튜닝 값; 필요 시 Hadmit_*에서 가져와 덮어쓰기)
-    static Yadmittance_control AControl[3] = {
-        Yadmittance_control(dt_s), Yadmittance_control(dt_s), Yadmittance_control(dt_s)
-    };
+        // Return 준비
+        return_active_  = true;
+        return_elapsed_ = 0.0;
+        return_duration_= 4.0;
+        for (int i = 0; i < DOF; ++i) return_start_q_(i) = RArm.qc(i);
 
-    const bool has6 = (Hadmit_M.size()==DOF && Hadmit_D.size()==DOF && Hadmit_K.size()==DOF);
-    const double Mx = has6 ? Hadmit_M(0) : 2.0;
-    const double My = has6 ? Hadmit_M(1) : 2.0;
-    const double Mz = has6 ? Hadmit_M(2) : 2.5;
-
-    const double Dx = has6 ? Hadmit_D(0) : 60.0;
-    const double Dy = has6 ? Hadmit_D(1) : 60.0;
-    const double Dz = has6 ? Hadmit_D(2) : 80.0;
-
-    const double Kx = has6 ? Hadmit_K(0) : 0.0;
-    const double Ky = has6 ? Hadmit_K(1) : 0.0;
-    const double Kz = has6 ? Hadmit_K(2) : 0.0;
-
-    AControl[0].adm_1D_MDK(Mx, Dx, Kx);
-    AControl[1].adm_1D_MDK(My, Dy, Ky);
-    AControl[2].adm_1D_MDK(Mz, Dz, Kz);
-
-    // 현재 EE상태는 UpdateState()로 pos_current/rpy_current가 갱신돼 있다고 가정
-    Eigen::Vector3d Xc;  // admittance가 보정한 목표 위치
-    Xc.x() = AControl[0].adm_1D_control(Xd.x(), Fd.x(), Fext_pos.x());
-    Xc.y() = AControl[1].adm_1D_control(Xd.y(), Fd.y(), Fext_pos.y());
-    Xc.z() = AControl[2].adm_1D_control(Xd.z(), Fd.z(), Fext_pos.z());
-
-    // 회전은 일단 목표 그대로 (필요하면 회전축도 admittance 적용)
-    Eigen::Vector3d Rc = Rd;
-
-    // 4) 카르테시안 오차
-    Eigen::Matrix<double,6,1> cart_err;
-    cart_err.segment<3>(0) = (Xc - pos_current);  // [m]
-    cart_err.segment<3>(3) = (Rc - rpy_current);  // [rad]
-
-    // 5) DLS IK (BaseLine 방식) — Jacobian은 RArm.qc를 참조하므로 먼저 현재 조인트를 주입
-    Eigen::Matrix<double,6,1> q_now;
-    for (int i=0;i<DOF;++i) q_now(i) = joint_pos[i];
-
-    for (int i=0;i<DOF;++i) {
-        RArm.q(i)  = q_now(i);
-        RArm.qc(i) = q_now(i);  // Jacobian()이 qc 사용
-        RArm.qd(i) = q_now(i);
+        printf("[PB] End of file. Start return-to-home.\n");
+        return false;
     }
 
-    // 자코비안 계산 → RArm.J 활용
-    AKin.Jacobian(&RArm);
-    Eigen::Matrix<double,6,6> J = RArm.J;
+    // ── 1) TXT 목표 (TCP 기준)
+    Eigen::Vector3d Xd, Rd_rpy, Fd;
+    Xd      << (double)des_x,   (double)des_y,   (double)des_z;
+    Rd_rpy  << (double)des_roll,(double)des_pitch,(double)des_yaw;
+    Fd      << (double)des_cfx, (double)des_cfy, (double)des_cfz;
 
-    // Damped Least Squares pseudo-inverse
-    const double lambda = 1e-3;
-    Eigen::Matrix<double,6,6> I6  = Eigen::Matrix<double,6,6>::Identity();
-    Eigen::Matrix<double,6,6> JJt = J * J.transpose();
-    Eigen::Matrix<double,6,6> Jpinv = J.transpose() * (JJt + (lambda*lambda)*I6).inverse();
+    // ── 2) 측정 외력 (기본: Z만 사용, 필요시 벡터로 교체)
+    // 예: 벡터가 있으면 Eigen::Vector3d Fext = Rot_Cforce2;
+    static double fz_lp = 0.0;
+    const double fc = 15.0;                      // 1차 LPF 컷오프(Hz) — 필요시 조정
+    const double Ts = (dt>0.0)? dt : 0.002;      // 전역 주기
+    const double alpha_lpf = (2*M_PI*fc*Ts) / (1.0 + 2*M_PI*fc*Ts);
+    fz_lp = fz_lp + alpha_lpf * (contact_force - fz_lp);
 
-    Eigen::Matrix<double,6,1> dq = Jpinv * cart_err;
+    Eigen::Vector3d Fext(0.0, 0.0, fz_lp);
 
-    // 증분 제한(안전)
-    const double dq_lim = 0.05; // [rad/step]
-    for (int i=0;i<DOF;++i) dq(i) = std::clamp(dq(i), -dq_lim, dq_lim);
+    // ── 3) 접촉 판단 & 블렌딩 게인
+    const double f_dead = 2.0;   // 데드밴드(절대값 N)
+    const double f_full = 12.0;  // 이 이상이면 완전 어드미턴스
+    double fmag = std::abs(Fext(2)); // Z로만 판단(필요시 ||F||로 변경)
+    double w = 0.0;               // 0=직접 추종, 1=풀 어드미턴스
+    if (fmag <= f_dead)      w = 0.0;
+    else if (fmag >= f_full) w = 1.0;
+    else                     w = (fmag - f_dead) / (f_full - f_dead);
 
-    // 최종 명령 qd
-    Eigen::Matrix<double,6,1> qd_vec = q_now + dq;
-    for (int i=0;i<DOF;++i) {
-        RArm.qd(i)   = qd_vec(i);   // BaseLine 명령 버퍼
-        joint_pos[i] = qd_vec(i);   // 내부 상태 동기화
+    // ── 4) 어드미턴스 (XYZ 1D) — 접촉 시에만 영향, 드리프트 방지용 제한 포함
+    static bool adm_init = false;
+    static Yadmittance_control AX(Ts), AY(Ts), AZ(Ts);
+    static Eigen::Vector3d Xc_prev = Xd;
+
+    if (!adm_init) {
+        auto safe = [](double v, double def){ return (std::isfinite(v)&&fabs(v)>1e-12)? v : def; };
+        AX.adm_1D_MDK( safe(Hadmit_M(0),2.0),  safe(Hadmit_D(0),80.0),  safe(Hadmit_K(0),0.0) );
+        AY.adm_1D_MDK( safe(Hadmit_M(1),2.0),  safe(Hadmit_D(1),80.0),  safe(Hadmit_K(1),0.0) );
+        AZ.adm_1D_MDK( safe(Hadmit_M(2),2.5),  safe(Hadmit_D(2),100.0), safe(Hadmit_K(2),0.0) );
+        Xc_prev = Xd;
+        adm_init = true;
     }
 
-    // 6) joints publish (형식 유지)
+    // 어드미턴스 출력
+    Eigen::Vector3d Xa;
+    Xa(0) = AX.adm_1D_control(Xd(0), Fd(0), 0.0);
+    Xa(1) = AY.adm_1D_control(Xd(1), Fd(1), 0.0);
+    Xa(2) = AZ.adm_1D_control(Xd(2), Fd(2), Fext(2));
+
+    // 블렌딩: 접촉 아닐 땐 Xd, 접촉 강할수록 Xa로
+    Eigen::Vector3d Xc = (1.0 - w) * Xd + w * Xa;
+
+    // 변위/증분 제한(라인 유지용)
+    const double max_offset = 0.010;  // Xd로부터 최대 이탈 (m) — 필요시 축별로
+    for (int i=0;i<3;i++)
+        Xc(i) = std::clamp(Xc(i), Xd(i)-max_offset, Xd(i)+max_offset);
+
+    const double max_step = 0.003;    // 한 스텝 최대 이동 (m)
+    Eigen::Vector3d step = Xc - Xc_prev;
+    for (int i=0;i<3;i++)
+        step(i) = std::clamp(step(i), -max_step, max_step);
+    Xc = Xc_prev + step;
+    Xc_prev = Xc;
+
+    // ── 5) IK 입력 (Baseline 동일: 플랜지 Z = TCP Z + TOOL_Z)
+    Eigen::Matrix3d Rd_R;
+    AKin.EulerAngle2Rotation(Rd_R, Rd_rpy);
+
+    Eigen::Vector3d flange_xyz = Xc;
+    flange_xyz(2) += TOOL_Z;
+
+    RArm.Td << Rd_R(0,0), Rd_R(0,1), Rd_R(0,2), flange_xyz(0),
+               Rd_R(1,0), Rd_R(1,1), Rd_R(1,2), flange_xyz(1),
+               Rd_R(2,0), Rd_R(2,1), Rd_R(2,2), flange_xyz(2),
+               0,0,0,1;
+
+#if TCP_standard == 0
+    AKin.InverseK_min(&RArm);
+#else
+    AKin.Ycontact_InverseK_min(&RArm);
+#endif
+
+    // ── 6) joints publish (Baseline 형식 유지)
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < DOF; ++i)
         joint_state_.position[i] = RArm.qd(i);
     joint_commands_pub_->publish(joint_state_);
 
-    // 7) 다음 웨이포인트로
-    ++path_exe_counter;
-    return false; // 아직 진행 중
+    return true;
 }
+
 
 
 
