@@ -138,6 +138,9 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
   joint_cmd_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
     "/yoon_UR10e_joint_cmd", 100, std::bind(&JointControl::JointCmdCallback, this, std::placeholders::_1));
 
+  VR_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
+    "/vive/pos0", 100, std::bind(&JointControl::VRdataCallback, this, std::placeholders::_1));
+
   joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
     "/isaac_joint_states", rclcpp::QoS(10), std::bind(&JointControl::getActualQ, this, std::placeholders::_1));
 
@@ -435,6 +438,78 @@ void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr 
     set_status(message_status, path_gen_done);
     path_done_flag = true;
   }
+}
+
+void JointControl::VRdataCallback(geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+  if(!VR_yaml_loader) {
+    YAML::Node T_AD = NRS_VR_setting["T_AD"];
+    for (std::size_t i = 0; i < T_AD.size(); ++i)
+      for(std::size_t j = 0; j < T_AD[i].size(); ++j)
+        VR_Cali_TAD(i,j) = T_AD[i][j].as<double>();
+
+    YAML::Node T_BC_inv = NRS_VR_setting["T_BC_inv"];
+    for (std::size_t i = 0; i < T_BC_inv.size(); ++i)
+      for(std::size_t j = 0; j < T_BC_inv[i].size(); ++j)
+        VR_Cali_TBC_inv(i,j) = T_BC_inv[i][j].as<double>();
+
+    YAML::Node T_BC_PB = NRS_VR_setting["T_BC_PB"];
+    for (std::size_t i = 0; i < T_BC_PB.size(); ++i)
+      for(std::size_t j = 0; j < T_BC_PB[i].size(); ++j)
+        VR_Cali_TBC_PB(i,j) = T_BC_PB[i][j].as<double>();
+
+    YAML::Node T_CE = NRS_VR_setting["T_CE"];
+    for (std::size_t i = 0; i < T_CE.size(); ++i)
+      for(std::size_t j = 0; j < T_CE[i].size(); ++j)
+        VR_Cali_TCE(i,j) = T_CE[i][j].as<double>();
+
+    YAML::Node R_Adj = NRS_VR_setting["R_Adj"];
+    for (std::size_t i = 0; i < R_Adj.size(); ++i)
+      for(std::size_t j = 0; j < R_Adj[i].size(); ++j)
+        VR_Cali_RAdj(i,j) = R_Adj[i][j].as<double>();
+
+    VR_yaml_loader = true;
+  }
+
+  VR_pose[0] = msg->pose.position.x;
+  VR_pose[1] = msg->pose.position.y;
+  VR_pose[2] = msg->pose.position.z;
+  VR_pose[3] = msg->pose.orientation.w;
+  VR_pose[4] = msg->pose.orientation.x;
+  VR_pose[5] = msg->pose.orientation.y;
+  VR_pose[6] = msg->pose.orientation.z;
+
+  VR_Q2Rot = AKin.Qua2Rot(VR_pose[3],VR_pose[4],VR_pose[5],VR_pose[6]);
+  VR_PoseM.block(0,0,3,3) = VR_Q2Rot;
+  VR_PoseM.block(0,3,3,1) << VR_pose[0], VR_pose[1], VR_pose[2];
+  VR_PoseM.block(3,0,1,4) << 0.0,0.0,0.0,1.0;
+
+  VR_Cali_TAdj.block(0,0,3,3) = AKin.RotZ(0.0)*(AKin.RotX(0.0))*VR_Cali_RAdj.transpose();
+  VR_Cali_TAdj.block(0,3,3,1) << 0.0, 0.0, 0.0;
+  VR_Cali_TAdj.block(3,0,1,4) << 0.0, 0.0, 0.0, 1.0;
+  VR_PoseM = VR_Cali_TAdj*VR_PoseM;
+
+  Quaterniond VR_roted_qua = AKin.Rot2Qua(VR_PoseM.block(0,0,3,3));
+  VR_pose[0] = VR_PoseM(0,3);
+  VR_pose[1] = VR_PoseM(1,3);
+  VR_pose[2] = VR_PoseM(2,3);
+  VR_pose[3] = VR_roted_qua.w();
+  VR_pose[4] = VR_roted_qua.x();
+  VR_pose[5] = VR_roted_qua.y();
+  VR_pose[6] = VR_roted_qua.z();
+
+  VR_CalPoseM = VR_Cali_TAD*VR_PoseM*VR_Cali_TBC_inv*VR_Cali_TBC_PB*VR_Cali_TCE;
+  Quaterniond VR_cal_qua = AKin.Rot2Qua(VR_CalPoseM.block(0,0,3,3));
+  VR_cal_pose[0] = VR_CalPoseM(0,3);
+  VR_cal_pose[1] = VR_CalPoseM(1,3);
+  VR_cal_pose[2] = VR_CalPoseM(2,3);
+  VR_cal_pose[3] = VR_cal_qua.w();
+  VR_cal_pose[4] = VR_cal_qua.x();
+  VR_cal_pose[5] = VR_cal_qua.y();
+  VR_cal_pose[6] = VR_cal_qua.z();
+
+  VR_CalRPY=AKin.VR_Rot2RPY(VR_CalPoseM.block(0,0,3,3));
+  VR_CalPoseRPY << VR_CalPoseM(0,3),VR_CalPoseM(1,3),VR_CalPoseM(2,3),
+                    M_PI+VR_CalRPY(1), -M_PI-VR_CalRPY(2), -M_PI/2-VR_CalRPY(0);
 }
 
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg) {
