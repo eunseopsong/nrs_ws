@@ -12,8 +12,8 @@ def load_xyz(path: str):
     return data[:, 0], data[:, 1], data[:, 2]  # x, y, z
 
 def main():
-    path_a = "/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt"
-    path_b = "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt"
+    path_a = "/home/eunseop/nrs_ws/src/rtde_handarm2/data/hand_g_recording.txt"
+    path_b = "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt"
 
     # 데이터 로드
     x_a, y_a, z_a = load_xyz(path_a)

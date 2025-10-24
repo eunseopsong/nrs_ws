@@ -30,7 +30,7 @@ public:
     topic_        = this->declare_parameter<std::string>("topic", "/isaac_joint_commands");
     hz_           = this->declare_parameter<double>("hz", 100.0);
     use_degrees_  = this->declare_parameter<bool>("use_degrees", false); // r,p,y 단위 선택
-    tool_z_       = this->declare_parameter<double>("tool_z", 0.239);    // EE +Z → TCP [m]
+    tool_z_       = this->declare_parameter<double>("tool_z", 0.248);    // EE +Z → TCP [m]
     interp_s_     = this->declare_parameter<double>("interp_s", 0.0);    // 보간 시간(초)
 
     // ---- Publisher ----
