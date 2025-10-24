@@ -31,6 +31,8 @@ set(Yoon_LIB
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/ur10e_forward.cpp # Add on 2025.10.24
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/UR10/ur10e_inverse.cpp # Add on 2025.10.24
 
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/ForceControl/admittance_control.cpp # Add on 2025.10.24
+
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_force_control/Yoon_force_control.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_path/Yoon_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/include/rtde_handarm2/Yoon_filters/Yoon_filters.cpp
