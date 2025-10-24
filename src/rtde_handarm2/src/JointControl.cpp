@@ -1,6 +1,16 @@
-// JointControl.cpp
+// JointControl.cpp (v2025-rt-safe)
+// - 기존 기능을 유지하면서 실시간성/일관성/안정성 개선
+// - 주요 수정점: dt 측정, TOOL_Z 일관화, 조인트 소스 단일화, 힘 변환 간소화, 퍼블리시 최적화
+
 #include "JointControl.h"
 
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <algorithm>
+#include <chrono>
+#include <mutex>
+#include <filesystem>
 
 constexpr int DOF = 6;
 using Vector6d = Eigen::Matrix<double, 6, 1>;
@@ -10,55 +20,30 @@ using Vector6d = Eigen::Matrix<double, 6, 1>;
 // ================================================================================
 //
 // [1] 로봇 및 운동학 관련 객체
-// -------------------------------------------------------------------------------
-// - AKin                : Kinematics helper
-//                         - ForwardK_T(), InverseK_min(), Rotation2EulerAngle() 등 제공
-//                         - EE 좌표계 계산 및 역기구학 수행
+//  - AKin : Kinematics helper (ForwardK_T, Ycontact_ForwardK_T, InverseK_min, Rotation2EulerAngle, …)
+//  - RArm : Robot arm state holder
+//      qc : 현재 조인트(rad)
+//      qd : 목표 조인트(rad)
+//      xc : 현재 EE 위치 (x,y,z) [m]
+//      thc: 현재 EE RPY (r,p,y) [rad]
+//      Tc/Td : Homogeneous Transform (현재/목표)
 //
-// - RArm                : Robot arm state holder
-//                         - qc : 현재 조인트 위치 [rad]
-//                         - qd : 목표 조인트 위치 [rad]
-//                         - xc : 현재 EE 위치 (x, y, z)
-//                         - thc : 현재 EE 자세 (roll, pitch, yaw)
-//                         - Tc, Td : Homogeneous Transform (현재/목표)
+// [2] Trajectory/Playback
+//  - Hand_G_playback : TXT 파일 핸들 (x y z r p y fx fy fz)
+//  - path_exe_counter/Path_point_num 등 실행 인덱스
 //
-// [2] Trajectory 및 Playback 관련 객체
-// -------------------------------------------------------------------------------
-// - Posture_PB, Power_PB : path / playback 관련 구조체
-//                          - 예전 버전에서는 PTP_* 함수에 사용되었으나
-//                            현재 버전(v2025)에서는 InitMove(), PathFollow(), ReturnHomePose()로 통합됨
+// [3] 제어/상태 관련 글로벌들
+//  - ctrl, pre_ctrl (std::atomic<int>)
+//  - mode_cmd, path_done_flag, pause_cnt, speedmode, printer_counter, print_period 등
+//  - 메시지 문자열: message_status, set_status()
+//  - 파일 핸들: hand_g_recording, Discre_P_recording, VRCali_UR10CB_EE, VRCali_UR10CB_VR, path_recording_pos, path_recording_joint, EXPdata1
 //
-// - joint_trajectory_    : TXT 파일 기반 EE 또는 Joint trajectory 저장용 벡터
-// - path_exe_counter     : trajectory 실행 단계 인덱스 관리
-//
-// [3] 외력 및 제어 관련 파라미터
-// -------------------------------------------------------------------------------
-// - Contact_Fcon_mode    : 외력 제어 모드 선택값 (ex. 4 → Force Control 모드)
-// - contact_force        : F/T 센서에서 측정된 접촉 힘 [N]
-// - ControlForce()       : Admittance / FAAC 제어 메인 함수
-//
-// [4] 설정 및 환경 관련 객체
-// -------------------------------------------------------------------------------
-// - NRS_recording        : YAML::Node, trajectory 기록 및 설정 관리
-// - NRS_VR_setting       : YAML::Node, VR Teaching 관련 설정
-//
-// [5] 제어 모드 상수 (Yoon_UR10e_cmd.h에 정의됨)
-// -------------------------------------------------------------------------------
-// - Hand_guiding_mode    : 핸드가이딩 제어 모드
-// - Motion_stop_mode     : 정지 상태
-// - Cartesian_mode_cmd   : Cartesian 위치 제어 모드
-// - Joint_control_mode_cmd : Joint 위치 제어 모드
-// - Contact_Fcon_mode    : Force/Admittance 제어 모드
-//
-// [6] 기타 유틸리티
-// -------------------------------------------------------------------------------
-// - J_single, path_planning : Path generator (이전 버전에서 사용)
-// - txt trajectory 파일 : x y z r p y fx fy fz (9열 형식)
-//                         → 현재 버전에서는 1~6열만 position/orientation 추종에 사용
-// ================================================================================
-// ================================================================================
+// [4] 상수/모드 상수 (Yoon_UR10e_cmd.h)
+//  - Hand_guiding_mode_cmd, Motion_stop_cmd, Playback_mode_cmd, Joint_control_mode_cmd,
+//    EE_Posture_control_mode_cmd, Continuous_reording_start, Continusous_recording_end, …
+//// ================================================================================
 
-
+// ===================== 유틸 & 전역 =====================
 static std::mutex g_cmdmode_mtx;
 
 template <size_t N>
@@ -75,12 +60,7 @@ static std::string trim_path(std::string s) {
   return s;
 }
 
-// ========== 안전한 YAML 경로 취득 & 디렉토리 준비 유틸 ==========
-
-// YAML에서 key에 해당하는 값을 안전하게 파일 경로 문자열로 반환한다.
-// - 스칼라면 그대로 사용
-// - 시퀀스면 path join
-// - 미정의/스칼라 아님/변환 실패면 ""을 반환하고 에러 로그
+// YAML에서 파일 경로 안전 취득
 static std::string yaml_get_path(const YAML::Node& root, const char* key, const rclcpp::Logger& logger) {
   try {
     if (!root || !root.IsMap()) {
@@ -114,7 +94,7 @@ static std::string yaml_get_path(const YAML::Node& root, const char* key, const 
   }
 }
 
-// 주어진 파일 경로의 부모 폴더를 생성(존재하지 않으면)한다.
+// 파일 부모 폴더 보장
 static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger& logger) {
   if (filepath.empty()) return;
   std::error_code ec;
@@ -129,26 +109,30 @@ static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger&
   }
 }
 
+// EE +Z → TCP 오프셋(모든 FK/IK에서 동일 사용)
+static constexpr double TOOL_Z = 0.248;  // [m]
+
 // ===================== JointControl =====================
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
-: node_(node), milisec(0)
+: node_(node), milisec(0.0)
 {
+  // 모니터링 객체
   AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "AdaptiveK_msg");
   FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "FAAC3step_msg");
 
   // Publishers
-  YSurfN_Fext_pub_   = node_->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
-  UR10e_mode_pub_    = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
-  UR10_pose_pub_     = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
-  UR10_wrench_pub_   = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
-  // Isaac joint command
+  YSurfN_Fext_pub_    = node_->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
+  UR10e_mode_pub_     = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
+  UR10_pose_pub_      = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
+  UR10_wrench_pub_    = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
   joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20);
 
+  // JointState 메시지 초기화(고정 필드 사전 세팅)
   joint_state_.name = {
     "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"
   };
-  joint_state_.position.resize(6, 0.0);
+  joint_state_.position.resize(DOF, 0.0);
 
   // Subscribers
   UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
@@ -168,38 +152,39 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     std::bind(&JointControl::FtCallback, this, std::placeholders::_1)
   );
 
-  // Timer (100 ms로 동작 가정)
+  // Timer (10ms 권장). 메인루프에서 실제 dt는 steady_clock으로 산출.
   timer_ = node_->create_wall_timer(
     std::chrono::milliseconds(10),
     std::bind(&JointControl::CalculateAndPublishJoint, this));
 
-  // 파일 핸들/상태 초기화
-  if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
-  if (Discre_P_recording){ std::fclose(Discre_P_recording);Discre_P_recording= nullptr; }
-  if (VRCali_UR10CB_EE) { std::fclose(VRCali_UR10CB_EE); VRCali_UR10CB_EE = nullptr; }
-  if (VRCali_UR10CB_VR) { std::fclose(VRCali_UR10CB_VR); VRCali_UR10CB_VR = nullptr; }
-  if (Hand_G_playback)  { std::fclose(Hand_G_playback);  Hand_G_playback  = nullptr; }
-  if (path_recording_pos){ std::fclose(path_recording_pos);path_recording_pos= nullptr; }
-  if (path_recording_joint){ std::fclose(path_recording_joint); path_recording_joint = nullptr; }
-  if (EXPdata1) { std::fclose(EXPdata1); EXPdata1=nullptr; }
+  // 파일 핸들 정리
+  if (hand_g_recording)    { std::fclose(hand_g_recording);    hand_g_recording    = nullptr; }
+  if (Discre_P_recording)  { std::fclose(Discre_P_recording);  Discre_P_recording  = nullptr; }
+  if (VRCali_UR10CB_EE)    { std::fclose(VRCali_UR10CB_EE);    VRCali_UR10CB_EE    = nullptr; }
+  if (VRCali_UR10CB_VR)    { std::fclose(VRCali_UR10CB_VR);    VRCali_UR10CB_VR    = nullptr; }
+  if (Hand_G_playback)     { std::fclose(Hand_G_playback);     Hand_G_playback     = nullptr; }
+  if (path_recording_pos)  { std::fclose(path_recording_pos);  path_recording_pos  = nullptr; }
+  if (path_recording_joint){ std::fclose(path_recording_joint);path_recording_joint = nullptr; }
+  if (EXPdata1)            { std::fclose(EXPdata1);            EXPdata1            = nullptr; }
 
-  // 디버그/상태
+  // 상태 초기화
   set_status(message_status, "Motion stop");
   LD_X=LD_Y=LD_Z=LD_Roll=LD_Pitch=LD_Yaw=LD_CFx=LD_CFy=LD_CFz=0.0f;
 }
 
 JointControl::~JointControl() {
-  if (hand_g_recording) std::fclose(hand_g_recording);
-  if (Discre_P_recording) std::fclose(Discre_P_recording);
-  if (VRCali_UR10CB_EE) std::fclose(VRCali_UR10CB_EE);
-  if (VRCali_UR10CB_VR) std::fclose(VRCali_UR10CB_VR);
-  if (Hand_G_playback) std::fclose(Hand_G_playback);
-  if (path_recording_pos) std::fclose(path_recording_pos);
+  if (hand_g_recording)     std::fclose(hand_g_recording);
+  if (Discre_P_recording)   std::fclose(Discre_P_recording);
+  if (VRCali_UR10CB_EE)     std::fclose(VRCali_UR10CB_EE);
+  if (VRCali_UR10CB_VR)     std::fclose(VRCali_UR10CB_VR);
+  if (Hand_G_playback)      std::fclose(Hand_G_playback);
+  if (path_recording_pos)   std::fclose(path_recording_pos);
   if (path_recording_joint) std::fclose(path_recording_joint);
-  if (EXPdata1) std::fclose(EXPdata1);
+  if (EXPdata1)             std::fclose(EXPdata1);
 }
 
 // ===================== Mode Callback =====================
+// 역할: 외부 모드 명령을 수신하여 상태/파일/레코딩을 전환하고, ctrl 원자 변수 갱신
 void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
   std::lock_guard<std::mutex> lk(g_cmdmode_mtx);
   try {
@@ -215,7 +200,6 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
 
       if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
 
-      // 안전한 경로 취득 + 디렉토리 준비
       auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
       if (hand_path.empty()) {
         RCLCPP_ERROR(node_->get_logger(), "hand_g_recording path invalid; recording aborted.");
@@ -285,8 +269,9 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       } else {
         Decr_RD_points.topRows(Num_RD_points+1) = Inst_RD_points;
       }
-      Decr_RD_points.bottomRows(1) << VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
-                                      VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
+      Decr_RD_points.bottomRows(1) <<
+        VR_CalPoseRPY(0), VR_CalPoseRPY(1), VR_CalPoseRPY(2),
+        VR_CalPoseRPY(3), VR_CalPoseRPY(4), VR_CalPoseRPY(5);
       Num_RD_points++;
       std::snprintf(Saved_way_point, sizeof(Saved_way_point), "Saved way point: %d", Num_RD_points);
       set_status(message_status, Saved_way_point);
@@ -400,7 +385,6 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       printf("\n Cali points saved \n");
     }
     else if (mode_cmd == Playback_mode_cmd) {
-      // 경로 파일 검증 + 오픈(재사용 위해 핸들 유지)
       auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
       if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
         RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
@@ -423,9 +407,9 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
     else if (mode_cmd == Motion_stop_cmd) {
       ctrl.store(0, std::memory_order_release);
       set_status(message_status, Motion_stop_mode);
-      if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
-      if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
-      if (path_recording_pos){ std::fclose(path_recording_pos);path_recording_pos= nullptr; }
+      if (Hand_G_playback)     { std::fclose(Hand_G_playback);     Hand_G_playback     = nullptr; }
+      if (hand_g_recording)    { std::fclose(hand_g_recording);    hand_g_recording    = nullptr; }
+      if (path_recording_pos)  { std::fclose(path_recording_pos);  path_recording_pos  = nullptr; }
     }
 
   } catch (const std::exception& e) {
@@ -433,21 +417,20 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
   }
 }
 
-// ===================== Other Callback =====================
+// ===================== Other Callbacks =====================
+// 역할: 수동 재생 인덱스/단일 조인트 블렌딩 명령 수신
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg) {
   PB_iter_cmd = msg->data; PB_iter_cur = 1; // 1 is right
 }
 
+// 역할: 단일 조인트 증분 경로 생성 및 모드1 실행 트리거
 void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr msg) {
   mjoint_cmd = msg->data;
   printf("\nSelected joint: %1.0f, Target relative joint angle: %4f \n", mjoint_cmd[0],mjoint_cmd[1]);
-  double Tar_pos[] = {0.0};
-  double Tar_vel[] = {0.0};
-  double Waiting_time[] = {0,0}; // s
-  double Vel_set = 0.1; // rad/s
 
-  Tar_pos[0] = std::fabs(mjoint_cmd[1]);
-  Tar_vel[0] = (mjoint_cmd[1]>=0) ? Vel_set : -Vel_set;
+  double Tar_pos[] = { std::fabs(mjoint_cmd[1]) };
+  double Tar_vel[] = { (mjoint_cmd[1]>=0) ? 0.1 : -0.1 };
+  double Waiting_time[] = {0,0}; // s
 
   Joint_path_start <<RArm.qc(0),RArm.qc(1),RArm.qc(2),RArm.qc(3),RArm.qc(4),RArm.qc(5);
   Path_point_num = J_single.Single_blended_path(Tar_pos,Tar_vel,Waiting_time,(int)(sizeof(Tar_pos)/sizeof(*Tar_pos)));
@@ -459,108 +442,85 @@ void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr 
   }
 }
 
+// 역할: Isaac joint_state 구독 → RArm.qc 최신화(진리 소스)
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg) {
-  for (int i = 0; i < 6 && i < (int)msg->position.size(); ++i){
+  for (int i = 0; i < DOF && i < (int)msg->position.size(); ++i){
     RArm.qc[i] = msg->position[i];
   }
 }
 
 // ===================== UpdateState() =====================
+// 역할: 현재 조인트(RArm.qc) 기반 FK 계산 → TCP Pose(pos_current, rpy_current) 업데이트
 void JointControl::UpdateState()
 {
-    // 1️⃣ joint_pos → Eigen::VectorXd 변환
-    Eigen::VectorXd q(6);
-    for (int i = 0; i < 6; ++i)
-        q(i) = joint_pos[i];
+    // 최신 조인트는 콜백에서 RArm.qc에 유지됨
+    Eigen::Matrix<double, DOF, 1> q = RArm.qc;
 
-    // 2️⃣ TCP offset 포함 Forward 계산
-    constexpr double TOOL_Z = 0.248;  // [m]
+    // EE +Z → TCP 오프셋을 포함한 FK
     T_current = ur10e_forward(q, TOOL_Z);
 
-    // 3️⃣ 위치, 자세 계산
     pos_current = T_current.block<3, 1>(0, 3);
-    Eigen::Matrix3d R_TCP = T_current.block<3, 3>(0, 0);
+    const Eigen::Matrix3d R_TCP = T_current.block<3, 3>(0, 0);
+
+    // XYZ-fixed RPY
     Eigen::Vector3d rpy;
-    rpy(0) = std::atan2(R_TCP(2,1), R_TCP(2,2));   // Roll
-    rpy(1) = std::asin(-R_TCP(2,0));               // Pitch
-    rpy(2) = std::atan2(R_TCP(1,0), R_TCP(0,0));   // Yaw
+    rpy(0) = std::atan2(R_TCP(2,1), R_TCP(2,2));
+    rpy(1) = std::asin(-R_TCP(2,0));
+    rpy(2) = std::atan2(R_TCP(1,0), R_TCP(0,0));
     rpy_current = rpy;
-
-    // 4️⃣ 조인트 각도 문자열로 변환
-    // std::ostringstream q_str;
-    // q_str << std::fixed << std::setprecision(3);
-    // q_str << "[";
-    // for (int i = 0; i < 6; ++i) {
-    //     q_str << q(i);
-    //     if (i < 5) q_str << ", ";
-    // }
-    // q_str << "]";
-
-    // 5️⃣ 디버그 출력
-    // RCLCPP_INFO(node_->get_logger(),
-    //             "[UpdateState] q=%s → TCP Pose: x=%.6f y=%.6f z=%.6f | r=%.6f p=%.6f y=%.6f",
-    //             q_str.str().c_str(),
-    //             pos_current(0), pos_current(1), pos_current(2),
-    //             rpy_current(0), rpy_current(1), rpy_current(2));
 }
-
 
 // ===================== Force Callback =====================
+// 역할: TCP축 힘(Fz)을 수신하고, 최신 FK 회전으로 Base 프레임 힘 벡터를 계산
 void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 {
-    // 1️⃣ TCP 기준의 접촉 힘 (F_TCP = [0, 0, Fz])
     contact_force = msg->data;
-    Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
 
-    // 2️⃣ 현재 조인트 각도로 Inverse 행렬 계산 (TCP → Base)
-    Eigen::VectorXd q(6);
-    for (int i = 0; i < 6; ++i)
-        q(i) = joint_pos[i];   // 최신 조인트 상태 사용
+    // TCP 기준 힘(스칼라만 올 때의 가정: [0,0,Fz])
+    const Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
 
-    constexpr double TOOL_Z = 0.248; // EE +Z → TCP offset [m]
-    Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
-    Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3, 3>(0, 0);
+    // 가장 최근 FK(메인루프/여기서 계산된)의 회전 사용
+    const Eigen::Matrix3d R_TCP_base = RArm.Tc.block<3,3>(0,0);
+    const Eigen::Vector3d F_base = R_TCP_base * F_TCP;
 
-    // 3️⃣ Base 좌표계 기준 힘 계산
-    Eigen::Vector3d F_base = R_TCP_base * F_TCP;
-
-    // (선택) F_base 퍼블리시 가능
-    // std_msgs::msg::Float64MultiArray F_base_msg;
-    // F_base_msg.data = {F_base(0), F_base(1), F_base(2)};
-    // UR10_wrench_pub_->publish(F_base_msg);
-
-    // (선택) 디버깅 출력
-    // RCLCPP_INFO(node_->get_logger(),
-    //             "[FtCallback] TCP Fz=%.3f → Base Fx=%.3f Fy=%.3f Fz=%.3f",
-    //             contact_force, F_base(0), F_base(1), F_base(2));
+    // 필요 시 퍼블리시/로그 확장 가능
+    (void)F_base;
 }
 
-
-
-
-
+// ===================== InitMove() =====================
+// 역할: 재생 시작 시 현재 위치→TXT 첫 포즈로 시간기반 보간 이동(SLERP+선형)
 bool JointControl::InitMove(double dt_s)
 {
-    static bool active = false;
-    static bool finished = false;
-    static double elapsed = 0.0;
-    static double duration = 0.0;
+    // ---- 파라미터(필요시 rosparam으로 승격 가능) ----
+    static constexpr double LIN_VEL   = 0.20;  // m/s  (기존 0.05 -> 빠르게)
+    static constexpr double ANG_VEL   = 1.0;   // rad/s
+    static constexpr double MIN_DUR   = 0.8;   // s    (너무 짧지 않게)
+    static constexpr double MAX_DUR   = 4.0;   // s    (너무 길지 않게)
+
+    // ---- 내부 상태 ----
+    static bool active = false, finished = false;
+    static double elapsed = 0.0, duration = 0.0;
     static Eigen::Vector3d start_xyz, goal_xyz;
     static Eigen::Matrix3d start_rot, goal_rot;
+    static FILE* last_handle = nullptr;
 
-    constexpr double TOOL_Z = -0.248;
+    // 파일 핸들이 바뀌면 상태 리셋(재생 재시작 안정화)
+    if (Hand_G_playback != last_handle) {
+        active = false; finished = false; elapsed = 0.0; duration = 0.0;
+        last_handle = Hand_G_playback;
+    }
 
-    // --- 최초 진입 시 ---
+    // --- 최초 진입 ---
     if (!active && !finished) {
         if (!Hand_G_playback) return false;
 
-        // TXT 첫 유효 라인 읽기
+        // TXT 첫 유효 라인 읽기(#만 스킵)
         float x, y, z, r, p, yw, fx, fy, fz;
         char buf[2048];
         bool valid = false;
         std::rewind(Hand_G_playback);
         while (std::fgets(buf, sizeof(buf), Hand_G_playback)) {
-            if (buf[0]=='#' || std::isspace(buf[0])) continue;
+            if (buf[0] == '#') continue;
             int n = std::sscanf(buf, "%f %f %f %f %f %f %f %f %f",
                                 &x,&y,&z,&r,&p,&yw,&fx,&fy,&fz);
             if (n == 9) { valid = true; break; }
@@ -570,42 +530,48 @@ bool JointControl::InitMove(double dt_s)
             return false;
         }
 
-        start_xyz = RArm.xc;                   // 현재 pose [m]
-        goal_xyz  = Eigen::Vector3d(x, y, z);  // txt 목표 [m]
+        start_xyz = RArm.xc;
+        goal_xyz  = Eigen::Vector3d(x, y, z);
 
         start_rot = RArm.Tc.block<3,3>(0,0);
         Eigen::Vector3d goal_rpy(r,p,yw);
         AKin.EulerAngle2Rotation(goal_rot, goal_rpy);
 
-        double linear_dist = (goal_xyz - start_xyz).norm();
-        double vel = 0.05; // m/s
-        duration = std::max(2.0, linear_dist / std::max(1e-6, vel));
+        // 시간 산정: 선형/회전 요구시간 중 큰 값 사용 + 캡핑
+        const double lin_dist = (goal_xyz - start_xyz).norm();
+        const Eigen::Quaterniond q0(start_rot), q1(goal_rot);
+        const double ang_dist = std::acos(std::clamp(q0.normalized().dot(q1.normalized()), -1.0, 1.0)) * 2.0;
+
+        double t_lin = (LIN_VEL > 1e-6) ? lin_dist / LIN_VEL : 0.0;
+        double t_ang = (ANG_VEL > 1e-6) ? ang_dist / ANG_VEL : 0.0;
+
+        duration = std::max(MIN_DUR, std::min(MAX_DUR, std::max(t_lin, t_ang)));
 
         elapsed = 0.0;
         active = true;
         finished = false;
 
-        printf("[InitMove] start → goal (dist=%.3f, dur=%.2fs)\n", linear_dist, duration);
+        printf("[InitMove] dist=%.3f ang=%.3f rad -> dur=%.2fs\n", lin_dist, ang_dist, duration);
     }
 
     if (!active) return finished;
 
-    // --- 진행 중 ---
+    // --- 진행 ---
     elapsed += dt_s;
-    double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
+    const double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
 
-    Eigen::Vector3d xyz_interp = (1.0 - alpha) * start_xyz + alpha * goal_xyz;
+    const Eigen::Vector3d xyz_interp = (1.0 - alpha) * start_xyz + alpha * goal_xyz;
     Desired_XYZ = xyz_interp;
 
     Eigen::Quaterniond q0(start_rot), q1(goal_rot);
     if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0;
-    Eigen::Quaterniond q_interp = q0.slerp(alpha, q1).normalized();
-    Eigen::Matrix3d R_interp = q_interp.toRotationMatrix();
+    const Eigen::Quaterniond q_interp = q0.slerp(alpha, q1).normalized();
+    const Eigen::Matrix3d R_interp = q_interp.toRotationMatrix();
     Desired_RPY = R_interp.eulerAngles(0,1,2);
 
-    // ---- IK 변환 및 퍼블리시 ----
+    // IK 변환 (TCP -> 플랜지, z에 TOOL_Z 더함)
     Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-    Desired_XYZ_cmd(2) -= TOOL_Z;
+    Desired_XYZ_cmd(2) += TOOL_Z;
 
     RArm.Td << R_interp(0,0),R_interp(0,1),R_interp(0,2),Desired_XYZ_cmd(0),
                 R_interp(1,0),R_interp(1,1),R_interp(1,2),Desired_XYZ_cmd(1),
@@ -618,29 +584,35 @@ bool JointControl::InitMove(double dt_s)
 #endif
 
     joint_state_.header.stamp = node_->now();
-    for (int i = 0; i < 6; ++i)
-        joint_state_.position[i] = RArm.qd(i);
+    for (int i = 0; i < DOF; ++i) joint_state_.position[i] = RArm.qd(i);
     joint_commands_pub_->publish(joint_state_);
 
-    // --- 종료 조건 ---
+    // --- 종료 ---
     if (alpha >= 1.0 - 1e-6) {
         active = false;
         finished = true;
-        std::rewind(Hand_G_playback);
-        printf("[InitMove] completed → switching to PathFollow.\n");
+        std::rewind(Hand_G_playback); // PathFollow가 처음부터 읽도록
+        printf("[InitMove] completed.\n");
     }
-
     return finished;
 }
 
 
-bool JointControl::PathFollow(double dt_s)
-{
-    static bool active = true;
-    if (!active)
-        return false;
 
-    // playback 파일 존재 확인
+// ===================== PathFollow() =====================
+// 역할: TXT를 한 줄씩 읽어 목표 포즈로 IK → 조인트 명령 퍼블리시
+bool JointControl::PathFollow(double /*dt_s*/)
+{
+    // 재생 파일 핸들이 바뀌면 active 재활성화
+    static bool active = true;
+    static FILE* last_handle = nullptr;
+    if (Hand_G_playback != last_handle) {
+        active = true;
+        last_handle = Hand_G_playback;
+    }
+
+    if (!active) return false;
+
     if (!Hand_G_playback) {
         RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
         ctrl.store(0, std::memory_order_release);
@@ -648,7 +620,7 @@ bool JointControl::PathFollow(double dt_s)
         return false;
     }
 
-    // ---- TXT 파일에서 (x y z r p y fx fy fz) 읽기 ----
+    // TXT: x y z r p y fx fy fz
     float LD_X, LD_Y, LD_Z;
     float LD_Roll, LD_Pitch, LD_Yaw;
     float LD_CFx, LD_CFy, LD_CFz;
@@ -658,39 +630,34 @@ bool JointControl::PathFollow(double dt_s)
                            &LD_Roll, &LD_Pitch, &LD_Yaw,
                            &LD_CFx, &LD_CFy, &LD_CFz);
 
-    // ---- 파일 끝(EOF) ----
     if (reti != 9) {
         std::fclose(Hand_G_playback);
         Hand_G_playback = nullptr;
         active = false;
 
-        // 다음 단계(ReturnHomePose) 준비
-        return_active_ = true;
+        // Return 준비
+        return_active_  = true;
         return_elapsed_ = 0.0;
-        return_duration_ = 4.0;
-        for (int i = 0; i < 6; ++i)
-            return_start_q_(i) = RArm.qc(i);
+        return_duration_= 4.0;
+        for (int i = 0; i < DOF; ++i) return_start_q_(i) = RArm.qc(i);
 
         printf("[PB] End of file. Start return-to-home.\n");
         return false;
     }
 
-    // ---- 목표 pose 업데이트 ----
     Desired_XYZ << (double)LD_X, (double)LD_Y, (double)LD_Z;
     Desired_RPY << (double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw;
 
-    // ---- Force 값 업데이트 ----
     Contact_Rot_force(0) = (double)LD_CFx;
     Contact_Rot_force(1) = (double)LD_CFy;
     Contact_Rot_force(2) = (double)LD_CFz;
 
-    // ---- IK 계산 ----
     Eigen::Matrix3d Desired_rot;
     AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
 
+    // ⬅️ FIX: IK용 플랜지 z = TCP z + TOOL_Z
     Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-    constexpr double TOOL_Z = -0.248;  // 기존과 동일한 오프셋 방향
-    Desired_XYZ_cmd(2) -= TOOL_Z;
+    Desired_XYZ_cmd(2) += TOOL_Z;
 
     RArm.Td << Desired_rot(0,0), Desired_rot(0,1), Desired_rot(0,2), Desired_XYZ_cmd(0),
                 Desired_rot(1,0), Desired_rot(1,1), Desired_rot(1,2), Desired_XYZ_cmd(1),
@@ -703,9 +670,8 @@ bool JointControl::PathFollow(double dt_s)
     AKin.Ycontact_InverseK_min(&RArm);
 #endif
 
-    // ---- 퍼블리시 ----
     joint_state_.header.stamp = node_->now();
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < DOF; ++i)
         joint_state_.position[i] = RArm.qd(i);
     joint_commands_pub_->publish(joint_state_);
 
@@ -713,39 +679,38 @@ bool JointControl::PathFollow(double dt_s)
 }
 
 
+// ===================== ReturnHomePose() =====================
+// 역할: 현재 q에서 HOME_Q까지 시간기반 선형 보간으로 복귀
 bool JointControl::ReturnHomePose(double dt_s)
 {
-    static bool active = false;
-    static double elapsed = 0.0;
+    static bool   active   = false;
+    static double elapsed  = 0.0;
     static double duration = 0.0;
     static Vector6d start_q;
 
     static const Vector6d HOME_Q = (Vector6d() <<
         0.0, -M_PI / 2.0, -M_PI / 2.0, -M_PI / 2.0, +M_PI / 2.0, 0.0).finished();
 
-    // --- 홈 복귀 활성화 ---
+    // --- 활성화 ---
     if (return_active_ && !active) {
-        active = true;
-        elapsed = 0.0;
+        active   = true;
+        elapsed  = 0.0;
         duration = return_duration_;
-        start_q = return_start_q_;
+        start_q  = return_start_q_;
     }
 
-    // --- 홈 복귀 중 ---
+    // --- 진행 ---
     if (active) {
         elapsed += dt_s;
-        double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
+        const double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
 
-        Vector6d q_cmd = (1.0 - alpha) * start_q + alpha * HOME_Q;
-        for (int i = 0; i < 6; ++i)
-            RArm.qd(i) = q_cmd(i);
+        const Vector6d q_cmd = (1.0 - alpha) * start_q + alpha * HOME_Q;
+        for (int i = 0; i < DOF; ++i) RArm.qd(i) = q_cmd(i);
 
         joint_state_.header.stamp = node_->now();
-        for (int i = 0; i < 6; ++i)
-            joint_state_.position[i] = RArm.qd(i);
+        for (int i = 0; i < DOF; ++i) joint_state_.position[i] = RArm.qd(i);
         joint_commands_pub_->publish(joint_state_);
 
-        // --- 완료 처리 ---
         if (alpha >= 1.0 - 1e-6) {
             active = false;
             return_active_ = false;
@@ -756,19 +721,23 @@ bool JointControl::ReturnHomePose(double dt_s)
         return true;
     }
 
-    // --- 비활성 상태 ---
     return false;
 }
 
-
-
-
 // ===================== Main Control Loop =====================
+// 역할: 주기(dt) 산출 → 최신 FK/상태 갱신 → 모드별 제어/퍼블리시
 void JointControl::CalculateAndPublishJoint() {
-  const double dt_s = 0.1;
-  milisec += 10;
+  // dt 측정(타이머 지터/일시정지 대비)
+  static auto t_prev = std::chrono::steady_clock::now();
+  const auto t_now = std::chrono::steady_clock::now();
+  double dt_s = std::chrono::duration<double>(t_now - t_prev).count();
+  t_prev = t_now;
+  if (dt_s <= 0.0 || dt_s > 0.2) dt_s = 0.01;  // 안전망 (10ms)
 
-  for (int i = 0; i < 6; i++) {
+  milisec += dt_s * 1000.0;
+
+  // 가속/속도/증분 초기화
+  for (int i = 0; i < DOF; i++) {
     RArm.ddqd(i) = 0;
     RArm.dqd(i)  = 0;
     RArm.dqc(i)  = 0;
@@ -776,132 +745,95 @@ void JointControl::CalculateAndPublishJoint() {
   RArm.qd = RArm.qc;
   RArm.qt = RArm.qc;
 
+  // 최신 FK & RPY
 #if TCP_standard == 0
-  AKin.ForwardK_T(&RArm); // qc -> Tc, xc
-#elif TCP_standard == 1
+  AKin.ForwardK_T(&RArm);
+#else
   AKin.Ycontact_ForwardK_T(&RArm);
 #endif
-
-  // 중요: RPY 업데이트
-  AKin.Rotation2EulerAngle(&RArm); // Tc -> thc (R,P,Y)
+  AKin.Rotation2EulerAngle(&RArm); // Tc -> thc
   RArm.Td = RArm.Tc;
 
-  VectorXd Init_qc = RArm.qc;
-  int path_exe_counter = 0;
+  // 클래스 보조 상태 동기화(가시화용)
+  for (int i = 0; i < DOF; ++i) joint_pos[i] = RArm.qc(i);
 
-  // 상태 로드
-  int control_mode = ctrl.load(std::memory_order_relaxed);
-  int pre_control_mode = pre_ctrl.load(std::memory_order_relaxed);
-
-  // ---- Base Frame 변환 (TCP → Base) ----
-  Eigen::Vector3d F_base;
+  // TCP→Base 힘 변환(참고용)
+  Eigen::Vector3d F_base = Eigen::Vector3d::Zero();
   {
-      Eigen::VectorXd q(6);
-      for (int i = 0; i < 6; ++i)
-          q(i) = RArm.qc(i);   // 현재 로봇 관절 상태 사용
-
-      constexpr double TOOL_Z = 0.248;  // EE +Z offset [m]
-      Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
-      Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3,3>(0,0);
-
-      Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
+      const Eigen::Matrix3d R_TCP_base = RArm.Tc.block<3,3>(0,0);
+      const Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
       F_base = R_TCP_base * F_TCP;
   }
 
-  // ====== Printing ======
+  // 상태 로드
+  const int control_mode     = ctrl.load(std::memory_order_relaxed);
+  const int pre_control_mode = pre_ctrl.load(std::memory_order_relaxed);
+
+  // ====== 디버그 출력(주기 제한) ======
   if (printer_counter >= print_period) {
   #if RT_printing
       printf("======================================== \n");
-      printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",
-             Actual_mode, control_mode, pre_control_mode, path_exe_counter, Path_point_num);
-      printf("Current status: %s \n", message_status);
-      printf("Selected force controller: %d \n", Contact_Fcon_mode);
-      printf("milisec: %.2f \n", milisec);
-      printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), "
-             "A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
-             RArm.qc(0), RArm.qc(0)*(180/PI),
-             RArm.qc(1), RArm.qc(1)*(180/PI),
-             RArm.qc(2), RArm.qc(2)*(180/PI),
-             RArm.qc(3), RArm.qc(3)*(180/PI),
-             RArm.qc(4), RArm.qc(4)*(180/PI),
-             RArm.qc(5), RArm.qc(5)*(180/PI));
+      printf("RUN MODE %d (prev %d)\n", control_mode, pre_control_mode);
 
-      printf("D_q1: %.3f(%.1f), D_q2: %.3f(%.1f), D_q3: %.3f(%.1f), "
-             "D_q4: %.3f(%.1f), D_q5: %.3f(%.1f), D_q6: %.3f(%.1f)\n",
-             RArm.qd(0), RArm.qd(0)*(180/PI),
-             RArm.qd(1), RArm.qd(1)*(180/PI),
-             RArm.qd(2), RArm.qd(2)*(180/PI),
-             RArm.qd(3), RArm.qd(3)*(180/PI),
-             RArm.qd(4), RArm.qd(4)*(180/PI),
-             RArm.qd(5), RArm.qd(5)*(180/PI));
-
-      // Contact force 출력
-      printf("Contact force value: %.2f \n", contact_force);
-      printf("→ Base Frame Force: CFx=%.3f  CFy=%.3f  CFz=%.3f\n",
-             F_base(0), F_base(1), F_base(2));
+      printf("q  : %.3f %.3f %.3f %.3f %.3f %.3f\n",
+            RArm.qc(0), RArm.qc(1), RArm.qc(2), RArm.qc(3), RArm.qc(4), RArm.qc(5));
+      printf("qd : %.3f %.3f %.3f %.3f %.3f %.3f\n",
+            RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
 
       printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
-             RArm.xc(0), RArm.xc(1), RArm.xc(2),
-             RArm.thc(0), RArm.thc(1), RArm.thc(2));
+            RArm.xc(0), RArm.xc(1), RArm.xc(2),
+            RArm.thc(0), RArm.thc(1), RArm.thc(2));
+
       printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
-             Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2),
-             Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
+            Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2),
+            Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
+
+      printf("Contact Fz: %.2f -> Base: %.3f %.3f %.3f\n",
+            contact_force, F_base(0), F_base(1), F_base(2));
   #endif
       printer_counter = 0;
   } else {
       printer_counter++;
   }
 
-  // ====== 토픽 퍼블리시 ======
-  UR10_pose_msg_.data.clear();
-  UR10_wrench_msg_.data.clear();
+
+  // ====== 토픽 퍼블리시(비차단/재사용 버퍼) ======
+  UR10_pose_msg_.data.resize(6);
+  UR10_wrench_msg_.data.resize(6);
   for(int i=0; i<6; i++){
-    if (i<3) UR10_pose_msg_.data.push_back(RArm.xc(i));
-    else     UR10_pose_msg_.data.push_back(RArm.thc(i-3));
-    UR10_wrench_msg_.data.push_back(ftS2(i));
+    UR10_pose_msg_.data[i]   = (i<3) ? RArm.xc(i) : RArm.thc(i-3);
+    UR10_wrench_msg_.data[i] = ftS2(i);
   }
   UR10_pose_pub_->publish(UR10_pose_msg_);
   UR10_wrench_pub_->publish(UR10_wrench_msg_);
 
-  // * ====== Control modes ====== *//
-
-  // 0) Initial state (hold the fixed home pose: 0 -90 -90 -90 90 0 deg)
+  // ====== 모드 처리 ======
+  // 0) 홈자세 고정
   if (control_mode == 0) {
       speedmode = 0;
-      // Fixed home pose in radians
       static const double HOME_Q[6] = { 0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0 };
-      // static const double HOME_Q[6] = {2.584298, -1.113670, -1.044218, -0.983704, 1.604492, -3.141593 };
 
-      // Command the home pose every cycle
-      for (int i = 0; i < 6; ++i) { 
-          RArm.qd(i) = HOME_Q[i]; 
-          joint_pos[i] = HOME_Q[i];      // ✅ UpdateState에서 사용할 현재 조인트도 갱신
+      for (int i = 0; i < DOF; ++i) {
+          RArm.qd(i)   = HOME_Q[i];
+          joint_pos[i] = HOME_Q[i];  // 가시화용 동기화
       }
 
       RArm.qt = RArm.qd;
       RArm.dqc << 0, 0, 0, 0, 0, 0;
       pause_cnt = 0;
 
-      // ✅ UpdateState() 호출 (현재 홈자세로 FK 계산)
-      // UpdateState();
-
-      // Publish to Isaac
       joint_state_.header.stamp = node_->now();
-      joint_state_.position.resize(6);
-      for (int i = 0; i < 6; ++i) { 
-          joint_state_.position[i] = RArm.qd(i); 
-      }
+      for (int i = 0; i < DOF; ++i) joint_state_.position[i] = RArm.qd(i);
       joint_commands_pub_->publish(joint_state_);
 
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
 
-  // 1) Cartesian position control mode
+  // 1) Cartesian / Joint 경로 실행 (기존 로직 유지)
   if (control_mode == 1) {
     if(path_done_flag == true) {
       if(path_exe_counter<Path_point_num) {
-        /* The case of joint position control */
         if(mode_cmd == Joint_control_mode_cmd) {
           RArm.qd(0) = Joint_path_start(0) + ((double)(mjoint_cmd[0]==1))*J_single.Final_pos(path_exe_counter,1);
           RArm.qd(1) = Joint_path_start(1) + ((double)(mjoint_cmd[0]==2))*J_single.Final_pos(path_exe_counter,1);
@@ -915,7 +847,6 @@ void JointControl::CalculateAndPublishJoint() {
               RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
           }
         }
-        /***** The case of EE posture control *****/
         else if (mode_cmd == EE_Posture_control_mode_cmd) {
           Desired_XYZ << TCP_path_start(0), TCP_path_start(1), TCP_path_start(2);
           Desired_RPY << TCP_path_start(3)+path_planning.Final_pos(path_exe_counter,1),
@@ -926,7 +857,7 @@ void JointControl::CalculateAndPublishJoint() {
                       Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
                       0,0,0,1;
 #if TCP_standard == 0
-          AKin.InverseK_min(&RArm); // input: Td , output : qd
+          AKin.InverseK_min(&RArm);
 #else
           AKin.Ycontact_InverseK_min(&RArm);
 #endif
@@ -945,47 +876,58 @@ void JointControl::CalculateAndPublishJoint() {
 
     // 명령 전송 (시뮬)
     joint_state_.header.stamp = node_->now();
-    for (int i = 0; i < 6; ++i) joint_state_.position[i] = RArm.qd(i);
+    for (int i = 0; i < DOF; ++i) joint_state_.position[i] = RArm.qd(i);
     joint_commands_pub_->publish(joint_state_);
 
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
 
-  // 2) Hand-guiding control mode
+  // 2) Hand-guiding control mode (현 버전은 별 동작 없음, 유지)
   if (control_mode == 2) {
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
 
-
-
-  // ===================================================
-  // 3) Posture / Power Playback Control Mode
-  // ===================================================
+  // 3) Playback: InitMove → PathFollow → ReturnHomePose
   if (control_mode == 3) {
-      // InitMove → PathFollow → ReturnHomePose 순서
       static bool init_done = false;
 
-      if (!init_done) {
-          init_done = InitMove(dt_s);
-          return;  // 아직 init 중이면 PathFollow 안감
+      // 모드 전환 시 InitMove부터 다시 시작
+      if (pre_control_mode != 3) {
+          init_done = false;
       }
 
-      if (PathFollow(dt_s))
-          return;
+      if (!init_done) {
+          bool just_finished = InitMove(dt_s);
+          if (!just_finished) {
+              // 아직 InitMove 진행 중이면 여기서 종료
+              pre_ctrl.store(control_mode, std::memory_order_relaxed);
+              return;
+          }
+          // ⬇️ 바로 PathFollow로 이어감 (다음 틱 기다리지 않음)
+          init_done = true;
+      }
 
+      if (PathFollow(dt_s)) {
+          pre_ctrl.store(control_mode, std::memory_order_relaxed);
+          return;
+      }
+
+      // PathFollow가 false를 반환하면 EOF → Return 단계
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
 
-    // 그 외
-    speedmode = 0;
-    RArm.qd = RArm.qc;
-    RArm.qt = RArm.qc;
-    RArm.dqc << 0,0,0,0,0,0;
-    pause_cnt=0;
 
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-  }
+
+  // 그 외(보호)
+  speedmode = 0;
+  RArm.qd = RArm.qc;
+  RArm.qt = RArm.qc;
+  RArm.dqc << 0,0,0,0,0,0;
+  pause_cnt=0;
+
+  pre_ctrl.store(control_mode, std::memory_order_relaxed);
+}
