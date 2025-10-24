@@ -93,7 +93,6 @@ private:
     void cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
-    void VRdataCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
     void FtCallback(const std_msgs::msg::Float64::SharedPtr msg);
 
     // --------------------------- //
