@@ -1,15 +1,6 @@
 // JointControl.cpp
 #include "JointControl.h"
 
-// ========================= 추가로 필요한 헤더만 유지 =========================
-#include <ament_index_cpp/get_package_share_directory.hpp>  // ROS2 패키지 경로 탐색용
-#include <filesystem>   // 파일 경로 확인용
-#include <mutex>        // 멀티스레드 동기화용 (콜백 충돌 방지 시 필요)
-#include <sstream>      // 문자열 처리용
-#include <fstream>      // 파일 입출력용
-#include <iostream>     // 디버그 출력용
-#include <sys/stat.h>   // 파일 존재 확인용
-
 
 constexpr int DOF = 6;
 using Vector6d = Eigen::Matrix<double, 6, 1>;
