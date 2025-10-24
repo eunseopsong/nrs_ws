@@ -169,8 +169,11 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // 상태 초기화
   set_status(message_status, "Motion stop");
-  LD_X=LD_Y=LD_Z=LD_Roll=LD_Pitch=LD_Yaw=LD_CFx=LD_CFy=LD_CFz=0.0f;
+  Desired_XYZ.setZero();
+  Desired_RPY.setZero();
+  Contact_Rot_force.setZero();
 }
+
 
 JointControl::~JointControl() {
   if (hand_g_recording)     std::fclose(hand_g_recording);
@@ -621,14 +624,14 @@ bool JointControl::PathFollow(double /*dt_s*/)
     }
 
     // TXT: x y z r p y fx fy fz
-    float LD_X, LD_Y, LD_Z;
-    float LD_Roll, LD_Pitch, LD_Yaw;
-    float LD_CFx, LD_CFy, LD_CFz;
+    float des_x, des_y, des_z;
+    float des_roll, des_pitch, des_yaw;
+    float des_cfx, des_cfy, des_cfz;
 
     int reti = std::fscanf(Hand_G_playback, "%f %f %f %f %f %f %f %f %f",
-                           &LD_X, &LD_Y, &LD_Z,
-                           &LD_Roll, &LD_Pitch, &LD_Yaw,
-                           &LD_CFx, &LD_CFy, &LD_CFz);
+                           &des_x, &des_y, &des_z,
+                           &des_roll, &des_pitch, &des_yaw,
+                           &des_cfx, &des_cfy, &des_cfz);
 
     if (reti != 9) {
         std::fclose(Hand_G_playback);
@@ -645,17 +648,17 @@ bool JointControl::PathFollow(double /*dt_s*/)
         return false;
     }
 
-    Desired_XYZ << (double)LD_X, (double)LD_Y, (double)LD_Z;
-    Desired_RPY << (double)LD_Roll, (double)LD_Pitch, (double)LD_Yaw;
+    Desired_XYZ << (double)des_x, (double)des_y, (double)des_z;
+    Desired_RPY << (double)des_roll, (double)des_pitch, (double)des_yaw;
 
-    Contact_Rot_force(0) = (double)LD_CFx;
-    Contact_Rot_force(1) = (double)LD_CFy;
-    Contact_Rot_force(2) = (double)LD_CFz;
+    Contact_Rot_force(0) = (double)des_cfx;
+    Contact_Rot_force(1) = (double)des_cfy;
+    Contact_Rot_force(2) = (double)des_cfz;
 
     Eigen::Matrix3d Desired_rot;
     AKin.EulerAngle2Rotation(Desired_rot, Desired_RPY);
 
-    // ⬅️ FIX: IK용 플랜지 z = TCP z + TOOL_Z
+    // IK용 플랜지 z = TCP z + TOOL_Z
     Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
     Desired_XYZ_cmd(2) += TOOL_Z;
 
@@ -677,6 +680,7 @@ bool JointControl::PathFollow(double /*dt_s*/)
 
     return true;
 }
+
 
 
 // ===================== ReturnHomePose() =====================
