@@ -461,6 +461,7 @@ void JointControl::UpdateState()
 }
 
 
+// ===================== Force Callback =====================
 void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 {
     // 1️⃣ TCP 기준의 접촉 힘 (F_TCP = [0, 0, Fz])
@@ -470,7 +471,7 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
     // 2️⃣ 현재 조인트 각도로 Inverse 행렬 계산 (TCP → Base)
     Eigen::VectorXd q(6);
     for (int i = 0; i < 6; ++i)
-        q(i) = joint_pos[i];
+        q(i) = joint_pos[i];   // 최신 조인트 상태 사용
 
     constexpr double TOOL_Z = 0.248; // EE +Z → TCP offset [m]
     Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
@@ -479,16 +480,17 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
     // 3️⃣ Base 좌표계 기준 힘 계산
     Eigen::Vector3d F_base = R_TCP_base * F_TCP;
 
-    // 4️⃣ 디버깅 출력
-    // RCLCPP_INFO(node_->get_logger(),
-    //             "[FtCallback] F_TCP = [0, 0, %.3f] → F_base = [%.3f, %.3f, %.3f]",
-    //             contact_force, F_base(0), F_base(1), F_base(2));
-
     // (선택) F_base 퍼블리시 가능
     // std_msgs::msg::Float64MultiArray F_base_msg;
     // F_base_msg.data = {F_base(0), F_base(1), F_base(2)};
     // UR10_wrench_pub_->publish(F_base_msg);
+
+    // (선택) 디버깅 출력
+    // RCLCPP_INFO(node_->get_logger(),
+    //             "[FtCallback] TCP Fz=%.3f → Base Fx=%.3f Fy=%.3f Fz=%.3f",
+    //             contact_force, F_base(0), F_base(1), F_base(2));
 }
+
 
 
 // ===================== Main Control Loop =====================
@@ -545,7 +547,7 @@ void JointControl::CalculateAndPublishJoint() {
       {
           Eigen::VectorXd q(6);
           for (int i = 0; i < 6; ++i)
-              q(i) = RArm.qc(i);
+              q(i) = RArm.qc(i);   // 현재 로봇 관절 상태 사용
 
           constexpr double TOOL_Z = 0.248;  // EE +Z offset [m]
           Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
@@ -558,8 +560,6 @@ void JointControl::CalculateAndPublishJoint() {
                  F_base(0), F_base(1), F_base(2));
       }
 
-      //// printf("HFx: %.2f, HFy: %.2f, HFz: %.2f | CFx: %.2f, CFy: %.2f, CFz: %.2f \n",
-      //// ftS1(0),ftS1(1),ftS1(2), ftS2(0),ftS2(1),ftS2(2));
       printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
         RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
       printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
@@ -569,6 +569,8 @@ void JointControl::CalculateAndPublishJoint() {
   } else {
     printer_counter++;
   }
+
+
 
   // ====== 토픽 퍼블리시 ======
   UR10_pose_msg_.data.clear();
