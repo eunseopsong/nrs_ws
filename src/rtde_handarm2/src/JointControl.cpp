@@ -596,97 +596,99 @@ void JointControl::ControlForce()
 
 bool JointControl::InitMove(double dt_s)
 {
-    // --- 내부 상태 ---
     static bool active = false;
-    static bool initialized = false;
-    static double elapsed = 0.0, duration = 0.0;
-    static Eigen::Vector3d start_xyz, goal_xyz_raw;
+    static bool finished = false;
+    static double elapsed = 0.0;
+    static double duration = 0.0;
+    static Eigen::Vector3d start_xyz, goal_xyz;
     static Eigen::Matrix3d start_rot, goal_rot;
 
-    constexpr double TOOL_Z = 0.248;
+    constexpr double TOOL_Z = -0.248;
 
     // --- 최초 진입 시 ---
-    if (!initialized) {
-        // playback 파일 열기
-        if (!Hand_G_playback) {
-            auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
-            if (!hand_path.empty())
-                Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
+    if (!active && !finished) {
+        if (!Hand_G_playback) return false;
+
+        // TXT 첫 유효 라인 읽기
+        float x, y, z, r, p, yw, fx, fy, fz;
+        char buf[2048];
+        bool valid = false;
+        std::rewind(Hand_G_playback);
+        while (std::fgets(buf, sizeof(buf), Hand_G_playback)) {
+            if (buf[0]=='#' || std::isspace(buf[0])) continue;
+            int n = std::sscanf(buf, "%f %f %f %f %f %f %f %f %f",
+                                &x,&y,&z,&r,&p,&yw,&fx,&fy,&fz);
+            if (n == 9) { valid = true; break; }
         }
-        if (!Hand_G_playback) {
-            RCLCPP_ERROR(node_->get_logger(), "[PB] playback file not opened.");
-            ctrl.store(0, std::memory_order_release);
+        if (!valid) {
+            RCLCPP_ERROR(node_->get_logger(), "[InitMove] no valid first line in TXT.");
             return false;
         }
 
-        // 첫 행 읽기
-        float x,y,z,r,p,yw,fx,fy,fz;
-        char buf[2048];
-        while (std::fgets(buf, sizeof(buf), Hand_G_playback)) {
-            if (buf[0]=='#' || std::isspace(buf[0])) continue;
-            int n = std::sscanf(buf,"%f %f %f %f %f %f %f %f %f",&x,&y,&z,&r,&p,&yw,&fx,&fy,&fz);
-            if (n==9) break;
-        }
+        start_xyz = RArm.xc;                   // 현재 pose [m]
+        goal_xyz  = Eigen::Vector3d(x, y, z);  // txt 목표 [m]
 
-        // init move 설정
-        start_xyz << RArm.xc(0), RArm.xc(1), RArm.xc(2);
-        goal_xyz_raw << x, y, z;
         start_rot = RArm.Tc.block<3,3>(0,0);
         Eigen::Vector3d goal_rpy(r,p,yw);
         AKin.EulerAngle2Rotation(goal_rot, goal_rpy);
 
-        double v = 0.05;
-        double dist = (goal_xyz_raw - start_xyz).norm();
-        duration = std::max(3.0, dist / std::max(1e-6, v));
+        double linear_dist = (goal_xyz - start_xyz).norm();
+        double vel = 0.05; // m/s
+        duration = std::max(2.0, linear_dist / std::max(1e-6, vel));
+
         elapsed = 0.0;
-
-        initialized = true;
         active = true;
+        finished = false;
 
-        std::rewind(Hand_G_playback);
-        set_status(message_status, ST_path_gen_done);
-        return true; // 첫 루프는 여기서 종료
+        printf("[InitMove] start → goal (dist=%.3f, dur=%.2fs)\n", linear_dist, duration);
     }
 
-    // --- 활성 상태 ---
-    if (active) {
-        elapsed += dt_s;
-        double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
+    if (!active) return finished;
 
-        Eigen::Vector3d xyz_raw = (1.0 - alpha)*start_xyz + alpha*goal_xyz_raw;
-        Desired_XYZ = xyz_raw;
+    // --- 진행 중 ---
+    elapsed += dt_s;
+    double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
 
-        Eigen::Quaterniond q0(start_rot), q1(goal_rot);
-        if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0;
-        Eigen::Quaterniond q = q0.slerp(alpha, q1).normalized();
-        Eigen::Matrix3d Desired_rot = q.toRotationMatrix();
-        Desired_RPY = Desired_rot.eulerAngles(0,1,2);
+    Eigen::Vector3d xyz_interp = (1.0 - alpha) * start_xyz + alpha * goal_xyz;
+    Desired_XYZ = xyz_interp;
 
-        Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
-        Desired_XYZ_cmd(2) -= TOOL_Z;
+    Eigen::Quaterniond q0(start_rot), q1(goal_rot);
+    if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0;
+    Eigen::Quaterniond q_interp = q0.slerp(alpha, q1).normalized();
+    Eigen::Matrix3d R_interp = q_interp.toRotationMatrix();
+    Desired_RPY = R_interp.eulerAngles(0,1,2);
 
-        RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ_cmd(0),
-                    Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ_cmd(1),
-                    Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ_cmd(2),
-                    0,0,0,1;
-#if TCP_standard==0
-        AKin.InverseK_min(&RArm);
+    // ---- IK 변환 및 퍼블리시 ----
+    Eigen::Vector3d Desired_XYZ_cmd = Desired_XYZ;
+    Desired_XYZ_cmd(2) -= TOOL_Z;
+
+    RArm.Td << R_interp(0,0),R_interp(0,1),R_interp(0,2),Desired_XYZ_cmd(0),
+                R_interp(1,0),R_interp(1,1),R_interp(1,2),Desired_XYZ_cmd(1),
+                R_interp(2,0),R_interp(2,1),R_interp(2,2),Desired_XYZ_cmd(2),
+                0,0,0,1;
+#if TCP_standard == 0
+    AKin.InverseK_min(&RArm);
 #else
-        AKin.Ycontact_InverseK_min(&RArm);
+    AKin.Ycontact_InverseK_min(&RArm);
 #endif
-        joint_state_.header.stamp = node_->now();
-        for (int i=0;i<6;i++) joint_state_.position[i] = RArm.qd(i);
-        joint_commands_pub_->publish(joint_state_);
 
-        if (alpha >= 1.0 - 1e-6) {
-            active = false;
-            initialized = true;
-            printf("[PB][INITMOVE] done. start following TXT lines.\n");
-        }
-        return true;
+    joint_state_.header.stamp = node_->now();
+    for (int i = 0; i < 6; ++i)
+        joint_state_.position[i] = RArm.qd(i);
+    joint_commands_pub_->publish(joint_state_);
+
+    // --- 종료 조건 ---
+    if (alpha >= 1.0 - 1e-6) {
+        active = false;
+        finished = true;
+        std::rewind(Hand_G_playback);
+        printf("[InitMove] completed → switching to PathFollow.\n");
     }
-    return false;
+
+    return finished;
 }
+
+
 
 
 bool JointControl::PathFollow(double dt_s)
@@ -1031,12 +1033,22 @@ void JointControl::CalculateAndPublishJoint() {
   // 3) Posture / Power Playback Control Mode
   // ===================================================
   if (control_mode == 3) {
-      if (InitMove(dt_s)) return;
-      if (PathFollow(dt_s)) return;
+      // InitMove → PathFollow → ReturnHomePose 순서
+      static bool init_done = false;
+
+      if (!init_done) {
+          init_done = InitMove(dt_s);
+          return;  // 아직 init 중이면 PathFollow 안감
+      }
+
+      if (PathFollow(dt_s))
+          return;
+
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
-  }
+}
+
 
 
 
