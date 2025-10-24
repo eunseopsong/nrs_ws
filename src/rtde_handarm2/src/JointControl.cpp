@@ -495,14 +495,13 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 
 // ===================== Main Control Loop =====================
 void JointControl::CalculateAndPublishJoint() {
-  // timer는 100ms 가정
   const double dt_s = 0.1;
   milisec += 10;
 
-  for(int i=0;i<6;i++){
+  for (int i = 0; i < 6; i++) {
     RArm.ddqd(i) = 0;
-    RArm.dqd(i) = 0;
-    RArm.dqc(i) = 0;
+    RArm.dqd(i)  = 0;
+    RArm.dqc(i)  = 0;
   }
   RArm.qd = RArm.qc;
   RArm.qt = RArm.qc;
@@ -515,7 +514,7 @@ void JointControl::CalculateAndPublishJoint() {
 
   // 중요: RPY 업데이트
   AKin.Rotation2EulerAngle(&RArm); // Tc -> thc (R,P,Y)
-  RArm.Td=RArm.Tc;
+  RArm.Td = RArm.Tc;
 
   VectorXd Init_qc = RArm.qc;
   int path_exe_counter = 0;
@@ -524,53 +523,64 @@ void JointControl::CalculateAndPublishJoint() {
   int control_mode = ctrl.load(std::memory_order_relaxed);
   int pre_control_mode = pre_ctrl.load(std::memory_order_relaxed);
 
+  // ---- Base Frame 변환 (TCP → Base) ----
+  Eigen::Vector3d F_base;
+  {
+      Eigen::VectorXd q(6);
+      for (int i = 0; i < 6; ++i)
+          q(i) = RArm.qc(i);   // 현재 로봇 관절 상태 사용
+
+      constexpr double TOOL_Z = 0.248;  // EE +Z offset [m]
+      Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
+      Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3,3>(0,0);
+
+      Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
+      F_base = R_TCP_base * F_TCP;
+  }
+
   // ====== Printing ======
-  if(printer_counter >= print_period) {
+  if (printer_counter >= print_period) {
   #if RT_printing
       printf("======================================== \n");
       printf("Now RUNNING MODE(%d), EXTERNAL MODE CMD: %d(%d) (%d/%d) \n",
-        Actual_mode,control_mode,pre_control_mode,path_exe_counter,Path_point_num);
-      printf("Current status: %s \n",message_status);
-      printf("Selected force controller: %d \n",Contact_Fcon_mode);
+             Actual_mode, control_mode, pre_control_mode, path_exe_counter, Path_point_num);
+      printf("Current status: %s \n", message_status);
+      printf("Selected force controller: %d \n", Contact_Fcon_mode);
       printf("milisec: %.2f \n", milisec);
-      printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
-        RArm.qc(0),RArm.qc(0)*(180/PI), RArm.qc(1),RArm.qc(1)*(180/PI), RArm.qc(2),RArm.qc(2)*(180/PI),
-        RArm.qc(3),RArm.qc(3)*(180/PI), RArm.qc(4),RArm.qc(4)*(180/PI), RArm.qc(5),RArm.qc(5)*(180/PI));
-      printf("D_q1: %.3f(%.1f), D_q2: %.3f(%.1f), D_q3: %.3f(%.1f), D_q4: %.3f(%.1f), D_q5: %.3f(%.1f), D_q6: %.3f(%.1f)\n",
-        RArm.qd(0),RArm.qd(0)*(180/PI), RArm.qd(1),RArm.qd(1)*(180/PI), RArm.qd(2),RArm.qd(2)*(180/PI),
-        RArm.qd(3),RArm.qd(3)*(180/PI), RArm.qd(4),RArm.qd(4)*(180/PI), RArm.qd(5),RArm.qd(5)*(180/PI));
+      printf("A_q1: %.3f(%.1f), A_q2: %.3f(%.1f), A_q3: %.3f(%.1f), "
+             "A_q4: %.3f(%.1f), A_q5: %.3f(%.1f), A_q6: %.3f(%.1f)\n",
+             RArm.qc(0), RArm.qc(0)*(180/PI),
+             RArm.qc(1), RArm.qc(1)*(180/PI),
+             RArm.qc(2), RArm.qc(2)*(180/PI),
+             RArm.qc(3), RArm.qc(3)*(180/PI),
+             RArm.qc(4), RArm.qc(4)*(180/PI),
+             RArm.qc(5), RArm.qc(5)*(180/PI));
 
-      // FtCallback
+      printf("D_q1: %.3f(%.1f), D_q2: %.3f(%.1f), D_q3: %.3f(%.1f), "
+             "D_q4: %.3f(%.1f), D_q5: %.3f(%.1f), D_q6: %.3f(%.1f)\n",
+             RArm.qd(0), RArm.qd(0)*(180/PI),
+             RArm.qd(1), RArm.qd(1)*(180/PI),
+             RArm.qd(2), RArm.qd(2)*(180/PI),
+             RArm.qd(3), RArm.qd(3)*(180/PI),
+             RArm.qd(4), RArm.qd(4)*(180/PI),
+             RArm.qd(5), RArm.qd(5)*(180/PI));
+
+      // Contact force 출력
       printf("Contact force value: %.2f \n", contact_force);
-
-      // ---- Base Frame 변환 (TCP → Base) ----
-      {
-          Eigen::VectorXd q(6);
-          for (int i = 0; i < 6; ++i)
-              q(i) = RArm.qc(i);   // 현재 로봇 관절 상태 사용
-
-          constexpr double TOOL_Z = 0.248;  // EE +Z offset [m]
-          Eigen::Matrix4d T_TCP_base = ur10e_inverse(q, TOOL_Z);
-          Eigen::Matrix3d R_TCP_base = T_TCP_base.block<3,3>(0,0);
-
-          Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
-          Eigen::Vector3d F_base = R_TCP_base * F_TCP;
-
-          printf("→ Base Frame Force: CFx=%.3f  CFy=%.3f  CFz=%.3f\n",
-                 F_base(0), F_base(1), F_base(2));
-      }
+      printf("→ Base Frame Force: CFx=%.3f  CFy=%.3f  CFz=%.3f\n",
+             F_base(0), F_base(1), F_base(2));
 
       printf("Act_XYZ: %.3f %.3f %.3f | Act_RPY: %.3f %.3f %.3f\n",
-        RArm.xc(0),RArm.xc(1),RArm.xc(2), RArm.thc(0),RArm.thc(1),RArm.thc(2));
+             RArm.xc(0), RArm.xc(1), RArm.xc(2),
+             RArm.thc(0), RArm.thc(1), RArm.thc(2));
       printf("Des_XYZ: %.3f %.3f %.3f | Des_RPY: %.3f %.3f %.3f\n",
-        Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2), Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
+             Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2),
+             Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
   #endif
-    printer_counter = 0;
+      printer_counter = 0;
   } else {
-    printer_counter++;
+      printer_counter++;
   }
-
-
 
   // ====== 토픽 퍼블리시 ======
   UR10_pose_msg_.data.clear();
