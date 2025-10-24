@@ -430,7 +430,7 @@ void JointControl::UpdateState()
         q(i) = joint_pos[i];
 
     // 2️⃣ TCP offset 포함 HTM 계산
-    constexpr double TOOL_Z = -0.248;  // [m]
+    constexpr double TOOL_Z = 0.248;  // [m]
     T_current = HTM(q, TOOL_Z);
 
     // 3️⃣ 위치, 자세 계산
@@ -453,11 +453,11 @@ void JointControl::UpdateState()
     q_str << "]";
 
     // 5️⃣ 디버그 출력
-    RCLCPP_INFO(node_->get_logger(),
-                "[UpdateState] q=%s → TCP Pose: x=%.4f y=%.4f z=%.4f | r=%.3f p=%.3f y=%.3f",
-                q_str.str().c_str(),
-                pos_current(0), pos_current(1), pos_current(2),
-                rpy_current(0), rpy_current(1), rpy_current(2));
+    // RCLCPP_INFO(node_->get_logger(),
+    //             "[UpdateState] q=%s → TCP Pose: x=%.6f y=%.6f z=%.6f | r=%.6f p=%.6f y=%.6f",
+    //             q_str.str().c_str(),
+    //             pos_current(0), pos_current(1), pos_current(2),
+    //             rpy_current(0), rpy_current(1), rpy_current(2));
 }
 
 
@@ -556,29 +556,40 @@ void JointControl::CalculateAndPublishJoint() {
   UR10_pose_pub_->publish(UR10_pose_msg_);
   UR10_wrench_pub_->publish(UR10_wrench_msg_);
 
-  //* ====== Control modes ====== *//
+  // * ====== Control modes ====== *//
 
   // 0) Initial state (hold the fixed home pose: 0 -90 -90 -90 90 0 deg)
   if (control_mode == 0) {
-    speedmode = 0;
-    // Fixed home pose in radians
-    static const double HOME_Q[6] = { 0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0 };
+      speedmode = 0;
+      // Fixed home pose in radians
+      static const double HOME_Q[6] = { 0.0, -M_PI/2.0, -M_PI/2.0, -M_PI/2.0, +M_PI/2.0, 0.0 };
+      // static const double HOME_Q[6] = {2.584298, -1.113670, -1.044218, -0.983704, 1.604492, -3.141593 };
 
-    // Command the home pose every cycle
-    for (int i = 0; i < 6; ++i) { RArm.qd(i) = HOME_Q[i]; }
-    RArm.qt = RArm.qd;
-    RArm.dqc << 0,0,0,0,0,0;
-    pause_cnt = 0;
+      // Command the home pose every cycle
+      for (int i = 0; i < 6; ++i) { 
+          RArm.qd(i) = HOME_Q[i]; 
+          joint_pos[i] = HOME_Q[i];      // ✅ UpdateState에서 사용할 현재 조인트도 갱신
+      }
 
-    // Publish to Isaac
-    joint_state_.header.stamp = node_->now();
-    joint_state_.position.resize(6);
-    for (int i = 0; i < 6; ++i) { joint_state_.position[i] = RArm.qd(i); }
-    joint_commands_pub_->publish(joint_state_);
+      RArm.qt = RArm.qd;
+      RArm.dqc << 0, 0, 0, 0, 0, 0;
+      pause_cnt = 0;
 
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
+      // ✅ UpdateState() 호출 (현재 홈자세로 FK 계산)
+      UpdateState();
+
+      // Publish to Isaac
+      joint_state_.header.stamp = node_->now();
+      joint_state_.position.resize(6);
+      for (int i = 0; i < 6; ++i) { 
+          joint_state_.position[i] = RArm.qd(i); 
+      }
+      joint_commands_pub_->publish(joint_state_);
+
+      pre_ctrl.store(control_mode, std::memory_order_relaxed);
+      return;
   }
+
 
   // 1) Cartesian position control mode
   if (control_mode == 1) {
