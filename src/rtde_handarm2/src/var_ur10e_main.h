@@ -16,6 +16,8 @@
 /* Custom library headers */
 #include "Kinematics.h"
 #include "Armtraj.h"
+#include "HTM.h"
+
 #include "ArmGuide.h"
 #include "Yoon_path.h"
 #include "Yoon_force_control.h"
