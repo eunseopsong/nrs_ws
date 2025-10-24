@@ -23,13 +23,13 @@
 #include <Eigen/Dense>
 
 // ========================= 추가로 필요한 헤더 유지 =========================
-#include <ament_index_cpp/get_package_share_directory.hpp>  // ROS2 패키지 경로 탐색용
-#include <filesystem>   // 파일 경로 확인용
-#include <mutex>        // 멀티스레드 동기화용 (콜백 충돌 방지 시 필요)
-#include <sstream>      // 문자열 처리용
-#include <fstream>      // 파일 입출력용
-#include <iostream>     // 디버그 출력용
-#include <sys/stat.h>   // 파일 존재 확인용
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <filesystem>
+#include <mutex>
+#include <sstream>
+#include <fstream>
+#include <iostream>
+#include <sys/stat.h>
 
 // ========================= 프로젝트 헤더 =========================
 #include "var_ur10e_main.h"
@@ -50,6 +50,8 @@ public:
     // 실제 JointState 수신 콜백
     void getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg);
 
+    // ✅ FK 기반 현재 로봇 상태(pose, orientation 등) 갱신
+    void UpdateState();
 
 private:
     // --------------------------- //
@@ -98,7 +100,10 @@ private:
     // --------------------------- //
     // 내부 상태 변수
     // --------------------------- //
-    std::array<double, 6> joint_pos{};   // 현재 조인트 각도
+    std::array<double, 6> joint_pos{};   // 현재 조인트 각도 [rad]
+    Eigen::Matrix4d       T_current;     // EE Homogeneous Transform
+    Eigen::Vector3d       pos_current;   // EE 위치 (x, y, z)
+    Eigen::Vector3d       rpy_current;   // EE 자세 (roll, pitch, yaw)
     double contact_force = 0.0;          // 접촉 힘
     int key_MODE = 0;
     int priority = 0;
