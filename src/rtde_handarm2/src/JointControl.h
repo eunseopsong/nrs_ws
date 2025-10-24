@@ -1,16 +1,30 @@
 #ifndef JOINTCONTROL_H
 #define JOINTCONTROL_H
 
-#include "var_ur10e_main.h"
+// ========================= 기본 ROS2 헤더 =========================
+#include <rclcpp/rclcpp.hpp>
+
+// ========================= ROS 메시지 타입 =========================
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
-#include <atomic>
-#include <memory>
+
+// ========================= 표준 라이브러리 =========================
 #include <array>
-#include <vector>
+#include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <memory>
+#include <string>
+#include <vector>
+
+// ========================= 수학/행렬 관련 =========================
+#include <Eigen/Dense>
+
+// ========================= 프로젝트 헤더 =========================
+#include "var_ur10e_main.h"
+
 
 // ============================================================================
 //  JointControl Class (UR10e ROS2 main control node)

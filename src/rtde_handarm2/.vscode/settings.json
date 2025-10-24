@@ -116,7 +116,8 @@
         "__tree": "cpp",
         "filesystem": "cpp",
         "queue": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "dense": "cpp"
     },
     "C_Cpp.errorSquiggles": "disabled"
         
