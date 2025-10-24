@@ -576,7 +576,7 @@ void JointControl::CalculateAndPublishJoint() {
       pause_cnt = 0;
 
       // ✅ UpdateState() 호출 (현재 홈자세로 FK 계산)
-      UpdateState();
+      // UpdateState();
 
       // Publish to Isaac
       joint_state_.header.stamp = node_->now();

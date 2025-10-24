@@ -17,6 +17,7 @@
 #include "Kinematics.h"
 #include "Armtraj.h"
 #include "Forward.h"
+#include "Inverse.h"
 
 #include "ArmGuide.h"
 #include "Yoon_path.h"
