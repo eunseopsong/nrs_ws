@@ -32,7 +32,7 @@ private:
     //////// Publishers ////////
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           YSurfN_Fext_pub_;
     rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_pub_;
-    // rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_Jangle_pub_;
+    //// rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_Jangle_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr UR10_wrench_pub_;
 
