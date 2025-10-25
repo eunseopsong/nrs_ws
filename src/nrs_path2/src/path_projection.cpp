@@ -1,4 +1,5 @@
 #include "path_projection.h"
+#include <rclcpp/rclcpp.hpp>
 
 //////////////////////////////////////
 // 전방 선언 (로거 전달 안 하도록 표준출력/에러 사용)
@@ -305,41 +306,72 @@ Waypoints interpolatexyzrpy(const Waypoints &input, double desired_interval) {
   Waypoints output;
   if (input.waypoints.empty()) return output;
 
+  // 누적 거리 계산
   std::vector<double> cumulative_distances;
   cumulative_distances.push_back(0.0);
   for (size_t i = 1; i < input.waypoints.size(); i++) {
     const auto &p0 = input.waypoints[i-1];
     const auto &p1 = input.waypoints[i];
-    double dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
+    double dx = p1.x - p0.x;
+    double dy = p1.y - p0.y;
+    double dz = p1.z - p0.z;
     double seg = std::sqrt(dx*dx + dy*dy + dz*dz);
     cumulative_distances.push_back(cumulative_distances.back() + seg);
   }
   double total_distance = cumulative_distances.back();
 
+  // desired_interval 간격으로 샘플 생성
   for (double d = 0.0; d <= total_distance; d += desired_interval) {
+    // 현재 d가 위치할 구간 인덱스 i 찾기
     size_t i = 1;
-    while (i < cumulative_distances.size() && cumulative_distances[i] < d) i++;
-    double t = (d - cumulative_distances[i-1]) / (cumulative_distances[i] - cumulative_distances[i-1]);
+    while (i < cumulative_distances.size() && cumulative_distances[i] < d) {
+      i++;
+    }
+    if (i >= cumulative_distances.size()) {
+      i = cumulative_distances.size() - 1;
+    }
+
+    // 분모가 0이면(=같은 위치가 연속으로 반복) 0으로 나누지 말고 alpha=0으로 고정
+    double denom = cumulative_distances[i] - cumulative_distances[i-1];
+    double alpha = 0.0;
+    if (denom > 1e-12) {
+      alpha = (d - cumulative_distances[i-1]) / denom;  // 0~1 사이 보간 계수
+    } else {
+      alpha = 0.0;  // 두 점이 완전히 같은 좌표 → 그냥 첫 점 그대로 사용
+    }
 
     const auto &p0 = input.waypoints[i-1];
     const auto &p1 = input.waypoints[i];
 
     Waypoint w;
-    w.x = p0.x + t*(p1.x - p0.x);
-    w.y = p0.y + t*(p1.y - p0.y);
-    w.z = p0.z + t*(p1.z - p0.z);
+    // 위치 보간
+    w.x = p0.x + alpha*(p1.x - p0.x);
+    w.y = p0.y + alpha*(p1.y - p0.y);
+    w.z = p0.z + alpha*(p1.z - p0.z);
 
-    w.fx = p0.fx + t*(p1.fx - p0.fx);
-    w.fy = p0.fy + t*(p1.fy - p0.fy);
-    w.fz = p0.fz + t*(p1.fz - p0.fz);
+    // 힘 보간 (이미 visual_final 쪽에서 fx,fy,fz 설정해줌)
+    w.fx = p0.fx + alpha*(p1.fx - p0.fx);
+    w.fy = p0.fy + alpha*(p1.fy - p0.fy);
+    w.fz = p0.fz + alpha*(p1.fz - p0.fz);
 
+    // 자세 보간 (slerp)
     tf2::Quaternion q0(p0.qx, p0.qy, p0.qz, p0.qw);
     tf2::Quaternion q1(p1.qx, p1.qy, p1.qz, p1.qw);
-    tf2::Quaternion qi = customSlerp(q0, q1, t);
-    w.qw = qi.getW(); w.qx = qi.getX(); w.qy = qi.getY(); w.qz = qi.getZ();
+    tf2::Quaternion qi = customSlerp(q0, q1, alpha);
+
+    w.qw = qi.getW();
+    w.qx = qi.getX();
+    w.qy = qi.getY();
+    w.qz = qi.getZ();
 
     output.waypoints.push_back(w);
   }
+
+  size_t estimated = static_cast<size_t>(total_distance / desired_interval) + 1;
+  RCLCPP_INFO(rclcpp::get_logger("path_projection_node"),
+              "[interpolatexyzrpy] total_distance=%.6f m, desired_interval=%.9f m, estimated_points≈%zu, output_points=%zu",
+              total_distance, desired_interval, estimated, output.waypoints.size());
+
   return output;
 }
 
@@ -374,29 +406,36 @@ public:
   : Node("path_projection_node")
   {
     // ---- 파라미터(필요 시 declare_parameter로 외부에서 바꿀 수 있도록) ----
-    desired_interval_   = this->declare_parameter<double>("desired_interval", 0.00003);
+    desired_interval_   = this->declare_parameter<double>("desired_interval", 0.00005);  // 0.00005 -> len(hand_g_recording) = 64000
     sampling_time_      = this->declare_parameter<double>("sampling_time", 0.002);
     starting_time_      = this->declare_parameter<double>("starting_time", 3.0);
     last_resting_time_  = this->declare_parameter<double>("last_resting_time", 3.0);
     acceleration_time_  = this->declare_parameter<double>("acceleration_time", 1.0);
+    density_multiplier_ = this->declare_parameter<double>("density_multiplier", 1.0); // 1.0 이상 권장
+
+    // mesh 파일 경로
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl");
     mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/_convex_surface_0.75.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/_concave_surface_0.75.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/complex_surface_2.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/non_continuous_surface_2.stl");
+
     plane_path_file_path_ = this->declare_parameter<std::string>("plane_path_file_path",
                               // "/home/eunseop/nrs_ws/src/nrs_path2/data/Ori_path_transformed.txt");
                               "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt");
                               // "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints.txt");
 
-
-                              
     rpy_file_path_      = this->declare_parameter<std::string>("rpy_output_path",
-                              "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints_RPY.txt");   // 필요시 수정
+                              "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints_RPY.txt");
     visual_file_path_   = this->declare_parameter<std::string>("visual_output_path",
                               // "/home/eunseop/nrs_ws/src/nrs_path2/data/visual_final_waypoints.txt");
                               "/home/eunseop/nrs_ws/src/rtde_handarm2/data/hand_g_recording.txt");
+
+    // ---- 파라미터 현재값 로그 ----
+    RCLCPP_INFO(this->get_logger(),
+                "Params | desired_interval=%.9f, density_multiplier=%.3f, sampling_time=%.6f, starting=%.3f, last_rest=%.3f, accel=%.3f",
+                desired_interval_, density_multiplier_, sampling_time_, starting_time_, last_resting_time_, acceleration_time_);
 
     // ---- 퍼블리셔 ----
     using QoS = rclcpp::QoS;
@@ -426,6 +465,7 @@ private:
   double starting_time_;
   double last_resting_time_;
   double acceleration_time_;
+  double density_multiplier_;
   double time_counter_ = 0.0;
   double projection_z_ = 0.5;
 
@@ -705,16 +745,25 @@ private:
                                   visual_retreat_wps.waypoints.begin(), visual_retreat_wps.waypoints.end());
 
     double accel_for_visual = 0.05;
-    visual_final = ACCProfiling(visual_final, sampling_time_, starting_time_, last_resting_time_, accel_for_visual, time_counter_);
+visual_final = ACCProfiling(visual_final, sampling_time_, starting_time_, last_resting_time_, accel_for_visual, time_counter_);
 
-    // 모든 시각화 웨이포인트의 fz를 10으로 고정 (2025.08.22)
-    for (auto& wp : visual_final.waypoints) {
-        // wp.z = 0.1;   // z 좌표(3번째 열) 고정
-        wp.fz = 10.0; // fz 값 고정
-    }
+// 시각화 traj에 힘/토크 채워넣기 (fz=10N 고정) -> interpolatexyzrpy()가 fx/fy/fz까지 보간할 수 있도록
+for (auto& wp : visual_final.waypoints) {
+    wp.fx = 0.0;
+    wp.fy = 0.0;
+    wp.fz = 10.0;
+}
 
-    clearFile(visual_file_path_);
-    saveWaypointsToFile(visual_final, visual_file_path_);
+// ---- trajectory density scaling for hand_g_recording.txt ----
+const double interval_effective = desired_interval_ / std::max(1.0, density_multiplier_);
+RCLCPP_INFO(this->get_logger(),
+            "Interpolating VISUAL with interval_effective=%.9f (desired=%.9f / density=%.3f)",
+            interval_effective, desired_interval_, density_multiplier_);
+
+Waypoints visual_final_dense = interpolatexyzrpy(visual_final, interval_effective);
+
+clearFile(visual_file_path_);
+saveWaypointsToFile(visual_final_dense, visual_file_path_);
 
     // 제어용 보간 (option=2: 가변 간격)
     double interval = 0.00005;
@@ -738,7 +787,11 @@ private:
     control_final.waypoints.insert(control_final.waypoints.end(),
                                    control_home_wps.waypoints.begin(), control_home_wps.waypoints.end());
 
-    control_final = interpolatexyzrpy(control_final, desired_interval_);
+    RCLCPP_INFO(this->get_logger(),
+            "Interpolating CONTROL with interval_effective=%.9f (desired=%.9f / density=%.3f)",
+            interval_effective, desired_interval_, density_multiplier_);
+
+control_final = interpolatexyzrpy(control_final, interval_effective);
 
     int approach_size = static_cast<int>(control_approach_wps.waypoints.size());
     int original_size = static_cast<int>(control_original_wps.waypoints.size());
