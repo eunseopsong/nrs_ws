@@ -415,9 +415,9 @@ public:
 
     // mesh 파일 경로
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl");
-    mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
+    // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/_convex_surface_0.75.stl");
-    // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/_concave_surface_0.75.stl");
+    mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/_concave_surface_0.75.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/complex_surface_2.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/non_continuous_surface_2.stl");
 
