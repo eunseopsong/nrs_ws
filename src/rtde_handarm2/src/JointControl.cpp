@@ -121,7 +121,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
   FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "FAAC3step_msg");
 
   // Publishers
-  YSurfN_Fext_pub_    = node_->create_publisher<std_msgs::msg::Float64>("YSurfN_Fext", 20);
+  force_ext_base_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("force_ext_base", 20);
   UR10e_mode_pub_     = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
   UR10_pose_pub_      = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
   UR10_wrench_pub_    = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
@@ -605,29 +605,75 @@ bool JointControl::InitMove(double dt_s)
 
 bool JointControl::PathFollow(double dt_s)
 {
-    // 재생 파일 핸들이 바뀌면 active 재활성화
-    static bool active = true;
+    // =========================================================================
+    // [사전 설명]
+    //
+    // PathFollow()는 재생용 trajectory 파일(txt)을 한 줄씩 읽으면서
+    //   1) txt에서 목표 pose / force 읽기      (STEP 1)
+    //   2) 현재 contact force를 base frame 외력으로 변환 (STEP 2)
+    //   3) txt에서 준 RPY -> spatial angle 변환   (STEP 3)
+    //   4) FAAC + 어드미턴스 적용해서 위치 보정   (STEP 4)
+    //   5) 보정된 pose로 IK 돌려 qd 생성          (STEP 5)
+    //   6) qd 퍼블리시                           (STEP 6)
+    //   7) 현재 base frame 외력(F_ext) 퍼블리시   (STEP 7)
+    //
+    // dt_s : 상위 타이머 루프(CalculateAndPublishJoint)에서 측정한 실제 제어주기 추정값.
+    //
+    // 리턴값:
+    //   true  → 아직 txt 재생 중
+    //   false → txt 재생이 끝났으므로 상위 루프에서 ReturnHomePose()로 넘어가야 함
+    // =========================================================================
+
+
+    // =========================================================================
+    // [재생 상태 관리 - playback 활성 플래그]
+    //
+    // Hand_G_playback : 현재 열려있는 재생 txt 파일 핸들 (글로벌/멤버 변수)
+    // active          : 이 함수 안에서만 유지되는 static 상태. true일 때만 재생 진행.
+    //
+    // 만약 파일 핸들이 바뀌면(active를 true로 다시 세팅) 재생을 재개하도록 한다.
+    // 파일이 끝나면(active=false로 바꾸고) false 리턴 → 상위에서 복귀 시퀀스 진입.
+    // =========================================================================
+    static bool  active      = true;
     static FILE* last_handle = nullptr;
     if (Hand_G_playback != last_handle) {
-        active = true;
+        active      = true;
         last_handle = Hand_G_playback;
     }
-    if (!active) return false;
+    if (!active) {
+        // 이미 재생 종료 상태라면 아무 것도 안 하고 false 리턴
+        return false;
+    }
 
     if (!Hand_G_playback) {
+        // 파일 핸들이 없는데 active가 true라면 비정상 상황 → 안전하게 정지
         RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
         ctrl.store(0, std::memory_order_release);
         set_status(message_status, "Playback file closed");
         return false;
     }
 
-    // ======================
-    // 1) TXT에서 한 줄 읽기
-    // 포맷: x y z r p yaw fx fy fz
-    // ======================
+
+    // =========================================================================
+    // [STEP 1] TXT에서 목표 pose/force 한 줄 읽기
+    //
+    // txt 라인 포맷 (공백 구분):
+    //   x y z r p yaw fx fy fz
+    //
+    // 의미:
+    //   x y z     : 목표 TCP 위치 [m], base frame 기준
+    //   r p yaw   : 목표 오리엔테이션 [rad], roll-pitch-yaw (Z-Y-X 순 RPY 가정)
+    //   fx fy fz  : 원하는 힘 [N], base frame 기준 목표값(즉 "이 방향으로 누르고 싶다")
+    //
+    // fscanf() 결과(reti)가 9가 아니면
+    //   → EOF 또는 파싱 실패로 간주하고
+    //   → 파일 닫고
+    //   → ReturnHomePose()에 필요한 시작상태 세팅 후
+    //   → false 리턴 (상위 루프가 홈 복귀 루틴으로 넘어감)
+    // =========================================================================
     float des_x, des_y, des_z;
-    float des_r, des_p, des_yaw;   // yaw 이름 충돌 안 나도록 des_yaw 로 사용
-    float des_fx, des_fy, des_fz;
+    float des_r, des_p, des_yaw;   // RPY
+    float des_fx, des_fy, des_fz;  // 목표 힘
 
     int reti = std::fscanf(
         Hand_G_playback,
@@ -638,89 +684,125 @@ bool JointControl::PathFollow(double dt_s)
     );
 
     if (reti != 9) {
-        // EOF or parse error → 파일 닫고 리턴 단계 준비
+        // --- 재생 종료 처리 ---------------------------------
         std::fclose(Hand_G_playback);
         Hand_G_playback = nullptr;
         active = false;
 
+        // Return-to-home 초기화:
+        //  return_active_   : ReturnHomePose()에서 "지금 홈으로 가야 함"을 알리는 플래그
+        //  return_elapsed_  : 0으로 리셋 (경과 시간 적분용)
+        //  return_duration_ : 홈까지 보간에 쓸 총 시간(초). (메인 루프에서 늘릴 수도 있음)
+        //  return_start_q_  : 복귀 시작 시 관절각 (현재 qc) 저장
         return_active_   = true;
         return_elapsed_  = 0.0;
-        return_duration_ = 4.0;
-        for (int i = 0; i < DOF; ++i)
+        return_duration_ = 4.0; // <- 현재 baseline: 4초짜리 복귀 보간
+        for (int i = 0; i < DOF; ++i) {
             return_start_q_(i) = RArm.qc(i);
+        }
 
         printf("[PB] End of file. Start return-to-home.\n");
-        return false;
+        return false; // 상위에서 ReturnHomePose() 호출하게 됨
     }
 
-    // TXT 목표를 Eigen으로 옮김
-    Eigen::Vector3d Xd;   // 원하는 위치 [m] (이미 txt가 m라고 가정)
-    Eigen::Vector3d RPYd; // 원하는 롤피치야우 [rad]
-    Eigen::Vector3d Fd;   // 원하는 힘 [N] (base프레임 기준 목표라고 해석)
+    // txt에서 읽은 목표를 Eigen 벡터로 변환
+    Eigen::Vector3d Xd;    // 원하는 위치 [m]
+    Eigen::Vector3d RPYd;  // 원하는 오일러각 [rad] (roll,pitch,yaw)
+    Eigen::Vector3d Fd;    // 원하는 힘 [N] in base frame
 
-    Xd   << (double)des_x,   (double)des_y,   (double)des_z;
-    RPYd << (double)des_r,   (double)des_p,   (double)des_yaw;
-    Fd   << (double)des_fx,  (double)des_fy,  (double)des_fz;
+    Xd   << (double)des_x,  (double)des_y,   (double)des_z;
+    RPYd << (double)des_r,  (double)des_p,   (double)des_yaw;
+    Fd   << (double)des_fx, (double)des_fy,  (double)des_fz;
 
-    // 디버깅용으로 유지하던 클래스 상태 갱신 (CalculateAndPublishJoint에서 printf용)
+    // 디버그용. 상위 CalculateAndPublishJoint() 쪽 printf에서 사용 중.
     Desired_XYZ = Xd;
     Desired_RPY = RPYd;
 
-    // ======================
-    // 2) 현재 실제 EE pose 및 힘(외력) 산출
-    //  - contact_force 는 TCP z축에서 측정된 힘(너가 이미 넣은 값)
-    //  - 이를 base frame 으로 변환
-    //  - 부호 반전(-) 적용해서 F_ext로 사용
-    // ======================
 
-    // 현재 EE transform (Base->TCP). RArm.Tc 는 4x4라 가정
-    Eigen::Matrix3d R_base_TCP = RArm.Tc.block<3,3>(0,0); // 회전
+    // =========================================================================
+    // [STEP 2] 현재 외력(측정 contact force) 추정 및 LPF
+    //
+    // 현재 우리는 접촉 힘을 contact_force 라는 단일 값( TCP z축 방향 성분 )으로만 받고 있음.
+    //   contact_force ≈ F_TCP.z  (TCP 프레임 기준)
+    //
+    // 이걸 base frame 기준 힘 벡터로 바꿔야 FAAC/어드미턴스에서 의미 있게 쓸 수 있음.
+    //
+    // 절차:
+    //   1) R_base_TCP = RArm.Tc(0:2,0:2)  (Base→TCP 회전행렬)
+    //   2) F_TCP = [0, 0, contact_force]
+    //   3) F_base = R_base_TCP * F_TCP
+    //   4) F_ext  = -F_base
+    //
+    //       부호(-)를 주는 이유:
+    //         - 시스템 정의 상 "외력이 +면 로봇을 누르는 방향"이 되도록 맞춘다.
+    //           (현재 contact_force의 부호가 그 반대로 나오는 상황이어서 통일)
+    //
+    //   5) F_ext에 1차 저역통과필터(LPF)를 적용해서 튐을 줄인다.
+    //
+    // 결과:
+    //   F_ext : base frame 기준 외력 추정 [N]
+    //
+    // 추가:
+    //   X_act : 현재 실제 EE 위치 (base frame, [m])
+    //
+    // force_control.cpp 와의 차이:
+    //   - force_control.cpp(kuka_motion.cpp 기반)에서는 ft1data[0..5]로
+    //     이미 base/TCP 변환된 힘/토크를 직접 받는다.
+    //   - 여기서는 Isaac Sim / UR10에서 얻은 단일 contact_force만 가지고
+    //     우리가 base 프레임으로 회전시켜서 재구성한다.  ★중요 차이점★
+    // =========================================================================
+    Eigen::Matrix3d R_base_TCP = RArm.Tc.block<3,3>(0,0); // Base->TCP 회전행렬
+    Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);       // TCP 프레임 힘 (z축만)
+    Eigen::Vector3d F_base = R_base_TCP * F_TCP;          // Base 프레임 힘
+    Eigen::Vector3d F_ext  = -F_base;                     // 부호 보정한 외력
 
-    // TCP에서 측정된 힘 벡터 (z축만 있다고 가정: (0,0,contact_force))
-    // contact_force는 "TCP 프레임에서의 Fz"
-    Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
-
-    // Base 프레임으로 변환: F_base = R_base_TCP * F_TCP
-    Eigen::Vector3d F_base = R_base_TCP * F_TCP;
-
-    // FAAC에서 쓰는 external force는 바깥이 로봇을 미는 방향이 (+)
-    // 만약 contact_force 부호가 반대로 나간다면 여기서 뒤집어주자
-    Eigen::Vector3d F_ext = -F_base; // 부호 반전 적용
-
-    // 간단한 LPF로 튐 줄이기 (축별)
+    // --- 외력 LPF (축별 1차 저역통과) ---
     {
         static Eigen::Vector3d F_lp = Eigen::Vector3d::Zero();
         static bool first_f = true;
 
-        const double fc = 15.0;                       // LPF cutoff [Hz]
-        const double Ts = (dt_s > 0.0 ? dt_s : 0.001);
+        const double fc = 15.0; // [Hz] cutoff
+        const double Ts = (dt_s > 0.0 ? dt_s : 0.001); // 샘플링 주기 추정
         const double alpha = (2.0 * M_PI * fc * Ts) / (1.0 + 2.0 * M_PI * fc * Ts);
 
         if (first_f) {
-            F_lp = F_ext;
+            F_lp   = F_ext;
             first_f = false;
         } else {
             F_lp = F_lp + alpha * (F_ext - F_lp);
         }
-        F_ext = F_lp;
+        F_ext = F_lp; // 필터링된 외력으로 교체
     }
 
-    // 현재 실제 EE 위치 (base frame, m)
+    // 현재 실제 EE 위치 (base, [m])
     Eigen::Vector3d X_act = RArm.xc;
 
-    // ======================
-    // 3) RPYd(roll,pitch,yaw)를 spatial angle Wd = [wx, wy, wz] 로 변환
+
+    // =========================================================================
+    // [STEP 3] 목표 오리엔테이션(RPY) → 목표 spatial angle (회전벡터) 변환
     //
-    //    spatial angle = 회전행렬의 로그맵 (Rotation Vector)
-    // ======================
+    // FAAC는 orientation을 roll/pitch/yaw 대신 spatial angle 벡터 [wx, wy, wz]로 다루는
+    // 구조를 상정하고 있다. spatial angle은 회전행렬의 로그맵 결과(axis * angle).
+    //
+    // 여기서는:
+    //   1) RPYd(roll,pitch,yaw) → 회전행렬 Rd_R
+    //   2) Rd_R → 회전벡터(=spatial angle) Wd
+    //
+    // rotFromRPY, rotLog 람다는 이 함수 내부에서만 쓰는 helper.
+    //
+    // force_control.cpp 쪽과 비교:
+    //   force_control.cpp는 KUKA용 YMatrix/SpatialAngle 유틸 직접 사용.
+    //   우리는 Eigen 기반으로 직접 구현했다.  ★차이점★
+    // =========================================================================
     auto rotFromRPY = [](const Eigen::Vector3d &rpy)->Eigen::Matrix3d {
-        double cr = std::cos(rpy(0));
-        double sr = std::sin(rpy(0));
-        double cp = std::cos(rpy(1));
-        double sp = std::sin(rpy(1));
-        double cy = std::cos(rpy(2));
-        double sy = std::sin(rpy(2));
-        // 여기서는 Z(yaw)*Y(pitch)*X(roll) 순이라고 가정
+        const double cr = std::cos(rpy(0));
+        const double sr = std::sin(rpy(0));
+        const double cp = std::cos(rpy(1));
+        const double sp = std::sin(rpy(1));
+        const double cy = std::cos(rpy(2));
+        const double sy = std::sin(rpy(2));
+
+        // Rz(yaw)*Ry(pitch)*Rx(roll) 순서라고 가정
         Eigen::Matrix3d Rz;
         Rz << cy,-sy,0,
               sy, cy,0,
@@ -733,18 +815,19 @@ bool JointControl::PathFollow(double dt_s)
         Rx << 1,0 ,0 ,
               0,cr,-sr,
               0,sr, cr;
-        return Rz*Ry*Rx;
+        return Rz * Ry * Rx;
     };
 
     auto rotLog = [](const Eigen::Matrix3d &R)->Eigen::Vector3d {
-        // rotation matrix -> rotation vector (axis * angle)
+        // 회전행렬 -> 회전벡터(axis * angle)
         double cos_theta = (R.trace() - 1.0) * 0.5;
         if (cos_theta >  1.0) cos_theta =  1.0;
         if (cos_theta < -1.0) cos_theta = -1.0;
+
         double theta = std::acos(cos_theta);
 
         if (theta < 1e-9) {
-            // 아주 작은 회전: 근사적으로 0벡터
+            // 각도가 매우 작으면 거의 0벡터로 간주
             return Eigen::Vector3d::Zero();
         }
 
@@ -753,21 +836,53 @@ bool JointControl::PathFollow(double dt_s)
                  R(0,2) - R(2,0),
                  R(1,0) - R(0,1);
         omega *= 0.5 / std::sin(theta);
-        return theta * omega; // axis * angle
+
+        // axis * angle
+        return theta * omega;
     };
 
-    Eigen::Matrix3d Rd_R = rotFromRPY(RPYd);
-    Eigen::Vector3d Wd   = rotLog(Rd_R); // 목표 spatial angle
+    Eigen::Matrix3d Rd_R = rotFromRPY(RPYd); // 목표 회전행렬
+    Eigen::Vector3d Wd   = rotLog(Rd_R);     // 목표 spatial angle [rad]
 
-    // ======================
-    // 4) FAAC + 어드미턴스 계산
-    //    => Xc_cmd (명령 위치), Wc_cmd (명령 spatial angle)
-    // ======================
 
-    // persistent statics for FAAC/AC
+    // =========================================================================
+    // [STEP 4] FAAC + 어드미턴스 제어
+    //
+    // 목표:
+    //   - 위치축(x,y,z)에 대해:
+    //       FAAC (3-step adaptive admittance) + 1D 어드미턴스 컨트롤로
+    //       보정된 명령 위치 Xc_cmd를 생성.
+    //
+    //   - 자세축(wx,wy,wz)에 대해:
+    //       아직 힘/토크 기반 적응은 안 넣고 그냥 목표 Wd 그대로 사용.
+    //
+    // 내부 static 상태:
+    //   fc_init        : 이 블록 초기화 여부
+    //   AControl[6]    : 축별 어드미턴스 컨트롤러 (Yadmittance_control)
+    //   FAAC3step[3]   : 위치축(x,y,z)용 3-step FAAC 객체 (Nrs3StepFAAC)
+    //   FAAC_flag[3]   : 각 축에서 접촉(force control) 활성화 여부
+    //   AC_pose_pos[]  : 지난 루프에서의 어드미턴스 결과(명령 위치) 저장
+    //   AC_pose_ori[]  : 지난 루프에서의 orientation 명령 저장 (현재는 Wd 그대로)
+    //
+    // FC_MASS / FC_DAMPER / FC_STIFFNESS :
+    //   어드미턴스 M,D,K 초기값.
+    //   force_control.cpp 의 kuka_motion::control_force()에서 쓰던 값과 동일한 스케일.
+    //
+    // Tank_energy :
+    //   아직 에너지 탱크 동적 계산 안 붙여서 상수 5.0으로 둠.
+    //
+    // 안전장치:
+    //   - 경로에서 너무 멀어지지 않도록 offset clamp (±1cm)
+    //   - 한 틱에 너무 많이 안 튀도록 step clamp (3mm/틱)
+    //
+    // force_control.cpp 대비 중요한 차이:
+    //   ★ 거긴 KUKA 로봇 전용이라 kuka_motion 클래스 멤버들(AControl[], FAAC3step[] 등)
+    //     을 사용하고, orientation도 SpatialAngle 기반 IK 바로 넣음.
+    //   ★ 여기는 UR10 제어라서 이 모든 걸 PathFollow() 내부 static으로 들고 있음.
+    // =========================================================================
     static bool fc_init = false;
 
-    // 6축 어드미턴스 컨트롤러 (x,y,z, wx,wy,wz)
+    // 축별 어드미턴스 컨트롤러 (x,y,z, wx,wy,wz)
     static Yadmittance_control AControl[6] = {
         Yadmittance_control(0.001),
         Yadmittance_control(0.001),
@@ -777,23 +892,23 @@ bool JointControl::PathFollow(double dt_s)
         Yadmittance_control(0.001)
     };
 
-    // x,y,z용 FAAC
+    // x,y,z용 FAAC 객체
     static std::unique_ptr<Nrs3StepFAAC> FAAC3step[3];
 
-    // 각 축별 FAAC 활성 플래그
+    // 각 위치축별로 FAAC 활성화 여부
     static bool FAAC_flag[3] = {false,false,false};
 
-    // 직전 어드미턴스 출력(누적) 저장
+    // 지난 루프 명령 누적(어드미턴스 출력 유지)
     static double AC_pose_pos[3] = {0.0,0.0,0.0}; // x,y,z
-    static double AC_pose_ori[3] = {0.0,0.0,0.0}; // wx,wy,wz
+    static double AC_pose_ori[3] = {0.0,0.0,0.0}; // wx,wy,wz (현재는 그대로만 복사)
 
-    // 초기 MDK 파라미터 (force_control.cpp 기준)
+    // 초기 M/D/K 파라미터 (force_control.cpp에서 쓰던 값과 동일 컨셉)
     static double FC_MASS[6]      = {1.0,   1.0,   1.0,   0.05, 0.05, 0.05};
     static double FC_DAMPER[6]    = {3000., 3000., 3000., 10.0, 10.0, 10.0};
     static double FC_STIFFNESS[6] = {2000., 2000., 2000., 20.0, 20.0, 20.0};
 
     if (!fc_init) {
-        // (a) 어드미턴스 M,D,K 초기 세팅
+        // (a) 어드미턴스 기본 M,D,K 세팅
         for (int i = 0; i < 6; ++i) {
             AControl[i].adm_1D_MDK(
                 FC_MASS[i],
@@ -802,8 +917,10 @@ bool JointControl::PathFollow(double dt_s)
             );
         }
 
-        // (b) FAAC 인스턴스 생성
-        // Nrs3StepFAAC ctor: (init_md, init_dd, init_kd, dt, proc_noise, meas_noise)
+        // (b) FAAC 인스턴스 준비
+        //    여기 UR10 버전 Nrs3StepFAAC 생성자는
+        //    (init_md, init_dd, init_kd, dt, process_noise, measurement_noise)
+        //    순서로 받도록 구성해두었다.
         std::vector<double> proc_noise = {0.1,0.1,0.1};
         std::vector<double> meas_noise = {10.0,10.0,10.0};
         double dt_for_faac = (dt_s > 0.0 ? dt_s : 0.001);
@@ -817,10 +934,10 @@ bool JointControl::PathFollow(double dt_s)
                 proc_noise,
                 meas_noise
             );
-            FAAC_flag[ax] = false;
+            FAAC_flag[ax] = false; // 처음엔 비활성
         }
 
-        // (c) 첫 어드미턴스 출력은 현재 목표에서 시작
+        // (c) 첫 AC 출력은 현재 목표값에서 시작
         AC_pose_pos[0] = Xd(0);
         AC_pose_pos[1] = Xd(1);
         AC_pose_pos[2] = Xd(2);
@@ -832,175 +949,276 @@ bool JointControl::PathFollow(double dt_s)
         fc_init = true;
     }
 
-    // 결과 명령 (기본은 그냥 원하는 값 복사)
+    // Xc_cmd : 이번 스텝에서 IK에 넣을 "명령 위치"
+    // Wc_cmd : 이번 스텝에서 IK에 넣을 "명령 spatial angle" (지금은 그냥 Wd 복사)
     Eigen::Vector3d Xc_cmd = Xd;
     Eigen::Vector3d Wc_cmd = Wd;
 
-    const double Tank_energy = 5.0;  // 아직 고정값
+    const double Tank_energy = 5.0; // 아직은 상수
 
-    // ---- 위치축 0,1,2 (x,y,z) ----
+    // ---- 위치축(x=0,y=1,z=2)에 대해 FAAC 적용 ----
     for (int ax = 0; ax < 3; ++ax)
     {
-        // (1) 이 축에서 FAAC 활성화 조건:
-        //     원하는 힘이 유의미하거나(|Fd|>0.01) 이전에 이미 활성화된 축이면 계속 true
+        // (1) 목표 힘이 유의미(|Fd|>0.01)하면 그 축의 FAAC를 활성화.
+        //     한 번 true가 되면 계속 true 유지.
         if (std::fabs(Fd(ax)) > 0.01 || FAAC_flag[ax]) {
             FAAC_flag[ax] = true;
         }
 
-        // (2) 활성화된 축이면 FAAC로 M,D,K 업데이트
+        // (2) FAAC 활성 축이면 3-step FAAC로 새로운 M,D,K를 추정해
+        //     어드미턴스 컨트롤러에 반영
         if (FAAC_flag[ax] && FAAC3step[ax]) {
             auto faac_mdk = FAAC3step[ax]->FAAC_MDKob_RUN(
-                Tank_energy,
-                F_ext(ax),        // 실제 외력 (base frame)
-                Fd(ax),           // 원하는 힘
-                AC_pose_pos[ax],  // 지난 출력 (Xc)
-                X_act(ax)         // 현재 실제 위치 X
+                Tank_energy,     // 탱크 에너지(임시 고정)
+                F_ext(ax),       // 측정 외력 (base frame)
+                Fd(ax),          // 원하는 힘 (base frame)
+                AC_pose_pos[ax], // 지난 루프에서 AC가 만든 명령 위치 Xc
+                X_act(ax)        // 현재 실제 위치
             );
 
+            // 어드미턴스 파라미터 갱신
             AControl[ax].adm_1D_MDK(
                 faac_mdk.Mass,
                 faac_mdk.Damping,
                 faac_mdk.Stiffness
             );
         }
-        // 비활성 축이면 아직 classic 복구 안 넣고 그냥 기존 MDK 유지
+        // 비활성 축이면 아직 classic 복구 로직(강성 점진 복원 등)은 없음.
 
-        // (3) 어드미턴스 1D 실행
+        // (3) 1D 어드미턴스 제어 수행:
+        //     adm_1D_control(x_des, F_des, F_ext_meas)
+        //     -> compliant하게 조정된 새로운 위치 명령
         double next_pos = AControl[ax].adm_1D_control(
-            Xd(ax),    // 원하는 위치
-            Fd(ax),    // 원하는 힘
-            F_ext(ax)  // 측정 외력
+            Xd(ax),    // 기준 경로상의 목표 위치
+            Fd(ax),    // 기준 경로상의 목표 힘
+            F_ext(ax)  // 필터 후 측정 외력
         );
         Xc_cmd(ax) = next_pos;
     }
 
-    // ---- 자세축(wx,wy,wz) ----
-    // 현재는 힘/토크 제어 없이 그냥 원하는 spatial angle 그대로
+    // ---- 자세축(wx,wy,wz)은 현재 그냥 목표값 그대로 사용 ----
+    // force_control.cpp에서도 orientation축은 기본적으로 포지션(자세) 추종만 하고
+    // 별도의 힘제어는 안 넣는 구조가 있었음.
     Wc_cmd = Wd;
 
-    // ---- 안전 클램프 (위치만) ----
+    // ---- 위치 명령 안정화 (클램프) ----
+    //  - 기준 경로 Xd에서 ±1cm 이상 벗어나지 않게 제한
+    //  - 한 틱에서 3mm 이상 점프하지 않게 제한
     {
-        static Eigen::Vector3d Xc_prev = Xd; // 이전 명령 위치
+        static Eigen::Vector3d Xc_prev = Xd; // 이전 틱의 명령 위치
 
-        const double max_offset = 0.010; // 경로에서 ±1 cm 이상 벗어나지 않게
-        const double max_step   = 0.003; // 한 주기당 3 mm 이상 튀지 않게
+        const double max_offset = 0.010; // [m] 경로 대비 허용 이탈
+        const double max_step   = 0.003; // [m] 한 주기 이동 제한
 
         for (int ax=0; ax<3; ++ax) {
-            // 기준경로 Xd 근처로 클램프
+            // (a) 기준경로 주변 offset 제한
             double lo = Xd(ax) - max_offset;
             double hi = Xd(ax) + max_offset;
             if (Xc_cmd(ax) < lo) Xc_cmd(ax) = lo;
             if (Xc_cmd(ax) > hi) Xc_cmd(ax) = hi;
 
-            // step 크기 제한
+            // (b) 프레임 간 점프 제한
             double d = Xc_cmd(ax) - Xc_prev(ax);
             if (d >  max_step) d =  max_step;
             if (d < -max_step) d = -max_step;
             Xc_cmd(ax) = Xc_prev(ax) + d;
         }
 
-        // 다음 루프 대비 업데이트
-        Xc_prev = Xc_cmd;
+        // 다음 틱 대비 저장
+        Xc_prev      = Xc_cmd;
 
-        // FAAC 내부 상태 갱신 (다음 반복에서 Xc로 사용)
+        // FAAC 내부 상태(다음 루프의 "이전 Xc") 갱신
         AC_pose_pos[0] = Xc_cmd(0);
         AC_pose_pos[1] = Xc_cmd(1);
         AC_pose_pos[2] = Xc_cmd(2);
     }
 
-    // orientation 쪽 기록(현재는 그냥 그대로)
+    // orientation 누적도 갱신 (현재는 그냥 복사)
     AC_pose_ori[0] = Wc_cmd(0);
     AC_pose_ori[1] = Wc_cmd(1);
     AC_pose_ori[2] = Wc_cmd(2);
 
-    // ======================
-    // 5) IK 입력 구성
-    //
-    //   위치는 Xc_cmd (어드미턴스/FAAC 반영된 것)
-    //   자세는 원래 txt의 RPYd 그대로 사용해서 회전행렬 구성
-    //
-    //   (우리는 아직 orientation 제어 안 비틀었으니까 RPYd로 충분)
-    //
-    //   + TOOL_Z 오프셋은 기존 Baseline 유지
-    // ======================
 
-    // 플랜지 기준 z offset
+    // =========================================================================
+    // [STEP 5] IK 입력 pose(Td) 구성
+    //
+    //    - 위치:   Xc_cmd (FAAC/어드미턴스 보정 결과)
+    //    - 자세:   여전히 txt에서 준 RPYd 기반 회전행렬 사용
+    //               (아직 IK에 spatial angle 직접 넣지 않음)
+    //
+    //    - TOOL_Z: TCP offset 보정. UR10 IK는 플랜지 좌표계를 쓰므로,
+    //              실제 원하는 TCP z를 플랜지 기준 위치로 바꾸기 위해
+    //              z에 TOOL_Z를 더해서 IK 타깃을 만든다.
+    //
+    //    RArm.Td : IK 타깃 homogeneous transform (4x4)
+    //              이 값으로 AKin.InverseK_min() 또는 AKin.Ycontact_InverseK_min()
+    //              을 호출하면 RArm.qd 에 joint 명령각이 채워진다.
+    //
+    // force_control.cpp와 비교:
+    //   - kuka_motion.cpp에서는 YMatrix 기반 IK/QP solver(solve_IK)를 호출.
+    //   - 우리는 UR10 전용 AKin.*InverseK_min()을 호출.   ★차이점★
+    // =========================================================================
     Eigen::Vector3d flange_xyz = Xc_cmd;
-    flange_xyz(2) += TOOL_Z;
+    flange_xyz(2) += TOOL_Z;  // TCP -> 플랜지 보정
 
-    // RPYd -> 회전행렬 (기존 kinematics util 사용)
+    // 다시 RPY → 회전행렬 (UR10 kinematics util 사용)
     Eigen::Matrix3d Rd_R_again;
     AKin.EulerAngle2Rotation(Rd_R_again, RPYd);
 
-    RArm.Td << Rd_R_again(0,0), Rd_R_again(0,1), Rd_R_again(0,2), flange_xyz(0),
-               Rd_R_again(1,0), Rd_R_again(1,1), Rd_R_again(1,2), flange_xyz(1),
-               Rd_R_again(2,0), Rd_R_again(2,1), Rd_R_again(2,2), flange_xyz(2),
-               0,0,0,1;
+    RArm.Td <<
+        Rd_R_again(0,0), Rd_R_again(0,1), Rd_R_again(0,2), flange_xyz(0),
+        Rd_R_again(1,0), Rd_R_again(1,1), Rd_R_again(1,2), flange_xyz(1),
+        Rd_R_again(2,0), Rd_R_again(2,1), Rd_R_again(2,2), flange_xyz(2),
+        0,               0,               0,               1;
 
 #if TCP_standard == 0
-    AKin.InverseK_min(&RArm);
+    AKin.InverseK_min(&RArm);          // 일반 IK
 #else
-    AKin.Ycontact_InverseK_min(&RArm);
+    AKin.Ycontact_InverseK_min(&RArm); // 접촉 상황 최적화된 IK
 #endif
 
-    // ======================
-    // 6) 조인트 명령 publish
-    // ======================
+
+    // =========================================================================
+    // [STEP 6] 조인트 명령 publish
+    //
+    // joint_state_ :
+    //   - 생성자에서 name[]과 position.resize()까지 초기화해 둔 sensor_msgs::msg::JointState
+    //   - 여기서 position[i] = RArm.qd(i) 로 갱신 후
+    //     joint_commands_pub_ 토픽(/isaac_joint_commands 등)으로 publish
+    //
+    // 상위 CalculateAndPublishJoint()에서 qc/qd 등을 printf로 찍으면서
+    // 잘 따라오는지 모니터링 중.
+    // =========================================================================
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < DOF; ++i) {
         joint_state_.position[i] = RArm.qd(i);
     }
     joint_commands_pub_->publish(joint_state_);
 
+
+    // =========================================================================
+    // [STEP 7] base frame 기준 외력(F_ext) publish
+    //
+    // 우리가 위 STEP 2에서 구한 F_ext는
+    //   - contact_force (TCP z축) → base frame 변환 → 부호정규화 → LPF
+    //   - 결과적으로 현재 EE에 작용 중이라고 추정되는 외력 [N]이다.
+    //
+    // 여기서 그 F_ext(x,y,z)를 그대로 퍼블리시해서
+    // 다른 노드나 로거에서 접촉력 추이를 관찰 가능하게 만든다.
+    //
+    // 메시지 타입:
+    //   force_ext_base_pub_ 는 Float64MultiArray 퍼블리셔라고 가정.
+    //   (만약 현재 코드에서 Float64 단일 퍼블리셔면,
+    //    JointControl 생성자에서 Float64MultiArray로 바꿔줘야 한다는 점 주의!)
+    //
+    // 토픽 이름 예: "force_ext_base"
+    // 내용:
+    //   data[0] = F_ext.x  [N, base frame]
+    //   data[1] = F_ext.y  [N, base frame]
+    //   data[2] = F_ext.z  [N, base frame]
+    // =========================================================================
+    {
+        std_msgs::msg::Float64MultiArray force_msg;
+        force_msg.data.resize(3);
+        force_msg.data[0] = F_ext(0);
+        force_msg.data[1] = F_ext(1);
+        force_msg.data[2] = F_ext(2);
+        force_ext_base_pub_->publish(force_msg);
+    }
+
+    // 여전히 재생 중이므로 true 반환
     return true;
 }
 
 
 
-// ===================== ReturnHomePose() =====================
-// 역할: 현재 q에서 HOME_Q까지 시간기반 선형 보간으로 복귀
 bool JointControl::ReturnHomePose(double dt_s)
 {
-    static bool   active   = false;
-    static double elapsed  = 0.0;
-    static double duration = 0.0;
-    static Vector6d start_q;
+    // 내부 상태 유지용 static 변수들
+    static bool     active    = false;   // 복귀 시퀀스 진행 중인지
+    static double   elapsed   = 0.0;     // 누적 경과 시간 [s]
+    static double   duration  = 10.0;    // 홈 복귀에 쓸 총 시간 [s] (느리게: 10초)
+    static Vector6d start_q;             // 복귀 시작 관절각
 
+    // 홈 자세 (라디안)
     static const Vector6d HOME_Q = (Vector6d() <<
-        0.0, -M_PI / 2.0, -M_PI / 2.0, -M_PI / 2.0, +M_PI / 2.0, 0.0).finished();
+        0.0,
+        -M_PI / 2.0,
+        -M_PI / 2.0,
+        -M_PI / 2.0,
+        +M_PI / 2.0,
+        0.0).finished();
 
-    // --- 활성화 ---
+    // --- 복귀 시퀀스 시작 트리거 ---
+    //
+    // PathFollow()에서 EOF를 만나면
+    //   return_active_  = true;
+    //   return_start_q_ = 현재 로봇 관절각(RArm.qc)
+    //
+    // 여기서 그 신호를 보고 첫 1회만 latch
     if (return_active_ && !active) {
-        active   = true;
-        elapsed  = 0.0;
-        duration = return_duration_;
-        start_q  = return_start_q_;
+        active    = true;
+        elapsed   = 0.0;
+        duration  = 10.0;          // 무조건 10초 (느리게 이동)
+        start_q   = return_start_q_;
     }
 
-    // --- 진행 ---
+    // --- 복귀 중이라면 보간 수행 ---
     if (active) {
-        elapsed += dt_s;
-        const double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
+        // dt_s가 비정상적으로 큰 경우(타이머 hiccup 등) 너무 빨리 시간을 밀지 않도록 클램프
+        double dt_step = dt_s;
+        if (dt_step <= 0.0 || dt_step > 0.05) { // 50ms 이상 튀면 그냥 1ms로 본다
+            dt_step = 0.001;
+        }
 
-        const Vector6d q_cmd = (1.0 - alpha) * start_q + alpha * HOME_Q;
-        for (int i = 0; i < DOF; ++i) RArm.qd(i) = q_cmd(i);
+        // 경과 시간 누적
+        elapsed += dt_step;
+
+        // 선형 진행비율 s_raw = [0..1]
+        double s_raw = elapsed / std::max(1e-6, duration);
+        if (s_raw < 0.0) s_raw = 0.0;
+        if (s_raw > 1.0) s_raw = 1.0;
+
+        // 부드러운 스케일 (smoothstep-ish: 3s^2 - 2s^3)
+        //   - 초반/후반 속도 낮춰서 갑자기 확 잡아당기는 느낌 줄이기
+        double s = (3.0 * s_raw * s_raw) - (2.0 * s_raw * s_raw * s_raw);
+
+        // 보간된 목표 관절각 q_cmd
+        Vector6d q_cmd;
+        for (int i = 0; i < DOF; ++i) {
+            q_cmd(i) = (1.0 - s) * start_q(i) + s * HOME_Q(i);
+        }
+
+        // qd에 반영하고 퍼블리시
+        for (int i = 0; i < DOF; ++i) {
+            RArm.qd(i) = q_cmd(i);
+        }
 
         joint_state_.header.stamp = node_->now();
-        for (int i = 0; i < DOF; ++i) joint_state_.position[i] = RArm.qd(i);
+        for (int i = 0; i < DOF; ++i) {
+            joint_state_.position[i] = RArm.qd(i);
+        }
         joint_commands_pub_->publish(joint_state_);
 
-        if (alpha >= 1.0 - 1e-6) {
-            active = false;
-            return_active_ = false;
-            printf("[PB] Return-to-home done.\n");
+        // 마무리: 다 도착했으면 모드 해제
+        if (s_raw >= 1.0 - 1e-6) {
+            active          = false;
+            return_active_  = false;
+
+            printf("[PB] Return-to-home done (10s smooth ramp).\n");
+
+            // playback 모드 종료 → 홈 유지 모드(0)
             ctrl.store(0, std::memory_order_release);
             set_status(message_status, "Playback finished");
         }
-        return true;
+
+        return true; // 복귀 시퀀스 진행 중
     }
 
+    // 복귀 안 하고 있으면 false
     return false;
 }
+
 
 // ===================== Main Control Loop =====================
 // 역할: 주기(dt) 산출 → 최신 FK/상태 갱신 → 모드별 제어/퍼블리시
@@ -1036,12 +1254,16 @@ void JointControl::CalculateAndPublishJoint() {
   // 클래스 보조 상태 동기화(가시화용)
   for (int i = 0; i < DOF; ++i) joint_pos[i] = RArm.qc(i);
 
-  // TCP→Base 힘 변환(참고용)
-  Eigen::Vector3d F_base = Eigen::Vector3d::Zero();
+  // TCP→Base 힘 변환 (for debug print)
+  Eigen::Vector3d F_base_dbg = Eigen::Vector3d::Zero();
   {
-      const Eigen::Matrix3d R_TCP_base = RArm.Tc.block<3,3>(0,0);
-      const Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);
-      F_base = R_TCP_base * F_TCP;
+      const Eigen::Matrix3d R_TCP_base = RArm.Tc.block<3,3>(0,0);  // Base<-TCP 회전
+      const Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);        // TCP z축 힘
+      Eigen::Vector3d F_base_raw = R_TCP_base * F_TCP;             // 변환된 힘 (Base 기준)
+
+      // 제어 쪽에서 외력은 F_ext = -F_base_raw 를 쓰고 있으므로
+      // 디버그도 그 부호에 맞춰서 출력한다 (contact_force와 같은 방향으로 보이도록 뒤집음)
+      F_base_dbg = -F_base_raw;
   }
 
   // 상태 로드
@@ -1052,7 +1274,7 @@ void JointControl::CalculateAndPublishJoint() {
   if (printer_counter >= print_period) {
   #if RT_printing
       printf("======================================== \n");
-      printf("Simulation time : %d ms\n", (int)milisec);   // 정수로 캐스팅
+      printf("Simulation time : %d ms\n", (int)milisec);
       printf("RUN MODE %d (prev %d)\n", control_mode, pre_control_mode);
 
       printf("q  : %.3f %.3f %.3f %.3f %.3f %.3f\n",
@@ -1068,8 +1290,10 @@ void JointControl::CalculateAndPublishJoint() {
             Desired_XYZ(0), Desired_XYZ(1), Desired_XYZ(2),
             Desired_RPY(0), Desired_RPY(1), Desired_RPY(2));
 
+      // contact_force (TCP z) 와 같은 부호계로 맞춘 base-frame force 출력
       printf("Contact Fz: %.2f -> Base: %.3f %.3f %.3f\n",
-            contact_force, F_base(0), F_base(1), F_base(2));
+            contact_force,
+            F_base_dbg(0), F_base_dbg(1), F_base_dbg(2));
   #endif
       printer_counter = 0;
   } else {
@@ -1172,35 +1396,40 @@ void JointControl::CalculateAndPublishJoint() {
   // 3) Playback: InitMove → PathFollow → ReturnHomePose
   if (control_mode == 3) {
       static bool init_done = false;
+      static bool follow_done = false;  // TXT 추종 완료 여부
 
       // 모드 전환 시 InitMove부터 다시 시작
       if (pre_control_mode != 3) {
-          init_done = false;
+          init_done   = false;
+          follow_done = false;
       }
 
+      // 1) InitMove 단계
       if (!init_done) {
           bool just_finished = InitMove(dt_s);
           if (!just_finished) {
-              // 아직 InitMove 진행 중이면 여기서 종료
               pre_ctrl.store(control_mode, std::memory_order_relaxed);
               return;
           }
-          // ⬇️ 바로 PathFollow로 이어감 (다음 틱 기다리지 않음)
           init_done = true;
       }
 
-      if (PathFollow(dt_s)) {
-          pre_ctrl.store(control_mode, std::memory_order_relaxed);
-          return;
+      // 2) PathFollow 단계 (아직 안 끝났으면 계속)
+      if (!follow_done) {
+          if (PathFollow(dt_s)) {
+              pre_ctrl.store(control_mode, std::memory_order_relaxed);
+              return;
+          } else {
+              // 여기 오면 EOF 도달해서 return_active_ 세팅 끝난 상태
+              follow_done = true;
+          }
       }
 
-      // PathFollow가 false를 반환하면 EOF → Return 단계
+      // 3) Return 단계
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
-
-
 
   // 그 외(보호)
   speedmode = 0;

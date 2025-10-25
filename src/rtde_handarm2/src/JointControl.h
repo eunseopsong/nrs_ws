@@ -85,7 +85,6 @@ public:
     //  로봇 상태 갱신 / 제어 알고리즘
     // ------------------------------------------------------------------------
     void UpdateState();      // Forward Kinematics 기반 EE 상태 갱신
-    void ControlForce();     // 외력 기반 Cartesian Admittance 제어
 
     // ------------------------------------------------------------------------
     //  Trajectory Playback 관련 함수
@@ -122,7 +121,7 @@ private:
     // -------------------------------------------------------------------------
     //  ROS2 Publishers
     // -------------------------------------------------------------------------
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr              YSurfN_Fext_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    force_ext_base_pub_;
     rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr               UR10e_mode_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    UR10_wrench_pub_;
