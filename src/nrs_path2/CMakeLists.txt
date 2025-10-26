@@ -163,7 +163,7 @@ target_include_directories(nrs_node_visualization PUBLIC $<BUILD_INTERFACE:${CMA
 add_dependencies(nrs_node_visualization ${PROJECT_NAME}__rosidl_generator_cpp)
 target_link_libraries(nrs_node_visualization ${LINK_LIBS})
 
-## path_projection ##
+## path_projection (원본) ##
 add_executable(path_projection
   src/path_projection.cpp
 )
@@ -174,6 +174,18 @@ target_include_directories(path_projection PUBLIC
 )
 add_dependencies(path_projection ${PROJECT_NAME}__rosidl_generator_cpp)
 target_link_libraries(path_projection ${LINK_LIBS})
+
+## path_projection_wo_interp (보간 제거 버전) ##
+add_executable(path_projection_wo_interp
+  src/path_projection_wo_interp.cpp
+)
+ament_target_dependencies(path_projection_wo_interp ${COMMON_DEPENDENCIES} rosidl_typesupport_cpp)
+rosidl_target_interfaces(path_projection_wo_interp ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_include_directories(path_projection_wo_interp PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>
+)
+add_dependencies(path_projection_wo_interp ${PROJECT_NAME}__rosidl_generator_cpp)
+target_link_libraries(path_projection_wo_interp ${LINK_LIBS})
 
 ##############################
 #       INSTALL TARGETS      #
@@ -189,6 +201,7 @@ install(TARGETS
   nrs_node_path_generation
   nrs_node_visualization
   path_projection
+  path_projection_wo_interp
   DESTINATION lib/${PROJECT_NAME}
 )
 
