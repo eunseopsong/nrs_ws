@@ -889,9 +889,11 @@ bool JointControl::PathFollow(double dt_s)
 
     // 어드미턴스 초기 파라미터들
     static double FC_MASS[6]      = {1.0,   1.0,   1.0,   0.05, 0.05, 0.05};
-    static double FC_DAMPER[6]    = {3000., 3000., 3000., 10.0, 10.0, 10.0};
+    // static double FC_DAMPER[6]    = {3000., 3000., 3000., 10.0, 10.0, 10.0};
+    static double FC_DAMPER[6]    = {6000., 6000., 6000., 10.0, 10.0, 10.0};
     static double FC_STIFFNESS[6] = {2000., 2000., 2000., 20.0, 20.0, 20.0};
 
+    
     // --- 목표 힘 램프 (Fd -> Fd_cmd, up/down 서로 다른 타임상수) -------------
     //
     // 문제점(이전 버전):
