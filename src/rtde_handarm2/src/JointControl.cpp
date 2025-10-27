@@ -116,10 +116,6 @@ static constexpr double TOOL_Z = 0.248;  // [m]
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 : node_(node), milisec(0.0)
 {
-  // 모니터링 객체
-  AdaptiveK_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "AdaptiveK_msg");
-  FAAC3step_msg_ = std::make_unique<nrs_msgmonitoring2::MsgMonitoring>(node_, "FAAC3step_msg");
-
   // Publishers
   force_ext_base_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("force_ext_base", 20);
   UR10e_mode_pub_     = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
@@ -669,13 +665,13 @@ bool JointControl::PathFollow(double dt_s)
     Desired_RPY = RPYd;
 
     // [DEBUG STEP 1] TXT에서 읽은 원시 목표 값 확인
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP1] Xd(m) = [%.4f %.4f %.4f], RPY(rad)=[%.3f %.3f %.3f], Fd(N)=[%.2f %.2f %.2f]",
-        Xd(0), Xd(1), Xd(2),
-        RPYd(0), RPYd(1), RPYd(2),
-        Fd(0), Fd(1), Fd(2)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP1] Xd(m) = [%.4f %.4f %.4f], RPY(rad)=[%.3f %.3f %.3f], Fd(N)=[%.2f %.2f %.2f]",
+    //     Xd(0), Xd(1), Xd(2),
+    //     RPYd(0), RPYd(1), RPYd(2),
+    //     Fd(0), Fd(1), Fd(2)
+    // );
 
 
     // =========================================================================
@@ -714,13 +710,13 @@ bool JointControl::PathFollow(double dt_s)
     Eigen::Vector3d X_act = RArm.xc;
 
     // [DEBUG STEP 2] 외력 추정 및 실제 현재 EE 위치 출력
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP2] contact_force(raw)=%.2f -> F_ext(N)=[%.2f %.2f %.2f], X_act(m)=[%.4f %.4f %.4f]",
-    //     contact_force,
-    //     F_ext(0), F_ext(1), F_ext(2),
-    //     X_act(0), X_act(1), X_act(2)
-    // );
+    RCLCPP_INFO(
+        node_->get_logger(),
+        "[STEP2] contact_force(raw)=%.2f -> F_ext(N)=[%.2f %.2f %.2f], X_act(m)=[%.4f %.4f %.4f]",
+        contact_force,
+        F_ext(0), F_ext(1), F_ext(2),
+        X_act(0), X_act(1), X_act(2)
+    );
 
 
     // =========================================================================
