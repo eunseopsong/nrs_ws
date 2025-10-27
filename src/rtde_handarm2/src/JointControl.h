@@ -168,8 +168,12 @@ private:
     std::vector<std::vector<double>> joint_trajectory_;
 
     // =========================================================================
-    //  모니터링 객체 (AdaptiveK / FAAC 3-step)
+    //  디버그용 publishers
     // =========================================================================
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step1_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step2_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step4_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step5_pub_;
 
 };
 
