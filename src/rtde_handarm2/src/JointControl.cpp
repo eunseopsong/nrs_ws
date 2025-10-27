@@ -116,14 +116,13 @@ static constexpr double TOOL_Z = 0.248;  // [m]
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 : node_(node), milisec(0.0)
 {
-  debug_step1_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
-    "/debug_step1_ref", 10);
-  debug_step2_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
-      "/debug_step2_force", 10);
-  debug_step4_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
-      "/debug_step4_admit", 10);
-  debug_step5_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
-      "/debug_step5_cmd", 10);
+
+  // Debug Publishers
+  debug_step1_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step1", 10);
+  debug_step2_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step2", 10);
+  debug_step3_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step3", 10);
+  debug_step4_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step4", 10);
+  debug_step5_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step5", 10);
 
   // Publishers
   force_ext_base_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("force_ext_base", 20);
@@ -607,7 +606,6 @@ bool JointControl::InitMove(double dt_s)
 
 
 
-
 bool JointControl::PathFollow(double dt_s)
 {
     // =========================================================================
@@ -624,18 +622,14 @@ bool JointControl::PathFollow(double dt_s)
     }
 
     if (!Hand_G_playback) {
-        // 파일 핸들이 없는데 active라면 예외 상황 → 안전 정지
         RCLCPP_ERROR(node_->get_logger(), "[PB] playback file closed unexpectedly.");
         ctrl.store(0, std::memory_order_release);
         set_status(message_status, "Playback file closed");
         return false;
     }
 
-
     // =========================================================================
-    // [STEP 1] TXT에서 목표 pose/force 한 줄 읽기
-    //
-    // txt 라인 포맷:
+    // [STEP 1] TXT 한 줄 읽기 (목표 pose/force)
     //   x y z r p yaw fx fy fz
     // =========================================================================
     float des_x, des_y, des_z;
@@ -664,13 +658,14 @@ bool JointControl::PathFollow(double dt_s)
             return_start_q_(i) = RArm.qc(i);
         }
 
-        RCLCPP_INFO(node_->get_logger(), "[PB] EOF -> switching to ReturnHomePose");
-        return false; // 상위 루프가 ReturnHomePose() 호출
+        printf("[PB] End of file. Start return-to-home.\n");
+        return false;
     }
 
-    Eigen::Vector3d Xd;    // 원하는 위치 [m]
-    Eigen::Vector3d RPYd;  // 원하는 RPY [rad]
-    Eigen::Vector3d Fd;    // 원하는 힘 [N] (base frame 기준)
+    // 목표값 (기준 경로)
+    Eigen::Vector3d Xd;    // 목표 TCP 위치 [m] (base frame)
+    Eigen::Vector3d RPYd;  // 목표 roll,pitch,yaw [rad]
+    Eigen::Vector3d Fd;    // 목표 힘 [N] (base frame, 원하는 누르는 방향)
 
     Xd   << (double)des_x,  (double)des_y,   (double)des_z;
     RPYd << (double)des_r,  (double)des_p,   (double)des_yaw;
@@ -679,39 +674,51 @@ bool JointControl::PathFollow(double dt_s)
     Desired_XYZ = Xd;
     Desired_RPY = RPYd;
 
-    // [DEBUG STEP 1] 콘솔 출력
+    // [DEBUG STEP 1] 콘솔 + PUBLISH
     // RCLCPP_INFO(
     //     node_->get_logger(),
-    //     "[STEP1] Xd(m)=[%.4f %.4f %.4f], RPY(rad)=[%.3f %.3f %.3f], Fd(N)=[%.2f %.2f %.2f]",
+    //     "[STEP1] Xd=[%.4f %.4f %.4f], RPYd=[%.3f %.3f %.3f], Fd=[%.2f %.2f %.2f]",
     //     Xd(0), Xd(1), Xd(2),
     //     RPYd(0), RPYd(1), RPYd(2),
     //     Fd(0), Fd(1), Fd(2)
     // );
-
-    // [PUBLISH STEP 1] /debug_step1_ref
     {
-        std_msgs::msg::Float64MultiArray msg;
-        msg.data.resize(6);
-        msg.data[0] = Xd(0);
-        msg.data[1] = Xd(1);
-        msg.data[2] = Xd(2);
-        msg.data[3] = RPYd(0);
-        msg.data[4] = RPYd(1);
-        msg.data[5] = RPYd(2);
-        debug_step1_pub_->publish(msg);
+        std_msgs::msg::Float64MultiArray dbg;
+        dbg.data.resize(9);
+        dbg.data[0] = Xd(0);
+        dbg.data[1] = Xd(1);
+        dbg.data[2] = Xd(2);
+        dbg.data[3] = RPYd(0);
+        dbg.data[4] = RPYd(1);
+        dbg.data[5] = RPYd(2);
+        dbg.data[6] = Fd(0);
+        dbg.data[7] = Fd(1);
+        dbg.data[8] = Fd(2);
+        debug_step1_pub_->publish(dbg);
     }
-
 
     // =========================================================================
     // [STEP 2] 외력 추정 F_ext (LPF + saturation)
     //
-    // contact_force는 TCP z축 힘 스칼라.
-    // 이것을 base frame으로 변환 후 LPF와 saturation 적용.
+    // contact_force : Isaac에서 들어온 TCP z축 방향 힘 (스칼라)
+    // F_TCP         : TCP 프레임 기준 힘 벡터 [0,0,contact_force]
+    // 변환:
+    //   Base → TCP 동차변환 = ur10e_forward(RArm.qc, TOOL_Z)
+    //   그 회전부(3x3)를 R_base_TCP 라 하자.
+    //   이 회전은 "TCP 벡터를 base 좌표계로 표현"하는 회전이다.
+    //
+    //   F_base = R_base_TCP * F_TCP
+    //   F_ext  = -F_base (부호 정규화)
+    //
+    // 이후 LPF, saturation.
+    // 또한 현재 EE 실제 위치 X_act (= RArm.xc)
     // =========================================================================
-    Eigen::Matrix3d R_base_TCP = RArm.Tc.block<3,3>(0,0); // Base←TCP 회전
-    Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);       // TCP 프레임 힘
-    Eigen::Vector3d F_base = R_base_TCP * F_TCP;          // Base 프레임 힘
-    Eigen::Vector3d F_ext  = -F_base;                     // 부호 정규화
+    Eigen::Matrix4d T_base_TCP_cur = ur10e_forward(RArm.qc, TOOL_Z);
+    Eigen::Matrix3d R_base_TCP     = T_base_TCP_cur.block<3,3>(0,0);
+
+    Eigen::Vector3d F_TCP(0.0, 0.0, -contact_force);
+    Eigen::Vector3d F_base = R_base_TCP * F_TCP;
+    Eigen::Vector3d F_ext  = F_base;
 
     // LPF
     {
@@ -740,10 +747,10 @@ bool JointControl::PathFollow(double dt_s)
         }
     }
 
-    // 현재 EE 실제 위치
+    // 현재 EE 실제 위치 (TCP position in base)
     Eigen::Vector3d X_act = RArm.xc;
 
-    // [DEBUG STEP 2] 콘솔 출력
+    // [DEBUG STEP 2] 콘솔 + publish
     // RCLCPP_INFO(
     //     node_->get_logger(),
     //     "[STEP2] contact_force=%.2f -> F_ext=[%.2f %.2f %.2f], X_act=[%.4f %.4f %.4f]",
@@ -751,24 +758,29 @@ bool JointControl::PathFollow(double dt_s)
     //     F_ext(0), F_ext(1), F_ext(2),
     //     X_act(0), X_act(1), X_act(2)
     // );
-
-    // [PUBLISH STEP 2] /debug_step2_force
     {
-        std_msgs::msg::Float64MultiArray msg;
-        msg.data.resize(7);
-        msg.data[0] = contact_force;  // raw scalar
-        msg.data[1] = F_ext(0);
-        msg.data[2] = F_ext(1);
-        msg.data[3] = F_ext(2);
-        msg.data[4] = X_act(0);
-        msg.data[5] = X_act(1);
-        msg.data[6] = X_act(2);
-        debug_step2_pub_->publish(msg);
+        std_msgs::msg::Float64MultiArray dbg;
+        dbg.data.resize(7);
+        dbg.data[0] = contact_force;
+        dbg.data[1] = F_ext(0);
+        dbg.data[2] = F_ext(1);
+        dbg.data[3] = F_ext(2);
+        dbg.data[4] = X_act(0);
+        dbg.data[5] = X_act(1);
+        dbg.data[6] = X_act(2);
+        debug_step2_pub_->publish(dbg);
     }
 
-
     // =========================================================================
-    // [STEP 3] 목표 RPY -> 회전행렬 -> 회전벡터 (Wd)
+    // [STEP 3] 목표 자세 RPYd → 회전행렬 → axis-angle 벡터 Wd
+    //
+    // rotFromRPY(RPYd):
+    //   우리가 정의한 Z-Y-X 순서 (Rz(yaw)*Ry(pitch)*Rx(roll)) 로
+    //   목표 EE의 "Base→EE 회전" (즉 base에서 본 EE 방향) 행렬을 만든다고 가정한다.
+    //
+    // rotLog(Rd_R):
+    //   Rd_R의 회전을 "단일 회전축 * 회전각" 벡터(회전벡터)로 변환.
+    //   이걸 Wd라고 부르고 제어 내부에선 spatial angle, orientation vector 등으로 사용.
     // =========================================================================
     auto rotFromRPY = [](const Eigen::Vector3d &rpy)->Eigen::Matrix3d {
         const double cr = std::cos(rpy(0));
@@ -809,29 +821,50 @@ bool JointControl::PathFollow(double dt_s)
                  R(1,0) - R(0,1);
         omega *= 0.5 / std::sin(theta);
 
-        return theta * omega;
+        return theta * omega; // axis-angle 벡터
     };
 
-    Eigen::Matrix3d Rd_R = rotFromRPY(RPYd); // 목표 회전행렬
-    Eigen::Vector3d Wd   = rotLog(Rd_R);     // 목표 spatial angle
+    Eigen::Matrix3d Rd_R = rotFromRPY(RPYd); // 목표 EE orientation (base 기준)
+    Eigen::Vector3d Wd   = rotLog(Rd_R);     // axis-angle 목표 벡터
 
-    // [DEBUG STEP 3] 콘솔 출력 (회전 관련)
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP3] RPYd=[%.3f %.3f %.3f], Wd=[%.3f %.3f %.3f]",
-    //     RPYd(0), RPYd(1), RPYd(2),
-    //     Wd(0), Wd(1), Wd(2)
-    // );
+    // [DEBUG STEP 3] 콘솔 + publish
+    {
+        double Wd_norm = Wd.norm();
+        // RCLCPP_INFO(
+        //     node_->get_logger(),
+        //     "[STEP3] RPYd=[%.3f %.3f %.3f], Wd=[%.3f %.3f %.3f], |Wd|=%.3f",
+        //     RPYd(0), RPYd(1), RPYd(2),
+        //     Wd(0), Wd(1), Wd(2),
+        //     Wd_norm
+        // );
 
+        std_msgs::msg::Float64MultiArray dbg;
+        dbg.data.resize(7);
+        dbg.data[0] = RPYd(0);
+        dbg.data[1] = RPYd(1);
+        dbg.data[2] = RPYd(2);
+        dbg.data[3] = Wd(0);
+        dbg.data[4] = Wd(1);
+        dbg.data[5] = Wd(2);
+        dbg.data[6] = Wd_norm;
+        debug_step3_pub_->publish(dbg);
+    }
 
     // =========================================================================
-    // [STEP 4] FAAC + 어드미턴스 제어 준비
+    // [STEP 4] 어드미턴스 + FAAC
     //
-    //  - Fd_cmd : 목표 힘 램핑 결과
-    //  - AControl / FAAC3step : 어드미턴스 및 적응 M/D/K
+    //  - F_ext (측정된 외력, base frame)
+    //  - Fd     (목표 힘, base frame)
+    //  - X_act  (현재 위치, base frame)
+    //  - Xd     (기준 경로 위치, base frame)
+    //
+    // 출력:
+    //  - Xc_cmd : 어드미턴스/FAAC 보정 후 사용할 위치 명령 (base frame)
+    //  - Wc_cmd : 현재는 그냥 Wd (orientation은 아직 힘 적응 안 넣음)
     // =========================================================================
     static bool fc_init = false;
 
+    // 어드미턴스 컨트롤러 6축 (x,y,z, wx,wy,wz)
     static Yadmittance_control AControl[6] = {
         Yadmittance_control(0.001),
         Yadmittance_control(0.001),
@@ -841,28 +874,29 @@ bool JointControl::PathFollow(double dt_s)
         Yadmittance_control(0.001)
     };
 
+    // x,y,z 축용 FAAC 객체
     static std::unique_ptr<Nrs3StepFAAC> FAAC3step[3];
-    static bool   FAAC_flag[3] = {false,false,false};
+    static bool FAAC_flag[3] = {false,false,false};
 
-    static double AC_pose_pos[3] = {0.0,0.0,0.0}; // 지난 루프의 어드미턴스 출력 위치
-    static double AC_pose_ori[3] = {0.0,0.0,0.0}; // 지난 루프의 orientation 명령
+    // 지난 루프의 누적 명령 상태
+    static double AC_pose_pos[3] = {0.0,0.0,0.0}; // x,y,z
+    static double AC_pose_ori[3] = {0.0,0.0,0.0}; // wx,wy,wz
 
     static double FC_MASS[6]      = {1.0,   1.0,   1.0,   0.05, 0.05, 0.05};
     static double FC_DAMPER[6]    = {6000., 6000., 6000., 10.0, 10.0, 10.0};
     static double FC_STIFFNESS[6] = {2000., 2000., 2000., 20.0, 20.0, 20.0};
 
+    // 목표 힘 램프
     static Eigen::Vector3d Fd_cmd = Eigen::Vector3d::Zero();
     {
         const double alpha_up   = 0.02;
         const double alpha_down = 0.20;
-
         for (int k = 0; k < 3; ++k) {
             double alpha = (std::fabs(Fd(k)) > std::fabs(Fd_cmd(k)))
                            ? alpha_up
                            : alpha_down;
             Fd_cmd(k) += alpha * (Fd(k) - Fd_cmd(k));
         }
-
         const double FDES_SAT = 30.0;
         for (int k=0; k<3; ++k) {
             if (Fd_cmd(k) >  FDES_SAT) Fd_cmd(k) =  FDES_SAT;
@@ -870,8 +904,9 @@ bool JointControl::PathFollow(double dt_s)
         }
     }
 
+    // 1회성 초기화
     if (!fc_init) {
-        // 초기 어드미턴스 M/D/K 설정
+        // (a) 어드미턴스 M,D,K 초기 세팅
         for (int i = 0; i < 6; ++i) {
             AControl[i].adm_1D_MDK(
                 FC_MASS[i],
@@ -880,7 +915,7 @@ bool JointControl::PathFollow(double dt_s)
             );
         }
 
-        // FAAC 객체 초기화
+        // (b) FAAC 준비
         std::vector<double> proc_noise = {0.1,0.1,0.1};
         std::vector<double> meas_noise = {10.0,10.0,10.0};
         double dt_for_faac = (dt_s > 0.0 ? dt_s : 0.001);
@@ -897,7 +932,7 @@ bool JointControl::PathFollow(double dt_s)
             FAAC_flag[ax] = false;
         }
 
-        // 초기 누적 상태는 현재 목표에서 시작
+        // (c) 초기 어드미턴스 출력 기준
         AC_pose_pos[0] = Xd(0);
         AC_pose_pos[1] = Xd(1);
         AC_pose_pos[2] = Xd(2);
@@ -909,45 +944,27 @@ bool JointControl::PathFollow(double dt_s)
         fc_init = true;
     }
 
-    // [DEBUG STEP 4] 콘솔 출력 (목표힘 vs 램핑된 힘)
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP4] Fd=[%.2f %.2f %.2f] -> Fd_cmd=[%.2f %.2f %.2f], AC_pose_pos=[%.4f %.4f %.4f]",
-    //     Fd(0), Fd(1), Fd(2),
-    //     Fd_cmd(0), Fd_cmd(1), Fd_cmd(2),
-    //     AC_pose_pos[0], AC_pose_pos[1], AC_pose_pos[2]
-    // );
-
-
-    // =========================================================================
-    // [STEP 4-2] 접촉 게이팅(contact gating / z-lock) + 어드미턴스 계산
-    //
-    // 결과:
-    //   Xc_cmd : 이번 루프의 순응 보정된 위치 명령
-    //   Wc_cmd : 현재는 그냥 목표 자세 Wd
-    // =========================================================================
-    Eigen::Vector3d Xc_cmd = Xd;
-    Eigen::Vector3d Wc_cmd = Wd;
-
+    Eigen::Vector3d Xc_cmd = Xd; // 출력 위치 명령 (초기값)
+    Eigen::Vector3d Wc_cmd = Wd; // 출력 orientation 명령 (지금은 Wd 그대로)
     const double Tank_energy = 5.0;
 
+    // 접촉 게이팅(Z 하향 락)
     static bool   contact_on     = false;
     static double contact_z_lock = 0.0;
-
     {
         const double CONTACT_ON_TH   = 2.0;  // N
         const double CONTACT_HOLD_TH = 0.5;  // N
 
-        // 접촉 시작 감지: 충분히 큰 힘이 검출되고 의도된 힘도 충분히 크면
+        // 접촉 시작 감지
         if (!contact_on
             && std::fabs(F_ext(2))   > CONTACT_ON_TH
             && std::fabs(Fd_cmd(2))  > CONTACT_ON_TH)
         {
             contact_on     = true;
-            contact_z_lock = AC_pose_pos[2]; // 그 순간의 z를 lock
+            contact_z_lock = AC_pose_pos[2];
         }
 
-        // 접촉 해제 감지: 힘이 거의 사라지면 contact_on 풀어줌
+        // 접촉 해제 조건
         if (contact_on
             && std::fabs(Fd_cmd(2)) < CONTACT_HOLD_TH
             && std::fabs(F_ext(2))  < CONTACT_HOLD_TH)
@@ -955,31 +972,29 @@ bool JointControl::PathFollow(double dt_s)
             contact_on = false;
         }
 
-        // contact_on 상태에서는 더 깊게(더 낮은 z) 못 파고들게 제한
-        if (contact_on && std::fabs(Fd_cmd(2)) > CONTACT_HOLD_TH)
-        {
+        // 접촉 중이면 기준보다 더 "파고드는" z는 막는다
+        if (contact_on && std::fabs(Fd_cmd(2)) > CONTACT_HOLD_TH) {
             if (Xd(2) < contact_z_lock) {
                 Xd(2) = contact_z_lock;
             }
         }
     }
 
-    // 축별 어드미턴스/FAAC
+    // x,y,z 축에 대해 FAAC + 어드미턴스
     for (int ax = 0; ax < 3; ++ax)
     {
-        // 힘 제어 축 활성화 여부
+        // 의미있는 힘이면 FAAC 활성화
         if (std::fabs(Fd_cmd(ax)) > 0.01 || FAAC_flag[ax]) {
             FAAC_flag[ax] = true;
         }
 
-        // FAAC 활성축이면 M/D/K 적응
         if (FAAC_flag[ax] && FAAC3step[ax]) {
             auto faac_mdk = FAAC3step[ax]->FAAC_MDKob_RUN(
-                Tank_energy,     // 에너지 탱크 파라미터
-                F_ext(ax),       // 실제 외력
-                Fd_cmd(ax),      // 목표 힘(램핑 후)
-                AC_pose_pos[ax], // 이전 루프 명령 위치
-                X_act(ax)        // 실제 현재 위치
+                Tank_energy,
+                F_ext(ax),
+                Fd_cmd(ax),
+                AC_pose_pos[ax],
+                X_act(ax)
             );
 
             AControl[ax].adm_1D_MDK(
@@ -989,7 +1004,6 @@ bool JointControl::PathFollow(double dt_s)
             );
         }
 
-        // 어드미턴스 제어: 목표 위치/힘 대비 외력으로 보정된 새 위치 명령
         double next_pos = AControl[ax].adm_1D_control(
             Xd(ax),
             Fd_cmd(ax),
@@ -999,62 +1013,26 @@ bool JointControl::PathFollow(double dt_s)
         Xc_cmd(ax) = next_pos;
     }
 
-    // orientation은 그대로 사용 (아직 토크 기반 순응 없음)
+    // orientation은 아직 그대로 사용
     Wc_cmd = Wd;
 
-    // [DEBUG STEP 4-2] 콘솔 출력 (특히 z축)
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP4-2] contact_on=%d, z_lock=%.4f | Xd.z=%.4f -> Xc_cmd.z=%.4f | F_ext.z=%.2f Fd_cmd.z=%.2f",
-    //     contact_on ? 1 : 0,
-    //     contact_z_lock,
-    //     Xd(2),
-    //     Xc_cmd(2),
-    //     F_ext(2),
-    //     Fd_cmd(2)
-    // );
-
-    // [PUBLISH STEP 4] /debug_step4_admit
+    // 위치 명령 안정화 (step clamp / offset clamp)
     {
-        std_msgs::msg::Float64MultiArray msg;
-        msg.data.resize(10);
-        msg.data[0] = Fd_cmd(0);
-        msg.data[1] = Fd_cmd(1);
-        msg.data[2] = Fd_cmd(2);
-        msg.data[3] = F_ext(0);
-        msg.data[4] = F_ext(1);
-        msg.data[5] = F_ext(2);
-        msg.data[6] = Xd(2);              // contact gating 후 기준 z
-        msg.data[7] = Xc_cmd(2);          // 어드미턴스 출력 z
-        msg.data[8] = contact_on ? 1.0 : 0.0;
-        msg.data[9] = contact_z_lock;
-        debug_step4_pub_->publish(msg);
-    }
+        static Eigen::Vector3d Xc_prev = Xd;
 
-
-    // =========================================================================
-    // [STEP 5] 안정화: offset clamp / step clamp
-    //
-    // 너무 큰 위치 변화/누적 드리프트를 막아서 한 틱당 안전하게 움직이게 함.
-    // =========================================================================
-    {
-        static Eigen::Vector3d Xc_prev = Xd; // 이전 루프의 최종 명령
-
-        const double max_offset = 0.010; // [m] Xd 주변 허용 오프셋
+        const double max_offset = 0.010; // m
         const double max_step_each[3] = {
-            0.001,   // x per tick
-            0.001,   // y per tick
-            0.0003   // z per tick (더 보수적)
+            0.001,   // x
+            0.001,   // y
+            0.0003   // z (보수적으로)
         };
 
         for (int ax=0; ax<3; ++ax) {
-            // 기준 경로 Xd에서 너무 멀어지지 않도록 clamp
             double lo = Xd(ax) - max_offset;
             double hi = Xd(ax) + max_offset;
             if (Xc_cmd(ax) < lo) Xc_cmd(ax) = lo;
             if (Xc_cmd(ax) > hi) Xc_cmd(ax) = hi;
 
-            // 한 루프에서의 step 크기 제한
             double d        = Xc_cmd(ax) - Xc_prev(ax);
             double max_step = max_step_each[ax];
             if (d >  max_step) d =  max_step;
@@ -1062,10 +1040,8 @@ bool JointControl::PathFollow(double dt_s)
             Xc_cmd(ax) = Xc_prev(ax) + d;
         }
 
-        // 다음 루프 대비 저장
         Xc_prev = Xc_cmd;
 
-        // 어드미턴스 내부 상태도 업데이트 (누적 기준점)
         AC_pose_pos[0] = Xc_cmd(0);
         AC_pose_pos[1] = Xc_cmd(1);
         AC_pose_pos[2] = Xc_cmd(2);
@@ -1075,36 +1051,38 @@ bool JointControl::PathFollow(double dt_s)
     AC_pose_ori[1] = Wc_cmd(1);
     AC_pose_ori[2] = Wc_cmd(2);
 
-    // [DEBUG STEP 5] 콘솔 출력 (최종 위치 명령)
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP5] Xc_cmd(final)=[%.4f %.4f %.4f]  AC_pose_pos=[%.4f %.4f %.4f]",
-    //     Xc_cmd(0), Xc_cmd(1), Xc_cmd(2),
-    //     AC_pose_pos[0], AC_pose_pos[1], AC_pose_pos[2]
-    // );
-
-    // [PUBLISH STEP 5] /debug_step5_cmd
+    // [DEBUG STEP 4] publish 제어 내부 상태
     {
-        std_msgs::msg::Float64MultiArray msg;
-        msg.data.resize(6);
-        msg.data[0] = Xc_cmd(0);
-        msg.data[1] = Xc_cmd(1);
-        msg.data[2] = Xc_cmd(2);
-        msg.data[3] = AC_pose_pos[0];
-        msg.data[4] = AC_pose_pos[1];
-        msg.data[5] = AC_pose_pos[2];
-        debug_step5_pub_->publish(msg);
+        std_msgs::msg::Float64MultiArray dbg;
+        dbg.data.resize(12);
+        // F_ext vs Fd_cmd
+        dbg.data[0]  = F_ext(0);
+        dbg.data[1]  = F_ext(1);
+        dbg.data[2]  = F_ext(2);
+        dbg.data[3]  = Fd_cmd(0);
+        dbg.data[4]  = Fd_cmd(1);
+        dbg.data[5]  = Fd_cmd(2);
+        // X_act vs Xc_cmd
+        dbg.data[6]  = X_act(0);
+        dbg.data[7]  = X_act(1);
+        dbg.data[8]  = X_act(2);
+        dbg.data[9]  = Xc_cmd(0);
+        dbg.data[10] = Xc_cmd(1);
+        dbg.data[11] = Xc_cmd(2);
+        debug_step4_pub_->publish(dbg);
     }
 
-
     // =========================================================================
-    // [STEP 6] IK 입력 pose(Td) 구성 → IK → 조인트 명령 publish
+    // [STEP 5] IK용 목표 pose 구성 (RArm.Td)
+    //
+    // IK는 플랜지(=EE 원점) 기준 Pose를 기대한다고 가정하므로,
+    // TCP 목표 위치 Xc_cmd (base frame)에서 z에 TOOL_Z를 더해 플랜지(EE origin) 위치를 만든다.
     // =========================================================================
     Eigen::Vector3d flange_xyz = Xc_cmd;
-    flange_xyz(2) += TOOL_Z;  // TCP z → 플랜지 z 보정
+    flange_xyz(2) += TOOL_Z;
 
     Eigen::Matrix3d Rd_R_again;
-    AKin.EulerAngle2Rotation(Rd_R_again, RPYd);
+    AKin.EulerAngle2Rotation(Rd_R_again, RPYd); // 기존 코드 유지 (목표 RPY 사용)
 
     RArm.Td <<
         Rd_R_again(0,0), Rd_R_again(0,1), Rd_R_again(0,2), flange_xyz(0),
@@ -1113,29 +1091,22 @@ bool JointControl::PathFollow(double dt_s)
         0,               0,               0,               1;
 
 #if TCP_standard == 0
-    AKin.InverseK_min(&RArm);          // 일반 IK
+    AKin.InverseK_min(&RArm);          // 결과는 RArm.qd
 #else
-    AKin.Ycontact_InverseK_min(&RArm); // 접촉 상황 고려한 IK
+    AKin.Ycontact_InverseK_min(&RArm); // 접촉 고려 IK
 #endif
 
-    // 조인트 명령 publish
+    // =========================================================================
+    // [STEP 6] 조인트 명령 publish
+    // =========================================================================
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < DOF; ++i) {
         joint_state_.position[i] = RArm.qd(i);
     }
     joint_commands_pub_->publish(joint_state_);
 
-    // [DEBUG STEP 6] 콘솔 출력 (최종 qd)
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP6] qd(rad)=[%.3f %.3f %.3f %.3f %.3f %.3f]",
-    //     RArm.qd(0), RArm.qd(1), RArm.qd(2),
-    //     RArm.qd(3), RArm.qd(4), RArm.qd(5)
-    // );
-
-
     // =========================================================================
-    // [STEP 7] base frame 기준 외력(F_ext) publish (force_ext_base_pub_)
+    // [STEP 7] 외력 publish (base frame)
     // =========================================================================
     {
         std_msgs::msg::Float64MultiArray force_msg;
@@ -1146,14 +1117,7 @@ bool JointControl::PathFollow(double dt_s)
         force_ext_base_pub_->publish(force_msg);
     }
 
-    // [DEBUG STEP 7] 콘솔 출력
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP7] Published F_ext=[%.2f %.2f %.2f]",
-    //     F_ext(0), F_ext(1), F_ext(2)
-    // );
-
-    // 아직 txt 재생 중이므로 true 반환
+    // 아직 txt 재생 중
     return true;
 }
 
