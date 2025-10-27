@@ -172,6 +172,7 @@ private:
     // =========================================================================
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step1_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step2_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step3_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step4_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr debug_step5_pub_;
 
