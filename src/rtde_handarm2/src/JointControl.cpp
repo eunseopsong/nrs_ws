@@ -714,13 +714,13 @@ bool JointControl::PathFollow(double dt_s)
     Eigen::Vector3d X_act = RArm.xc;
 
     // [DEBUG STEP 2] 외력 추정 및 실제 현재 EE 위치 출력
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP2] contact_force(raw)=%.2f -> F_ext(N)=[%.2f %.2f %.2f], X_act(m)=[%.4f %.4f %.4f]",
-        contact_force,
-        F_ext(0), F_ext(1), F_ext(2),
-        X_act(0), X_act(1), X_act(2)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP2] contact_force(raw)=%.2f -> F_ext(N)=[%.2f %.2f %.2f], X_act(m)=[%.4f %.4f %.4f]",
+    //     contact_force,
+    //     F_ext(0), F_ext(1), F_ext(2),
+    //     X_act(0), X_act(1), X_act(2)
+    // );
 
 
     // =========================================================================
@@ -772,12 +772,12 @@ bool JointControl::PathFollow(double dt_s)
     Eigen::Vector3d Wd   = rotLog(Rd_R);
 
     // [DEBUG STEP 3] 자세 관련 중간값
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP3] RPYd(rad)=[%.3f %.3f %.3f], Wd(spatialAngle)=[%.3f %.3f %.3f]",
-        RPYd(0), RPYd(1), RPYd(2),
-        Wd(0), Wd(1), Wd(2)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP3] RPYd(rad)=[%.3f %.3f %.3f], Wd(spatialAngle)=[%.3f %.3f %.3f]",
+    //     RPYd(0), RPYd(1), RPYd(2),
+    //     Wd(0), Wd(1), Wd(2)
+    // );
 
 
     // =========================================================================
@@ -857,13 +857,13 @@ bool JointControl::PathFollow(double dt_s)
     }
 
     // [DEBUG STEP 4] 힘 목표 vs 램핑 결과, 그리고 이전 어드미턴스 출력
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP4] Fd(N)=[%.2f %.2f %.2f] -> Fd_cmd(N)=[%.2f %.2f %.2f], AC_pose_pos(m)=[%.4f %.4f %.4f]",
-        Fd(0), Fd(1), Fd(2),
-        Fd_cmd(0), Fd_cmd(1), Fd_cmd(2),
-        AC_pose_pos[0], AC_pose_pos[1], AC_pose_pos[2]
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP4] Fd(N)=[%.2f %.2f %.2f] -> Fd_cmd(N)=[%.2f %.2f %.2f], AC_pose_pos(m)=[%.4f %.4f %.4f]",
+    //     Fd(0), Fd(1), Fd(2),
+    //     Fd_cmd(0), Fd_cmd(1), Fd_cmd(2),
+    //     AC_pose_pos[0], AC_pose_pos[1], AC_pose_pos[2]
+    // );
 
 
     // =========================================================================
@@ -938,16 +938,16 @@ bool JointControl::PathFollow(double dt_s)
     Wc_cmd = Wd; // orientation 그대로 사용
 
     // [DEBUG STEP 4-2] 어드미턴스 결과 (특히 Z축 주목)
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP4-2] contact_on=%d, z_lock=%.4f | Xd.z=%.4f -> Xc_cmd.z=%.4f | F_ext.z=%.2f Fd_cmd.z=%.2f",
-        contact_on ? 1 : 0,
-        contact_z_lock,
-        Xd(2),
-        Xc_cmd(2),
-        F_ext(2),
-        Fd_cmd(2)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP4-2] contact_on=%d, z_lock=%.4f | Xd.z=%.4f -> Xc_cmd.z=%.4f | F_ext.z=%.2f Fd_cmd.z=%.2f",
+    //     contact_on ? 1 : 0,
+    //     contact_z_lock,
+    //     Xd(2),
+    //     Xc_cmd(2),
+    //     F_ext(2),
+    //     Fd_cmd(2)
+    // );
 
 
     // =========================================================================
@@ -984,11 +984,11 @@ bool JointControl::PathFollow(double dt_s)
     AC_pose_ori[2] = Wc_cmd(2);
 
     // [DEBUG STEP 5] 클램프/스텝 제한 이후 최종 위치 명령
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP5] Xc_cmd(final,m)=[%.4f %.4f %.4f]  (after clamp)",
-        Xc_cmd(0), Xc_cmd(1), Xc_cmd(2)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP5] Xc_cmd(final,m)=[%.4f %.4f %.4f]  (after clamp)",
+    //     Xc_cmd(0), Xc_cmd(1), Xc_cmd(2)
+    // );
 
 
     // =========================================================================
@@ -1019,12 +1019,12 @@ bool JointControl::PathFollow(double dt_s)
     joint_commands_pub_->publish(joint_state_);
 
     // [DEBUG STEP 6] 최종 조인트 명령 출력
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP6] qd(rad)=[%.3f %.3f %.3f %.3f %.3f %.3f]",
-        RArm.qd(0), RArm.qd(1), RArm.qd(2),
-        RArm.qd(3), RArm.qd(4), RArm.qd(5)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP6] qd(rad)=[%.3f %.3f %.3f %.3f %.3f %.3f]",
+    //     RArm.qd(0), RArm.qd(1), RArm.qd(2),
+    //     RArm.qd(3), RArm.qd(4), RArm.qd(5)
+    // );
 
 
     // =========================================================================
@@ -1040,11 +1040,11 @@ bool JointControl::PathFollow(double dt_s)
     }
 
     // [DEBUG STEP 7] Published force
-    RCLCPP_INFO(
-        node_->get_logger(),
-        "[STEP7] Published F_ext(N)=[%.2f %.2f %.2f]",
-        F_ext(0), F_ext(1), F_ext(2)
-    );
+    // RCLCPP_INFO(
+    //     node_->get_logger(),
+    //     "[STEP7] Published F_ext(N)=[%.2f %.2f %.2f]",
+    //     F_ext(0), F_ext(1), F_ext(2)
+    // );
 
     return true;
 }
