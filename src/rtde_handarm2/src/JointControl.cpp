@@ -154,7 +154,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // Timer (10ms 권장). 메인루프에서 실제 dt는 steady_clock으로 산출.
   timer_ = node_->create_wall_timer(
-    std::chrono::milliseconds(1),
+    std::chrono::milliseconds(2),
     std::bind(&JointControl::CalculateAndPublishJoint, this));
 
   // 파일 핸들 정리
@@ -1303,7 +1303,7 @@ void JointControl::CalculateAndPublishJoint() {
   if (dt_s <= 0.0 || dt_s > 0.2) dt_s = 0.01;  // 안전망 (10ms)
 
   // milisec += dt_s * 1000.0;
-  milisec += 1; // Simulation time in ms
+  milisec += 2; // Simulation time in ms
 
   // 가속/속도/증분 초기화
   for (int i = 0; i < DOF; i++) {
