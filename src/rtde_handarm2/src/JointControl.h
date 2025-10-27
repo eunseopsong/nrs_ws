@@ -170,8 +170,7 @@ private:
     // =========================================================================
     //  모니터링 객체 (AdaptiveK / FAAC 3-step)
     // =========================================================================
-    std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> AdaptiveK_msg_;
-    std::unique_ptr<nrs_msgmonitoring2::MsgMonitoring> FAAC3step_msg_;
+
 };
 
 #endif  // JOINTCONTROL_H
