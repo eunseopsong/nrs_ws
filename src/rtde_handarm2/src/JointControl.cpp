@@ -836,16 +836,7 @@ bool JointControl::PathFollow(double dt_s)
     }
 
     // =========================================================================
-    // [STEP 4] 어드미턴스 + FAAC
-    //
-    //  - F_ext (측정된 외력, base frame)
-    //  - Fd     (목표 힘, base frame)
-    //  - X_act  (현재 위치, base frame)
-    //  - Xd     (기준 경로 위치, base frame)
-    //
-    // 출력:
-    //  - Xc_cmd : 어드미턴스/FAAC 보정 후 사용할 위치 명령 (base frame)
-    //  - Wc_cmd : 현재는 그냥 Wd (orientation은 아직 힘 적응 안 넣음)
+    // [STEP 4] 어드미턴스 + FAAC (접촉 시 K=0 적용 버전)
     // =========================================================================
     static bool fc_init = false;
 
@@ -878,8 +869,8 @@ bool JointControl::PathFollow(double dt_s)
         const double alpha_down = 0.20;
         for (int k = 0; k < 3; ++k) {
             double alpha = (std::fabs(Fd(k)) > std::fabs(Fd_cmd(k)))
-                           ? alpha_up
-                           : alpha_down;
+                          ? alpha_up
+                          : alpha_down;
             Fd_cmd(k) += alpha * (Fd(k) - Fd_cmd(k));
         }
         const double FDES_SAT = 30.0;
@@ -933,39 +924,14 @@ bool JointControl::PathFollow(double dt_s)
     Eigen::Vector3d Wc_cmd = Wd; // 출력 orientation 명령 (지금은 Wd 그대로)
     const double Tank_energy = 5.0;
 
-    // 접촉 게이팅(Z 하향 락)
-    static bool   contact_on     = false;
-    static double contact_z_lock = 0.0;
-    {
-        const double CONTACT_ON_TH   = 2.0;  // N
-        const double CONTACT_HOLD_TH = 0.5;  // N
+    // ------------------------------------------------------------
+    // 접촉 상태 판단 (des_z ≤ 0.1 기준)
+    // ------------------------------------------------------------
+    bool contact_on = (Xd(2) <= 0.1);
 
-        // 접촉 시작 감지
-        if (!contact_on
-            && std::fabs(F_ext(2))   > CONTACT_ON_TH
-            && std::fabs(Fd_cmd(2))  > CONTACT_ON_TH)
-        {
-            contact_on     = true;
-            contact_z_lock = AC_pose_pos[2];
-        }
-
-        // 접촉 해제 조건
-        if (contact_on
-            && std::fabs(Fd_cmd(2)) < CONTACT_HOLD_TH
-            && std::fabs(F_ext(2))  < CONTACT_HOLD_TH)
-        {
-            contact_on = false;
-        }
-
-        // 접촉 중이면 기준보다 더 "파고드는" z는 막는다
-        if (contact_on && std::fabs(Fd_cmd(2)) > CONTACT_HOLD_TH) {
-            if (Xd(2) < contact_z_lock) {
-                Xd(2) = contact_z_lock;
-            }
-        }
-    }
-
-    // x,y,z 축에 대해 FAAC + 어드미턴스
+    // ------------------------------------------------------------
+    // x,y,z 축에 대해 FAAC + 어드미턴스 (K=0 스위칭)
+    // ------------------------------------------------------------
     for (int ax = 0; ax < 3; ++ax)
     {
         // 의미있는 힘이면 FAAC 활성화
@@ -982,10 +948,13 @@ bool JointControl::PathFollow(double dt_s)
                 X_act(ax)
             );
 
+            // 접촉 시 강성(K)=0 적용
+            double used_K = contact_on ? 0.0 : faac_mdk.Stiffness;
+
             AControl[ax].adm_1D_MDK(
                 faac_mdk.Mass,
                 faac_mdk.Damping,
-                faac_mdk.Stiffness
+                used_K
             );
         }
 
@@ -998,10 +967,12 @@ bool JointControl::PathFollow(double dt_s)
         Xc_cmd(ax) = next_pos;
     }
 
-    // orientation은 아직 그대로 사용
+    // orientation은 그대로 사용
     Wc_cmd = Wd;
 
+    // ------------------------------------------------------------
     // 위치 명령 안정화 (step clamp / offset clamp)
+    // ------------------------------------------------------------
     {
         static Eigen::Vector3d Xc_prev = Xd;
 
@@ -1009,7 +980,7 @@ bool JointControl::PathFollow(double dt_s)
         const double max_step_each[3] = {
             0.001,   // x
             0.001,   // y
-            0.0003   // z (보수적으로)
+            0.0003   // z
         };
 
         for (int ax=0; ax<3; ++ax) {
@@ -1039,21 +1010,20 @@ bool JointControl::PathFollow(double dt_s)
     // [DEBUG STEP 4] publish 제어 내부 상태
     {
         std_msgs::msg::Float64MultiArray dbg;
-        dbg.data.resize(12);
-        // F_ext vs Fd_cmd
+        dbg.data.resize(13);
         dbg.data[0]  = F_ext(0);
         dbg.data[1]  = F_ext(1);
         dbg.data[2]  = F_ext(2);
         dbg.data[3]  = Fd_cmd(0);
         dbg.data[4]  = Fd_cmd(1);
         dbg.data[5]  = Fd_cmd(2);
-        // X_act vs Xc_cmd
         dbg.data[6]  = X_act(0);
         dbg.data[7]  = X_act(1);
         dbg.data[8]  = X_act(2);
         dbg.data[9]  = Xc_cmd(0);
         dbg.data[10] = Xc_cmd(1);
         dbg.data[11] = Xc_cmd(2);
+        dbg.data[12] = static_cast<double>(contact_on);
         debug_step4_pub_->publish(dbg);
     }
 
