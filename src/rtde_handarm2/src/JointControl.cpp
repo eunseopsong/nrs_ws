@@ -699,25 +699,16 @@ bool JointControl::PathFollow(double dt_s)
 
     // =========================================================================
     // [STEP 2] 외력 추정 F_ext (LPF + saturation)
-    //
-    // contact_force : Isaac에서 들어온 TCP z축 방향 힘 (스칼라)
-    // F_TCP         : TCP 프레임 기준 힘 벡터 [0,0,contact_force]
-    // 변환:
-    //   Base → TCP 동차변환 = ur10e_forward(RArm.qc, TOOL_Z)
-    //   그 회전부(3x3)를 R_base_TCP 라 하자.
-    //   이 회전은 "TCP 벡터를 base 좌표계로 표현"하는 회전이다.
-    //
-    //   F_base = R_base_TCP * F_TCP
-    //   F_ext  = -F_base (부호 정규화)
-    //
-    // 이후 LPF, saturation.
-    // 또한 현재 EE 실제 위치 X_act (= RArm.xc)
     // =========================================================================
-    Eigen::Matrix4d T_base_TCP_cur = ur10e_forward(RArm.qc, TOOL_Z);
+    Eigen::Matrix4d T_base_TCP_cur = ur10e_forward(RArm.qc, 0); // sensor frame
     Eigen::Matrix3d R_base_TCP     = T_base_TCP_cur.block<3,3>(0,0);
+    Eigen::Matrix3d R_TCP_base     = R_base_TCP.transpose();  // 반대 방향 변환
 
     Eigen::Vector3d F_TCP(0.0, 0.0, -contact_force);
-    Eigen::Vector3d F_base = R_base_TCP * F_TCP;
+
+    // 기존: F_base = R_base_TCP * F_TCP
+    // 변경: TCP → Base 변환 대신 Base → TCP 변환 사용 구조로 수정
+    Eigen::Vector3d F_base = R_TCP_base * F_TCP;  // 변경된 부분
     Eigen::Vector3d F_ext  = F_base;
 
     // LPF
@@ -750,14 +741,7 @@ bool JointControl::PathFollow(double dt_s)
     // 현재 EE 실제 위치 (TCP position in base)
     Eigen::Vector3d X_act = RArm.xc;
 
-    // [DEBUG STEP 2] 콘솔 + publish
-    // RCLCPP_INFO(
-    //     node_->get_logger(),
-    //     "[STEP2] contact_force=%.2f -> F_ext=[%.2f %.2f %.2f], X_act=[%.4f %.4f %.4f]",
-    //     contact_force,
-    //     F_ext(0), F_ext(1), F_ext(2),
-    //     X_act(0), X_act(1), X_act(2)
-    // );
+    // Debug publish
     {
         std_msgs::msg::Float64MultiArray dbg;
         dbg.data.resize(7);
@@ -770,6 +754,7 @@ bool JointControl::PathFollow(double dt_s)
         dbg.data[6] = X_act(2);
         debug_step2_pub_->publish(dbg);
     }
+
 
     // =========================================================================
     // [STEP 3] 목표 자세 RPYd → 회전행렬 → axis-angle 벡터 Wd
