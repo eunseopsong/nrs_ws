@@ -1,6 +1,7 @@
 // JointControl.cpp (v2025-rt-safe)
 // - 기존 기능을 유지하면서 실시간성/일관성/안정성 개선
 // - 주요 수정점: dt 측정, TOOL_Z 일관화, 조인트 소스 단일화, 힘 변환 간소화, 퍼블리시 최적화
+// push from LAB 2025-11-04
 
 #include "JointControl.h"
 
