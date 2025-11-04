@@ -6,7 +6,7 @@ from geometry_msgs.msg import Pose, Twist
 
 
 def transform_HmdMatrix2npmatrix(hmd_matrix):
-    np_matrix = np.array(
+    raw = np.array(
         [
             [hmd_matrix[0][0], hmd_matrix[0][1], hmd_matrix[0][2], hmd_matrix[0][3]],
             [hmd_matrix[1][0], hmd_matrix[1][1], hmd_matrix[1][2], hmd_matrix[1][3]],
@@ -14,7 +14,19 @@ def transform_HmdMatrix2npmatrix(hmd_matrix):
             [0, 0, 0, 1],
         ]
     )
+
+    # y <-> z 스왑 행렬
+    swap_yz = np.array([
+        [1, 0, 0, 0],
+        [0, 0, 1, 0],  # y <- z
+        [0, 1, 0, 0],  # z <- y
+        [0, 0, 0, 1],
+    ])
+
+    # ✨ 여기! 앞에 곱해준다
+    np_matrix = swap_yz @ raw
     return np_matrix
+
 
 
 def matrix_to_pose(matrix: np.ndarray):
