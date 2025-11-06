@@ -501,25 +501,46 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 
 // ===================== calibratedPose Callback =====================
 // /calibrated_pose 콜백
-void JointControl::calibratedPoseCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+void JointControl::calibratedPoseCallback(
+    const std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
-  // 기대 형식: [x, y, z, r, p, yaw]
-  if (!msg || msg->data.size() < 6) {
-    // 데이터가 불완전하면 그냥 무시
-    teleop_pose_valid_ = false;
-    return;
-  }
+    if (msg->data.size() < 6) return;
 
-  teleop_xyz_(0) = msg->data[0];
-  teleop_xyz_(1) = msg->data[1];
-  teleop_xyz_(2) = msg->data[2];
+    Eigen::Vector3d xyz(
+        msg->data[0],
+        msg->data[1],
+        msg->data[2]  // 너가 쓰던 오프셋
+    );
+    Eigen::Vector3d rpy(
+        wrapToPi(msg->data[3]),
+        wrapToPi(msg->data[4]),
+        wrapToPi(msg->data[5])
+    );
 
-  teleop_rpy_(0) = msg->data[3];
-  teleop_rpy_(1) = msg->data[4];
-  teleop_rpy_(2) = msg->data[5];
+    // z + TOOL_Z 해서 Td 만들고 IK 수행
+    Eigen::Vector3d flange_xyz = xyz;
+    flange_xyz(2) += TOOL_Z;
 
-  teleop_pose_valid_ = true;
+    Eigen::Matrix3d R_des;
+    AKin.EulerAngle2Rotation(R_des, rpy);
+
+    RArm.Td <<
+        R_des(0,0), R_des(0,1), R_des(0,2), flange_xyz(0),
+        R_des(1,0), R_des(1,1), R_des(1,2), flange_xyz(1),
+        R_des(2,0), R_des(2,1), R_des(2,2), flange_xyz(2),
+        0,          0,          0,          1;
+
+#if TCP_standard == 0
+    AKin.InverseK_min(&RArm);
+#else
+    AKin.Ycontact_InverseK_min(&RArm);
+#endif
+
+    // IK 결과를 따로 저장
+    teleop_qd_ = RArm.qd;
+    teleop_qd_valid_ = true;
 }
+
 
 
 
@@ -1350,43 +1371,14 @@ void JointControl::CalculateAndPublishJoint() {
   // 2) Continuous Teaching Mode (teleop → IK → joint cmd)
   // 2) Teleop mode: /calibrated_pose → IK → /isaac_joint_commands
   if (control_mode == 2) {
-
-      if (teleop_pose_valid_) {
-          // 1. TCP 목표 (트래커에서 온 값)
-          Eigen::Vector3d tcp_xyz = teleop_xyz_;  // x,y,z
-          Eigen::Vector3d tcp_rpy = teleop_rpy_;  // r,p,y
-
-          // 2. IK가 플랜지 기준을 기대하므로 z에 TOOL_Z 더해줌
-          Eigen::Vector3d flange_xyz = tcp_xyz;
-          flange_xyz(2) += TOOL_Z;
-
-          // 3. RPY → 회전행렬
-          Eigen::Matrix3d R_des;
-          AKin.EulerAngle2Rotation(R_des, tcp_rpy);
-
-          // 4. 목표 homogeneous pose 구성
-          RArm.Td <<
-              R_des(0,0), R_des(0,1), R_des(0,2), flange_xyz(0),
-              R_des(1,0), R_des(1,1), R_des(1,2), flange_xyz(1),
-              R_des(2,0), R_des(2,1), R_des(2,2), flange_xyz(2),
-              0,          0,          0,          1;
-
-          // 5. IK 실행 → RArm.qd 에 결과 들어옴
-        #if TCP_standard == 0
-          AKin.InverseK_min(&RArm);
-        #else
-          AKin.Ycontact_InverseK_min(&RArm);
-        #endif
-
-          // 6. 조인트 명령 publish
+      if (teleop_qd_valid_) {
           joint_state_.header.stamp = node_->now();
           for (int i = 0; i < DOF; ++i) {
-              joint_state_.position[i] = RArm.qd(i);
+              joint_state_.position[i] = teleop_qd_(i);
           }
           joint_commands_pub_->publish(joint_state_);
-
       } else {
-          // 아직 /calibrated_pose 를 한 번도 못 받았으면 현재 자세 유지
+          // 아직 데이터 없으면 현재 자세 유지
           joint_state_.header.stamp = node_->now();
           for (int i = 0; i < DOF; ++i) {
               joint_state_.position[i] = RArm.qc(i);
@@ -1394,10 +1386,10 @@ void JointControl::CalculateAndPublishJoint() {
           joint_commands_pub_->publish(joint_state_);
       }
 
-      // 이 모드에서 더 아래 블록들이 실행되지 않게 return
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
+
 
 
 
