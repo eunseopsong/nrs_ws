@@ -401,6 +401,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       ctrl.store(1, std::memory_order_release);
       pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
     }
+
     else if (mode_cmd == Motion_stop_cmd) {
       ctrl.store(0, std::memory_order_release);
       set_status(message_status, Motion_stop_mode);
