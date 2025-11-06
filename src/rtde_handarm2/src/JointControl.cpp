@@ -543,8 +543,6 @@ void JointControl::calibratedPoseCallback(
 
 
 
-
-
 // ===================== InitMove() =====================
 // 역할: 재생 시작 시 현재 위치→TXT 첫 포즈로 시간기반 보간 이동(SLERP+선형)
 bool JointControl::InitMove(double dt_s)

@@ -9,7 +9,8 @@
 //   1) Joint & EE 상태 구독 및 퍼블리시
 //   2) Cartesian Admittance / Force Control 수행
 //   3) Trajectory Playback (InitMove → PathFollow → ReturnHomePose)
-//   4) /calibrated_pose 로부터 텔레옵 pose 받아서 control_mode == 2 에서 IK 수행
+//   4) /calibrated_pose + /ftsensor 에서 텔레옵 데이터를 받아 control_mode == 2 에서
+//      PathFollow 와 동일한 force chain 을 돌려 joints publish
 // ============================================================================
 
 #include <rclcpp/rclcpp.hpp>
@@ -17,8 +18,10 @@
 // ROS msg
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <std_msgs/msg/uint16.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <geometry_msgs/msg/wrench_stamped.hpp>   // ftsensor 용
+#include <geometry_msgs/msg/pose_stamped.hpp>
 
 // std
 #include <array>
@@ -53,6 +56,7 @@ public:
     explicit JointControl(const rclcpp::Node::SharedPtr& node);
     ~JointControl();
 
+    // 메인 제어 루프
     void CalculateAndPublishJoint();
 
     // subscribers
@@ -61,17 +65,21 @@ public:
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void FtCallback(const std_msgs::msg::Float64::SharedPtr msg);
-    // 텔레옵 pose 콜백
+
+    // 텔레옵 pose 콜백: /calibrated_pose → [x,y,z,r,p,yaw]
     void calibratedPoseCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
 
-    // state / trajectory
+    // 텔레옵 force 콜백: /ftsensor/measured_CValue → force.x,y,z
+    void ftSensorCallback(const geometry_msgs::msg::WrenchStamped::SharedPtr msg);
+
+    // 상태 / 트래젝토리 관련
     void UpdateState();
     bool InitMove(double dt_s);
     bool PathFollow(double dt_s);
     bool ReturnHomePose(double dt_s);
 
 private:
-    // 작은 유틸
+    // (-pi, pi] 로 접기
     inline double wrapToPi(double a) const {
         const double two_pi = 2.0 * M_PI;
         a = std::fmod(a + M_PI, two_pi);
@@ -79,6 +87,19 @@ private:
         return a - M_PI;
     }
 
+    // control_mode 1, 2 가 공통으로 쓰는 force/admittance/IK 체인
+    // Xd  : 목표 TCP 위치 (base)
+    // RPYd: 목표 TCP 오리엔테이션
+    // Fd  : 목표 힘 (base)
+    // dt_s: 루프 시간
+    void runCartesianForceChain(
+        const Eigen::Vector3d& Xd,
+        const Eigen::Vector3d& RPYd,
+        const Eigen::Vector3d& Fd,
+        double dt_s
+    );
+
+private:
     // 홈 복귀
     bool   return_active_   = false;
     double return_elapsed_  = 0.0;
@@ -96,8 +117,10 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr           ft_sub_;
-    // 새로 추가: /calibrated_pose
+
+    // 텔레옵용
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr calibrated_pose_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr ftsensor_sub_;
 
     // publishers
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    force_ext_base_pub_;
@@ -121,12 +144,17 @@ private:
     double contact_force = 0.0;
     int    key_MODE      = 0;
 
-    // 텔레옵에서 받은 마지막 pose / IK
+    // ───── 텔레옵에서 받은 최신 값들 ─────
+    // pose
     bool          teleop_pose_valid_ = false;
     Eigen::Vector3d teleop_xyz_      = Eigen::Vector3d::Zero();
     Eigen::Vector3d teleop_rpy_      = Eigen::Vector3d::Zero();
 
-    // IK까지 끝난 조인트 버전
+    // force
+    bool          teleop_force_valid_ = false;
+    Eigen::Vector3d teleop_force_     = Eigen::Vector3d::Zero();
+
+    // IK까지 끝난 조인트 버전 (필요시 fallback 용)
     Eigen::Matrix<double, 6, 1> teleop_qd_ = Eigen::Matrix<double, 6, 1>::Zero();
     bool                        teleop_qd_valid_ = false;
 
