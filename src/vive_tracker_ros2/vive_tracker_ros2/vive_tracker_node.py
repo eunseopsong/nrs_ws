@@ -87,15 +87,16 @@ class ViveTracker(Node):
     # ROS init
     # ------------------------------------------------------------------
     def _init_ros(self):
+        # 원래 있던 것들
         self.raw_pose_pub = self.create_publisher(
             Odometry, "vive_tracker_ros/raw_pose", 10
         )
-        self.calibrated_pose_pub = self.create_publisher(
+        self.calibrated_pose_pub_odom = self.create_publisher(
             Odometry, "vive_tracker_ros/calibrated_pose", 10
         )
-        # 여기 추가: RPY 전용 퍼블리셔 (공통 토픽 이름)
-        self.calibrated_rpy_pub = self.create_publisher(
-            Float64MultiArray, "vive_tracker_ros/calibrated_pose_rpy", 10
+        # 여기만 변경: rpy 토픽을 /calibrated_pose 로 통합
+        self.calibrated_pose_pub = self.create_publisher(
+            Float64MultiArray, "/calibrated_pose", 10
         )
 
         self.calibrate_srv = self.create_service(
@@ -269,7 +270,7 @@ class ViveTracker(Node):
         return current_ids
 
     # ------------------------------------------------------------------
-    # quaternion -> rot (같은 식)
+    # quaternion -> rot
     # ------------------------------------------------------------------
     @staticmethod
     def quat_to_rot(w, x, y, z):
@@ -366,20 +367,19 @@ class ViveTracker(Node):
             raw_twist = matrix_to_twist(raw_M, tdata["prev_raw_matrix"], dt)
             cal_twist = matrix_to_twist(M_cal, tdata["prev_calibrated_matrix"], dt)
 
-            # Odometry publish
+            # Odometry publish (tracker별)
             tdata["publisher_raw"].publish(self.create_vive_msg(raw_pose, raw_twist))
             tdata["publisher_calibrated"].publish(self.create_vive_msg(cal_pose, cal_twist))
 
-            # 여기서 rpy로도 publish
-            # 1) position
+            # 여기서 rpy로도 publish → 통합 토픽 /calibrated_pose
             px = float(M_cal[0, 3])
             py = float(M_cal[1, 3])
             pz = float(M_cal[2, 3])
-            # 2) rotation matrix
+
             Rm = M_cal[:3, :3]
             rpy_ros1 = self.rot_to_rpy_ros1(Rm)
 
-            # 네가 한 것처럼 roll<->yaw 스왑 + 부호 반전 + wrap
+            # 네가 쓰던 스왑/부호 그대로
             roll_raw = rpy_ros1[2]   # 원래 yaw
             pitch_raw = rpy_ros1[1]
             yaw_raw = rpy_ros1[0]    # 원래 roll
@@ -394,7 +394,7 @@ class ViveTracker(Node):
 
             arr = Float64MultiArray()
             arr.data = [px, py, pz, roll, pitch, yaw]
-            self.calibrated_rpy_pub.publish(arr)
+            self.calibrated_pose_pub.publish(arr)
 
             # TF
             if self.publish_tf:
@@ -419,7 +419,7 @@ class ViveTracker(Node):
         raw_twist = matrix_to_twist(first["raw_pose_matrix"], first["prev_raw_matrix"], dt)
         cal_twist = matrix_to_twist(first["prev_calibrated_matrix"], first["prev_calibrated_matrix"], dt)
         self.raw_pose_pub.publish(self.create_vive_msg(raw_pose, raw_twist))
-        self.calibrated_pose_pub.publish(self.create_vive_msg(cal_pose, cal_twist))
+        self.calibrated_pose_pub_odom.publish(self.create_vive_msg(cal_pose, cal_twist))
 
         self.prev_time = now
 
