@@ -1347,12 +1347,65 @@ void JointControl::CalculateAndPublishJoint() {
       return;
   }
 
-  // 2) Continuous Teaching Mode
+  // 2) Continuous Teaching Mode (teleop → IK → joint cmd)
   if (control_mode == 2) {
 
+      if (teleop_pose_valid_) {
+          // 1) /calibrated_pose 에서 온 TCP 기준 위치/자세
+          Eigen::Vector3d Xc_cmd = teleop_xyz_;   // x,y,z
+          Eigen::Vector3d RPYd   = teleop_rpy_;   // r,p,y
 
+          // Python 노드에서 하던 것처럼 트래커 높이 보정
+          // (필요 없으면 이 줄만 지우면 됨)
+          Xc_cmd(2) += 0.285;
+
+          // 디버깅/모니터링 변수도 같이 갱신
+          Desired_XYZ = Xc_cmd;
+          Desired_RPY = RPYd;
+
+          // 2) IK 가 기대하는 건 플랜지(EE origin) 위치라서 TOOL_Z 만큼 z 올려줌
+          Eigen::Vector3d flange_xyz = Xc_cmd;
+          flange_xyz(2) += TOOL_Z;   // 위에서 정의돼 있는 0.248 같은 값
+
+          // 3) RPY → 회전행렬
+          Eigen::Matrix3d Rd;
+          AKin.EulerAngle2Rotation(Rd, RPYd);
+
+          // 4) 목표 변환행렬 구성
+          RArm.Td <<
+              Rd(0,0), Rd(0,1), Rd(0,2), flange_xyz(0),
+              Rd(1,0), Rd(1,1), Rd(1,2), flange_xyz(1),
+              Rd(2,0), Rd(2,1), Rd(2,2), flange_xyz(2),
+              0,       0,       0,       1;
+
+          // 5) IK 실행해서 RArm.qd 채우기
+      #if TCP_standard == 0
+          AKin.InverseK_min(&RArm);
+      #else
+          AKin.Ycontact_InverseK_min(&RArm);
+      #endif
+
+          // 6) 조인트 커맨드 publish
+          joint_state_.header.stamp = node_->now();
+          for (int i = 0; i < DOF; ++i) {
+              joint_state_.position[i] = RArm.qd(i);
+          }
+          joint_commands_pub_->publish(joint_state_);
+
+      } else {
+          // 아직 /calibrated_pose 를 한 번도 못 받았으면 그냥 현 자세 유지
+          joint_state_.header.stamp = node_->now();
+          for (int i = 0; i < DOF; ++i) {
+              joint_state_.position[i] = RArm.qc(i);
+          }
+          joint_commands_pub_->publish(joint_state_);
+      }
+
+      // 이 모드 유지
+      pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
+
 
   // 그 외(보호)
   speedmode = 0;
