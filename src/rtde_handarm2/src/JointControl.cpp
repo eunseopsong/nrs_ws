@@ -117,7 +117,6 @@ static constexpr double TOOL_Z = 0.248;  // [m]
 JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 : node_(node), milisec(0.0)
 {
-
   // Debug Publishers
   debug_step1_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step1", 10);
   debug_step2_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/debug_step2", 10);
@@ -157,6 +156,13 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     std::bind(&JointControl::FtCallback, this, std::placeholders::_1)
   );
 
+  // 🔥 추가: /calibrated_pose 에서 [x,y,z,r,p,yaw] 받기
+  calibrated_pose_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
+    "/calibrated_pose",   // 네가 확인한 토픽 이름
+    10,
+    std::bind(&JointControl::calibratedPoseCallback, this, std::placeholders::_1)
+  );
+
   // Timer (10ms 권장). 메인루프에서 실제 dt는 steady_clock으로 산출.
   timer_ = node_->create_wall_timer(
     std::chrono::milliseconds(1),
@@ -177,7 +183,13 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
   Desired_XYZ.setZero();
   Desired_RPY.setZero();
   Contact_Rot_force.setZero();
+
+  // 🔥 추가: 텔레옵 pose 초기값
+  teleop_pose_valid_ = false;
+  teleop_xyz_.setZero();
+  teleop_rpy_.setZero();
 }
+
 
 
 JointControl::~JointControl() {
@@ -485,6 +497,32 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
     // 필요 시 퍼블리시/로그 확장 가능
     (void)F_base;
 }
+
+
+// ===================== calibratedPose Callback =====================
+// /calibrated_pose 콜백
+void JointControl::calibratedPoseCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+  // 기대 형식: [x, y, z, r, p, yaw]
+  if (!msg || msg->data.size() < 6) {
+    // 데이터가 불완전하면 그냥 무시
+    teleop_pose_valid_ = false;
+    return;
+  }
+
+  teleop_xyz_(0) = msg->data[0];
+  teleop_xyz_(1) = msg->data[1];
+  teleop_xyz_(2) = msg->data[2];
+
+  teleop_rpy_(0) = msg->data[3];
+  teleop_rpy_(1) = msg->data[4];
+  teleop_rpy_(2) = msg->data[5];
+
+  teleop_pose_valid_ = true;
+}
+
+
+
 
 // ===================== InitMove() =====================
 // 역할: 재생 시작 시 현재 위치→TXT 첫 포즈로 시간기반 보간 이동(SLERP+선형)

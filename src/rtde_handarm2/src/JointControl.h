@@ -9,6 +9,7 @@
 //   1) Joint & EE 상태 구독 및 퍼블리시
 //   2) Cartesian Admittance / Force Control 수행
 //   3) Trajectory Playback (InitMove → PathFollow → ReturnHomePose)
+//   4) (추가) /calibrated_pose 로부터 텔레옵 pose 받아서 control_mode == 2 에서 IK 수행
 // ============================================================================
 
 
@@ -45,8 +46,6 @@
 // ========================= 프로젝트 내부 헤더 =========================
 #include "var_ur10e_main.h"
 
-
-
 // ForceControl (admittance & FAAC)
 #include "rtde_handarm2/ForceControl/admittance_control.hpp"
 
@@ -80,6 +79,9 @@ public:
     void PbIterCallback(const std_msgs::msg::UInt16::SharedPtr msg);
     void JointCmdCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
     void FtCallback(const std_msgs::msg::Float64::SharedPtr msg);
+
+    // (추가) 텔레옵 pose 콜백
+    void calibratedPoseCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
 
     // ------------------------------------------------------------------------
     //  로봇 상태 갱신 / 제어 알고리즘
@@ -118,6 +120,9 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr           ft_sub_;
 
+    // (추가) /calibrated_pose 구독자
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr calibrated_pose_sub_;
+
     // -------------------------------------------------------------------------
     //  ROS2 Publishers
     // -------------------------------------------------------------------------
@@ -145,6 +150,11 @@ private:
     Eigen::Vector3d       rpy_current;
     double contact_force = 0.0;
     int key_MODE = 0;
+
+    // (추가) 텔레옵에서 받은 마지막 pose 저장
+    bool          teleop_pose_valid_ = false;
+    Eigen::Vector3d teleop_xyz_;   // x, y, z
+    Eigen::Vector3d teleop_rpy_;   // r, p, yaw
 
     // =========================================================================
     //  시간 관리
