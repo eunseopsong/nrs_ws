@@ -1,3 +1,5 @@
+#pragma once
+
 /* For formal */
 #include <stdio.h>
 #include <cmath>
