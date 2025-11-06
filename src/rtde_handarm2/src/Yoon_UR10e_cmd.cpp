@@ -44,15 +44,9 @@ void catch_signal(int sig)
 
 int main(int argc, char *argv[])
 {
-    //// ros::init(argc,argv,"Yoon_UR10e_cmd");
-    //// ros::NodeHandle nh;
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared("Yoon_UR10e_cmd");
 
-    //// ros::Publisher yoon_mode_pub = nh.advertise<std_msgs::UInt16>("Yoon_UR10e_mode",20);
-    //// ros::Publisher joint_command_pub = nh.advertise<std_msgs::Float64MultiArray>("yoon_UR10e_joint_cmd",20);
-    //// ros::Publisher posture_command_pub = nh.advertise<std_msgs::Float64MultiArray>("yoon_UR10e_EEposture_cmd",20);
-    //// ros::Publisher PbNum_command_pub = nh.advertise<std_msgs::UInt16>("Yoon_PbNum_cmd",20);
     auto yoon_mode_pub = node->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
     auto joint_command_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("yoon_UR10e_joint_cmd", 20);
     auto posture_command_pub = node->create_publisher<std_msgs::msg::Float64MultiArray>("yoon_UR10e_EEposture_cmd", 20);
