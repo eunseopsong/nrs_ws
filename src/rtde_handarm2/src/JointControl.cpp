@@ -203,33 +203,20 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       ctrl.store(2, std::memory_order_release);
       set_status(message_status, Hand_guiding_mode);
     }
+
+    // ===================== Continuous Recording Mode for Teleoperation ===================== //
     else if (mode_cmd == Continuous_reording_start) {
-      path_recording_flag = true;
-
-      if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
-
-      auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
-      if (hand_path.empty()) {
-        RCLCPP_ERROR(node_->get_logger(), "hand_g_recording path invalid; recording aborted.");
-        path_recording_flag = false;
-        set_status(message_status, "Recording path invalid");
-        return;
-      }
-      ensure_parent_dir(hand_path, node_->get_logger());
-
-      hand_g_recording = std::fopen(hand_path.c_str(), "wt");
-      if (!hand_g_recording) {
-        RCLCPP_ERROR(node_->get_logger(), "open for write failed: '%s' (%s)", hand_path.c_str(), std::strerror(errno));
-        path_recording_flag = false;
-        return;
-      }
+      // control_mode = 2 진입
+      ctrl.store(2, std::memory_order_release);
       set_status(message_status, Data_recording_on);
     }
     else if (mode_cmd == Continusous_recording_end) {
-      path_recording_flag = false;
-      if (hand_g_recording) { std::fclose(hand_g_recording); hand_g_recording = nullptr; }
+      // control_mode = 0 복귀
+      ctrl.store(0, std::memory_order_release);
       set_status(message_status, Data_recording_off);
     }
+
+
     else if (mode_cmd == Discrete_reording_start) {
       if (Num_RD_points != 0) {
         Inst_RD_points = Decr_RD_points;
@@ -392,6 +379,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       Inst_VR_points = Eigen::MatrixXd::Zero(1,7);
       printf("\n Cali points saved \n");
     }
+    
+    // ===================== Playback Mode for .txt Execution ===================== //
     else if (mode_cmd == Playback_mode_cmd) {
       auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
       if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
@@ -1322,7 +1311,7 @@ void JointControl::CalculateAndPublishJoint() {
   // 2) Continuous Teaching Mode
   if (control_mode == 2) {
 
-    
+
       return;
   }
 
