@@ -409,7 +409,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
         return;
       }
       set_status(message_status, ST_path_gen_done);
-      ctrl.store(3, std::memory_order_release);
+      ctrl.store(1, std::memory_order_release);
       pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
     }
     else if (mode_cmd == Motion_stop_cmd) {
@@ -428,7 +428,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
 // ===================== Other Callbacks =====================
 // 역할: 수동 재생 인덱스/단일 조인트 블렌딩 명령 수신
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg) {
-  PB_iter_cmd = msg->data; PB_iter_cur = 1; // 1 is right
+  PB_iter_cmd = msg->data; 
+  PB_iter_cur = 1; // 1 is right
 }
 
 // 역할: 단일 조인트 증분 경로 생성 및 모드1 실행 트리거
@@ -604,7 +605,6 @@ bool JointControl::InitMove(double dt_s)
     }
     return finished;
 }
-
 
 
 bool JointControl::PathFollow(double dt_s)
@@ -1079,8 +1079,6 @@ bool JointControl::PathFollow(double dt_s)
 
 
 
-
-
 bool JointControl::ReturnHomePose(double dt_s)
 {
     // 내부 상태 유지용 static 변수들
@@ -1283,67 +1281,8 @@ void JointControl::CalculateAndPublishJoint() {
       return;
   }
 
-  // 1) Cartesian / Joint 경로 실행 (기존 로직 유지)
+  // 1) Playback: InitMove → PathFollow → ReturnHomePose
   if (control_mode == 1) {
-    if(path_done_flag == true) {
-      if(path_exe_counter<Path_point_num) {
-        if(mode_cmd == Joint_control_mode_cmd) {
-          RArm.qd(0) = Joint_path_start(0) + ((double)(mjoint_cmd[0]==1))*J_single.Final_pos(path_exe_counter,1);
-          RArm.qd(1) = Joint_path_start(1) + ((double)(mjoint_cmd[0]==2))*J_single.Final_pos(path_exe_counter,1);
-          RArm.qd(2) = Joint_path_start(2) + ((double)(mjoint_cmd[0]==3))*J_single.Final_pos(path_exe_counter,1);
-          RArm.qd(3) = Joint_path_start(3) + ((double)(mjoint_cmd[0]==4))*J_single.Final_pos(path_exe_counter,1);
-          RArm.qd(4) = Joint_path_start(4) + ((double)(mjoint_cmd[0]==5))*J_single.Final_pos(path_exe_counter,1);
-          RArm.qd(5) = Joint_path_start(5) + ((double)(mjoint_cmd[0]==6))*J_single.Final_pos(path_exe_counter,1);
-
-          if (path_recording_joint) {
-            std::fprintf(path_recording_joint,"%10f %10f %10f %10f %10f %10f \n",
-              RArm.qd(0), RArm.qd(1), RArm.qd(2), RArm.qd(3), RArm.qd(4), RArm.qd(5));
-          }
-        }
-        else if (mode_cmd == EE_Posture_control_mode_cmd) {
-          Desired_XYZ << TCP_path_start(0), TCP_path_start(1), TCP_path_start(2);
-          Desired_RPY << TCP_path_start(3)+path_planning.Final_pos(path_exe_counter,1),
-                          TCP_path_start(4), TCP_path_start(5);
-          AKin.EulerAngle2Rotation(Desired_rot,Desired_RPY);
-          RArm.Td << Desired_rot(0,0),Desired_rot(0,1),Desired_rot(0,2),Desired_XYZ(0),
-                      Desired_rot(1,0),Desired_rot(1,1),Desired_rot(1,2),Desired_XYZ(1),
-                      Desired_rot(2,0),Desired_rot(2,1),Desired_rot(2,2),Desired_XYZ(2),
-                      0,0,0,1;
-#if TCP_standard == 0
-          AKin.InverseK_min(&RArm);
-#else
-          AKin.Ycontact_InverseK_min(&RArm);
-#endif
-          if (path_recording_pos) {
-            std::fprintf(path_recording_pos,"%10f %10f %10f %10f %10f %10f\n",
-              PPB_RTinput.PFd, Contact_Rot_force(2),
-              Power_PB.PTankE, Desired_rot(0,2), Desired_rot(1,2), Desired_rot(2,2));
-          }
-        }
-        path_exe_counter++;
-      } else {
-        path_done_flag = false;
-        path_exe_counter = 0;
-      }
-    }
-
-    // 명령 전송 (시뮬)
-    joint_state_.header.stamp = node_->now();
-    for (int i = 0; i < DOF; ++i) joint_state_.position[i] = RArm.qd(i);
-    joint_commands_pub_->publish(joint_state_);
-
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
-  }
-
-  // 2) Hand-guiding control mode (현 버전은 별 동작 없음, 유지)
-  if (control_mode == 2) {
-    pre_ctrl.store(control_mode, std::memory_order_relaxed);
-    return;
-  }
-
-  // 3) Playback: InitMove → PathFollow → ReturnHomePose
-  if (control_mode == 3) {
       static bool init_done = false;
       static bool follow_done = false;  // TXT 추종 완료 여부
 
@@ -1377,6 +1316,13 @@ void JointControl::CalculateAndPublishJoint() {
       // 3) Return 단계
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
+      return;
+  }
+
+  // 2) Continuous Teaching Mode
+  if (control_mode == 2) {
+
+    
       return;
   }
 
