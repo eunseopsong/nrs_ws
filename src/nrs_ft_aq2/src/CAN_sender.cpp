@@ -1,4 +1,5 @@
 #include "CAN_sender.hpp"
+#include <rclcpp/rclcpp.hpp>
 
 NRS_CAN_sender::~NRS_CAN_sender()
 {
@@ -25,11 +26,12 @@ void NRS_CAN_sender::TCP_connect(char *IP, int port)
     else
     {printf("TCP/IP was connected: %s \n",IP);}
 }
+
 void NRS_CAN_sender::CAN_sender_input()
 {
     int input;
 
-    data_sel:
+data_sel:
     std::cout << "Select the CAN ID(DEC): ";
     std::cin >> input;
 
@@ -49,11 +51,13 @@ void NRS_CAN_sender::CAN_sender_input()
     if(input == 0)
     {goto data_sel;}
 }
+
 void NRS_CAN_sender::CAN_send()
 {
     int iResult = send(clnt_sock, sendbuf, sizeof(sendbuf), 0);
     printf("Bytes Sent: %d\n", iResult);
 }
+
 void NRS_CAN_sender::CAN_start()
 {
     readstrlen = read(clnt_sock, (char *)&recvmsg, sizeof(recvmsg));
@@ -82,6 +86,7 @@ void NRS_CAN_sender::CAN_start()
     }
 
 }
+
 void NRS_CAN_sender::errhandle(const char *errmsg)
 { // for FT_communication
     fputs(errmsg, stderr);
@@ -90,27 +95,26 @@ void NRS_CAN_sender::errhandle(const char *errmsg)
     exit(1);
 }
 
-
-
 int main(int argc, char *argv[])
 {
-	ros::init(argc, argv, "can_sender");
-	ros::NodeHandle nh;
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<rclcpp::Node>("can_sender");
 
     NRS_CAN_sender NRS_CAN;
 
-    NRS_CAN.TCP_connect("192.168.0.42",4001);
+    NRS_CAN.TCP_connect((char *)"192.168.0.42", 4001);
     NRS_CAN.CAN_sender_input();
     NRS_CAN.CAN_send();
 
     double frequency = 2000.0; // Hz
-    ros::Rate loop_rate(frequency);
-    
-    while(ros::ok())
+    rclcpp::WallRate loop_rate(frequency);
+
+    while (rclcpp::ok())
     {
         NRS_CAN.CAN_start();
-        loop_rate.sleep();    // sleep to maintain loop rate
+        loop_rate.sleep();
     }
 
+    rclcpp::shutdown();
     return 0;
 }

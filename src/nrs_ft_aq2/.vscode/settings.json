@@ -62,5 +62,9 @@
         "/home/eunseop/nrs_lab",
         "/home/eunseop/nrs_lab",
         "/home/eunseop/nrs_lab"
-    ]
+    ],
+    "files.associations": {
+        "ostream": "cpp",
+        "vector": "cpp"
+    }
 }
