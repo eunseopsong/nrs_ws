@@ -1,0 +1,58 @@
+# Sensor IP (eCAN)
+AFT80IP: 192.168.0.42 # Robot side
+
+# Sensor CAN ID
+HandleID: 0x0b # Handle force id used in initializing the sensor
+ContactID: 0x01 # Contact force id used in initializing the sensor
+
+# Sensor ACC (Obtain the acceleration data from topic : /vive_acc, [Linacc(3), Angacc(3), Angvel(3)])
+HandleACC: false # Handle sensor acceleration switch (true: on, false: false)
+ContactACC: false # Contact sensor acceleration switch (true: on, false: false)
+
+# Sensor Sampling (unit: s)
+Sensor_sampling: 0.02 # 50Hz
+
+# Sensor Coordinate
+Handle_Sensor_Order:
+  - 2
+  - 0
+  - 1
+
+Handle_Sensor_sign:
+  - 1
+  - 1
+  - 1
+
+Contact_Sensor_Order:
+  - 0
+  - 1
+  - 2
+
+Contact_Sensor_sign:
+  - 3
+  - 3
+  - 3
+
+# If sensor Fz -> -Fx
+# H_Fx 2, H_Fx_sign 1
+# Force[0] = (H_Fx_sign-2)*Force[H_Fx];
+# If sensor Fy -> Fy
+# H_Fy 1, H_Fy_sign 3
+# Force[1] = (H_Fy_sign-2)*Force[H_Fy];
+
+# Recording File Path
+Data1_path: /home/nrsvr/vr2_ws/src/NRS_FT_AQ-main/measured/Data1.txt
+
+# Record Switch
+Data1_switch: 0 # 1: Recording on, 0: Recording off
+
+# Print Switch
+Print_switch: 1 # 1: Printing on, 0: Printing off
+
+# Filter Switch
+Hmov_switch: false # Handle sensor moving average filter switch
+HLPF_switch: false # Handle sensor low pass filter switch
+HBSF_switch: false # Handle sensor band stop filter switch
+Cmov_switch: false # Contact sensor moving average filter switch
+CLPF_switch: false # Contact sensor low pass filter switch
+CBSF_switch: false # Contact sensor band stop filter switch
