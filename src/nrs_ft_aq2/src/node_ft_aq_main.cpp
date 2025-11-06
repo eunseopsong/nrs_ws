@@ -2,39 +2,43 @@
 #include <signal.h>
 #include <rclcpp/rclcpp.hpp>
 
-static std::shared_ptr<rclcpp::Node> g_node = nullptr;
-
-void catch_signal(int sig)
-{
-  rclcpp::shutdown();
-  if (g_node) {
-    RCLCPP_ERROR(g_node->get_logger(), "Program was terminated (signal %d)", sig);
-  }
-}
-
 int main(int argc, char *argv[])
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<rclcpp::Node>("ft_aq_main");
-  g_node = node;
 
-  // 시그널 처리
-  signal(SIGTERM, catch_signal);
-  signal(SIGINT, catch_signal);
+  // 파라미터를 yaml에서 그냥 받아들이게 하는 옵션
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(true);
+  options.automatically_declare_parameters_from_overrides(true);
 
-  // 파라미터
-  int handle_id_i  = node->declare_parameter<int>("HandleID", 0x01);
-  int contact_id_i = node->declare_parameter<int>("ContactID", 0x11);
-  double sensor_sampling = node->declare_parameter<double>("Sensor_sampling", 0.001);
-  bool hacc_switch = node->declare_parameter<bool>("HandleACC", false);
-  bool cacc_switch = node->declare_parameter<bool>("ContactACC", false);
+  auto node = rclcpp::Node::make_shared("ft_aq", options);
 
-  unsigned char Handle_ID  = static_cast<unsigned char>(handle_id_i);
-  unsigned char Contact_ID = static_cast<unsigned char>(contact_id_i);
+  int HandleID = 0x01;
+  int ContactID = 0x11;
+  // ★ 기본 샘플링을 0.002s (= 500 Hz)로 설정
+  double Sensor_sampling = 0.002;
+  bool HaccSwitch = false;
+  bool CaccSwitch = false;
 
-  // FT_processing 은 우리가 ROS2 스타일로 바꿔둔 헤더 버전 기준
-  FT_processing ftp(node, sensor_sampling, Handle_ID, Contact_ID, hacc_switch, cacc_switch);
-  ftp.FT_run();   // 이 안에서 계속 도는 구조라고 가정
+  // yaml에 있으면 위 값들이 덮어써진다
+  node->get_parameter("HandleID", HandleID);
+  node->get_parameter("ContactID", ContactID);
+  node->get_parameter("Sensor_sampling", Sensor_sampling);
+  node->get_parameter("HandleACC", HaccSwitch);
+  node->get_parameter("ContactACC", CaccSwitch);
+
+  unsigned char handle_id_uc = static_cast<unsigned char>(HandleID);
+  unsigned char contact_id_uc = static_cast<unsigned char>(ContactID);
+
+  auto ftp = std::make_shared<FT_processing>(
+      node,
+      Sensor_sampling,
+      handle_id_uc,
+      contact_id_uc,
+      HaccSwitch,
+      CaccSwitch);
+
+  ftp->FT_run();
 
   rclcpp::shutdown();
   return 0;

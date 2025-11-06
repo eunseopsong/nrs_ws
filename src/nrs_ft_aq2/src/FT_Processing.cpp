@@ -44,7 +44,6 @@ FT_processing::FT_processing(std::shared_ptr<rclcpp::Node> node,
     YamlPrint_switch = 0;
   }
 
-  // 여기 4개가 문제였음 → int64 벡터로 받아서 int로 옮긴다
   {
     std::vector<int64_t> tmp;
     if (node_->get_parameter("Handle_Sensor_Order", tmp)) {
@@ -108,14 +107,12 @@ FT_processing::FT_processing(std::shared_ptr<rclcpp::Node> node,
   ftsensor_pub_ = node_->create_publisher<geometry_msgs::msg::Wrench>("/ftsensor/measured_Hvalue", 10);
   Cftsensor_pub_ = node_->create_publisher<geometry_msgs::msg::Wrench>("/ftsensor/measured_Cvalue", 10);
 
-  // 커스텀 msg 대신 표준
   vive_force_pub_  = node_->create_publisher<geometry_msgs::msg::Vector3>("vive_force", 10);
   vive_moment_pub_ = node_->create_publisher<geometry_msgs::msg::Vector3>("vive_moment", 10);
   vive_acc_pub_    = node_->create_publisher<std_msgs::msg::Float64MultiArray>("vive_acc", 10);
 
   aidinGui_statePub = node_->create_publisher<std_msgs::msg::String>("Aidin_State_Text", 20);
 
-  /* ROS2 Service init*/
   Aidin_gui_srv5 = node_->create_service<std_srvs::srv::Empty>(
     "sensor_zeroset",
     std::bind(&FT_processing::SRV5_Handle, this, std::placeholders::_1, std::placeholders::_2));
@@ -288,7 +285,7 @@ void FT_processing::FT_record()
 
 bool FT_processing::SRV5_Handle(
   const std::shared_ptr<std_srvs::srv::Empty::Request> /*req*/,
-  std::shared_ptr<std_srvs::srv::Empty::Response> /*res*/)
+  const std::shared_ptr<std_srvs::srv::Empty::Response> /*res*/)
 {
   sensor_init_counter = 0;
   aidinGui_stateMsg.data = "Sensor was initialized";
@@ -302,19 +299,29 @@ void FT_processing::FT_run()
   FT_init((int)(init_sec / Ts_));
   std::cout << "Sensor was initialized" << std::endl;
 
-  rclcpp::WallRate loop_rate(3 * (1.0 / Ts_));
+  rclcpp::WallRate loop_rate(1.0 / Ts_);
 
   while (rclcpp::ok())
   {
+    bool got_new_frame = false;
+
+    // 1) 소켓에서 데이터가 오면 그때만 값을 갱신
     if (TCP_start() != 0)
     {
+      got_new_frame = true;
       if (Sensor_value_init())
       {
         FT_filtering();
-        FT_publish();
-        FT_print();
-        FT_record();
       }
+    }
+
+    // 2) 데이터가 안 와도 publish/print는 매 주기마다 한다
+    //    (단, 초기화가 끝난 상태일 때만)
+    if (Sensor_value_init())
+    {
+      FT_publish();
+      FT_print();
+      FT_record();
     }
 
     rclcpp::spin_some(node_);
