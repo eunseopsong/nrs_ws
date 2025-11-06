@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# backup before rewriting (20251106 15:50)
+
 import os
 import json
 import re
