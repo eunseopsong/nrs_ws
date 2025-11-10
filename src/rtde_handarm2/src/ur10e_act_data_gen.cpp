@@ -35,12 +35,19 @@ public:
       10,
       std::bind(&ActDataRecorder::jointCallback, this, std::placeholders::_1));
 
-    image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-      "/camera/rgb",
+    // front camera
+    image_front_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
+      "/front_camera/rgb",
       10,
-      std::bind(&ActDataRecorder::imageCallback, this, std::placeholders::_1));
+      std::bind(&ActDataRecorder::frontImageCallback, this, std::placeholders::_1));
 
-    // FT 센서: 퍼블리셔랑 똑같이 소문자 v
+    // top camera
+    image_top_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
+      "/top_camera/rgb",
+      10,
+      std::bind(&ActDataRecorder::topImageCallback, this, std::placeholders::_1));
+
+    // FT 센서 (소문자 v)
     ft_sub_ = this->create_subscription<geometry_msgs::msg::Wrench>(
       "/ftsensor/measured_Cvalue",
       10,
@@ -68,6 +75,8 @@ public:
     RCLCPP_INFO(this->get_logger(), "Saving to: %s", hdf5_path_.c_str());
     RCLCPP_INFO(this->get_logger(),
                 "Episode rule: start=|fx|>=10, end=|fy|>=10, shutdown=|fx|>=10 && |fy|>=10");
+    RCLCPP_INFO(this->get_logger(),
+                "Cameras: /front_camera/rgb -> image_front, /top_camera/rgb -> image_top");
 
     // main loop 20Hz
     timer_ = this->create_wall_timer(
@@ -93,22 +102,32 @@ private:
     joint_received_ = true;
   }
 
-  void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+  void frontImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
   {
     try {
       auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
       std::lock_guard<std::mutex> lock(data_mutex_);
-      latest_image_ = cv_ptr->image.clone();
-      image_received_ = true;
+      latest_image_front_ = cv_ptr->image.clone();
+      image_front_received_ = true;
     } catch (const cv_bridge::Exception &e) {
-      RCLCPP_ERROR(this->get_logger(), "cv_bridge error: %s", e.what());
+      RCLCPP_ERROR(this->get_logger(), "cv_bridge (front) error: %s", e.what());
     }
   }
 
-  
+  void topImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+  {
+    try {
+      auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      latest_image_top_ = cv_ptr->image.clone();
+      image_top_received_ = true;
+    } catch (const cv_bridge::Exception &e) {
+      RCLCPP_ERROR(this->get_logger(), "cv_bridge (top) error: %s", e.what());
+    }
+  }
+
   void ftCallback(const geometry_msgs::msg::Wrench::SharedPtr msg)
   {
-    // 이건 원본 force (트리거용)
     double fx = msg->force.x;
     double fy = msg->force.y;
     double fz = msg->force.z;
@@ -121,15 +140,13 @@ private:
       ft_received_ = true;
     }
 
-    // --------- 트리거 로직 ----------
-    bool abs_fx_over = std::fabs(fx) >= 5.0;
-    bool abs_fy_over = std::fabs(fy) >= 5.0;
+    bool abs_fx_over = std::fabs(fx) >= 10.0;
+    bool abs_fy_over = std::fabs(fy) >= 10.0;
 
-    // 3) 노드 종료 조건: fx, fy 둘 다 10 이상
+    // 노드 종료 조건: 둘 다 10 이상
     if (abs_fx_over && abs_fy_over) {
       RCLCPP_WARN(this->get_logger(),
                   "FX=%.3f FY=%.3f -> shutdown condition met.", fx, fy);
-      // 녹화 중이었다면 저장하고 나간다
       if (recording_) {
         stopRecordingAndSave();
       }
@@ -137,13 +154,13 @@ private:
       return;
     }
 
-    // 1) 에피소드 시작: |fx| >= 10, 지금은 녹화 중이 아님
+    // 에피소드 시작: |fx| >= 10
     if (abs_fx_over && !recording_) {
       startRecording();
       return;
     }
 
-    // 2) 에피소드 끝: |fy| >= 10, 지금은 녹화 중일 때
+    // 에피소드 끝: |fy| >= 10
     if (abs_fy_over && recording_) {
       stopRecordingAndSave();
       return;
@@ -164,16 +181,20 @@ private:
       buffer_joints_.push_back(std::array<double,6>{0,0,0,0,0,0});
     }
 
-    // ft: 저장할 때는 fx=0, fy=0, fz 그대로
+    // ft: fx=0, fy=0, fz 그대로
     std::array<float,3> ft_to_save{0.f, 0.f, 0.f};
     if (ft_received_) {
-      ft_to_save[2] = latest_ft_raw_[2];  // fz만
+      ft_to_save[2] = latest_ft_raw_[2];
     }
     buffer_fts_.push_back(ft_to_save);
 
-    // image
-    if (image_received_) {
-      buffer_images_.push_back(latest_image_.clone());
+    // front image
+    if (image_front_received_) {
+      buffer_images_front_.push_back(latest_image_front_.clone());
+    }
+    // top image
+    if (image_top_received_) {
+      buffer_images_top_.push_back(latest_image_top_.clone());
     }
   }
 
@@ -181,20 +202,19 @@ private:
   void startRecording()
   {
     std::lock_guard<std::mutex> lock(data_mutex_);
-    if (recording_) return;  // 이미 녹화 중이면 무시
+    if (recording_) return;
     recording_ = true;
     buffer_joints_.clear();
     buffer_fts_.clear();
-    buffer_images_.clear();
+    buffer_images_front_.clear();
+    buffer_images_top_.clear();
     RCLCPP_INFO(this->get_logger(), "=== EPISODE STARTED (by |fx| >= 10) ===");
   }
 
   void stopRecordingAndSave()
   {
-    // 저장 중일 때 다시 들어오는 것 방지
     if (saving_) return;
 
-    // 녹화 중이 아니면 할 일 없음
     {
       std::lock_guard<std::mutex> lock(data_mutex_);
       if (!recording_) return;
@@ -209,7 +229,8 @@ private:
       std::lock_guard<std::mutex> lock(data_mutex_);
       buffer_joints_.clear();
       buffer_fts_.clear();
-      buffer_images_.clear();
+      buffer_images_front_.clear();
+      buffer_images_top_.clear();
       saving_ = false;
     }
   }
@@ -243,14 +264,14 @@ private:
       data_group_id = H5Gcreate(file_id, "/data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
     }
 
-    // demo 이름 정하기
+    // demo 이름
     hsize_t nobj;
     H5Gget_num_objs(data_group_id, &nobj);
     std::string demo_name = "demo_" + std::to_string(nobj);
     hid_t demo_group_id = H5Gcreate(data_group_id, demo_name.c_str(),
                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-    // 1) joints: (N, 6)
+    // joints (N,6)
     {
       hsize_t N = buffer_joints_.size();
       hsize_t dims[2] = {N, 6};
@@ -269,7 +290,7 @@ private:
       H5Sclose(space_id);
     }
 
-    // 2) ft: (N, 3)  ← 여기엔 이미 fx=0, fy=0 들어가 있음
+    // ft (N,3)  -> fx=0, fy=0, fz=값
     {
       hsize_t N = buffer_fts_.size();
       hsize_t dims[2] = {N, 3};
@@ -288,12 +309,12 @@ private:
       H5Sclose(space_id);
     }
 
-    // 3) image: (N, H, W, C)
-    if (!buffer_images_.empty()) {
-      int N = static_cast<int>(buffer_images_.size());
-      int H = buffer_images_[0].rows;
-      int W = buffer_images_[0].cols;
-      int C = buffer_images_[0].channels();
+    // front image 저장: (N, H, W, C)
+    if (!buffer_images_front_.empty()) {
+      int N = static_cast<int>(buffer_images_front_.size());
+      int H = buffer_images_front_[0].rows;
+      int W = buffer_images_front_[0].cols;
+      int C = buffer_images_front_[0].channels();
 
       hsize_t dims[4] = {
         static_cast<hsize_t>(N),
@@ -302,12 +323,40 @@ private:
         static_cast<hsize_t>(C)
       };
       hid_t space_id = H5Screate_simple(4, dims, nullptr);
-      hid_t dset_id = H5Dcreate(demo_group_id, "image", H5T_NATIVE_UCHAR, space_id,
+      hid_t dset_id = H5Dcreate(demo_group_id, "image_front", H5T_NATIVE_UCHAR, space_id,
                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
       std::vector<unsigned char> flat;
       flat.reserve(N * H * W * C);
-      for (auto &img : buffer_images_) {
+      for (auto &img : buffer_images_front_) {
+        flat.insert(flat.end(), img.data, img.data + (H * W * C));
+      }
+
+      H5Dwrite(dset_id, H5T_NATIVE_UCHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
+      H5Dclose(dset_id);
+      H5Sclose(space_id);
+    }
+
+    // top image 저장: (N, H, W, C)
+    if (!buffer_images_top_.empty()) {
+      int N = static_cast<int>(buffer_images_top_.size());
+      int H = buffer_images_top_[0].rows;
+      int W = buffer_images_top_[0].cols;
+      int C = buffer_images_top_[0].channels();
+
+      hsize_t dims[4] = {
+        static_cast<hsize_t>(N),
+        static_cast<hsize_t>(H),
+        static_cast<hsize_t>(W),
+        static_cast<hsize_t>(C)
+      };
+      hid_t space_id = H5Screate_simple(4, dims, nullptr);
+      hid_t dset_id = H5Dcreate(demo_group_id, "image_top", H5T_NATIVE_UCHAR, space_id,
+                                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+      std::vector<unsigned char> flat;
+      flat.reserve(N * H * W * C);
+      for (auto &img : buffer_images_top_) {
         flat.insert(flat.end(), img.data, img.data + (H * W * C));
       }
 
@@ -321,38 +370,43 @@ private:
     H5Fclose(file_id);
 
     RCLCPP_INFO(this->get_logger(),
-                "Saved %s (joints: %zu, ft: %zu, images: %zu)",
+                "Saved %s (joints: %zu, ft: %zu, front: %zu, top: %zu)",
                 demo_name.c_str(),
                 buffer_joints_.size(),
                 buffer_fts_.size(),
-                buffer_images_.size());
+                buffer_images_front_.size(),
+                buffer_images_top_.size());
   }
 
 private:
   // ROS
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr      image_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr      image_front_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr      image_top_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr   ft_sub_;
   rclcpp::TimerBase::SharedPtr                                  timer_;
 
   // latest data
   std::array<double, 6> latest_joint_{};
   std::array<float, 3>  latest_ft_raw_{};
-  cv::Mat latest_image_;
+
+  cv::Mat latest_image_front_;
+  cv::Mat latest_image_top_;
 
   bool joint_received_{false};
   bool ft_received_{false};
-  bool image_received_{false};
+  bool image_front_received_{false};
+  bool image_top_received_{false};
 
   // buffers
   std::vector<std::array<double,6>> buffer_joints_;
   std::vector<std::array<float,3>>  buffer_fts_;
-  std::vector<cv::Mat>              buffer_images_;
+  std::vector<cv::Mat>              buffer_images_front_;
+  std::vector<cv::Mat>              buffer_images_top_;
 
   // state
   bool recording_;
-  bool saving_;   // 저장 중일 때 중복 저장 방지
-
+  bool saving_;
   std::mutex data_mutex_;
 
   // joint names
