@@ -74,7 +74,9 @@ public:
 
     RCLCPP_INFO(this->get_logger(), "Saving to: %s", hdf5_path_.c_str());
     RCLCPP_INFO(this->get_logger(),
-                "Episode rule: start=|fx|>=10, end=|fy|>=10, shutdown=|fx|>=10 && |fy|>=10");
+                "Episode rule: start=|fx|>=10, end=|fy|>=10");
+    RCLCPP_INFO(this->get_logger(),
+                "Shutdown rule: |fx|>=20 && |fy|>=20");
     RCLCPP_INFO(this->get_logger(),
                 "Cameras: /front_camera/rgb -> image_front, /top_camera/rgb -> image_top");
 
@@ -140,13 +142,15 @@ private:
       ft_received_ = true;
     }
 
-    bool abs_fx_over = std::fabs(fx) >= 10.0;
-    bool abs_fy_over = std::fabs(fy) >= 10.0;
+    bool abs_fx_over_start = std::fabs(fx) >= 10.0;
+    bool abs_fy_over_end   = std::fabs(fy) >= 10.0;
+    bool abs_fx_over_shutdown = std::fabs(fx) >= 20.0;
+    bool abs_fy_over_shutdown = std::fabs(fy) >= 20.0;
 
-    // 노드 종료 조건: 둘 다 10 이상
-    if (abs_fx_over && abs_fy_over) {
+    // 3) 노드 종료 조건: fx, fy 둘 다 20 이상
+    if (abs_fx_over_shutdown && abs_fy_over_shutdown) {
       RCLCPP_WARN(this->get_logger(),
-                  "FX=%.3f FY=%.3f -> shutdown condition met.", fx, fy);
+                  "FX=%.3f FY=%.3f -> shutdown condition (20/20) met.", fx, fy);
       if (recording_) {
         stopRecordingAndSave();
       }
@@ -154,14 +158,14 @@ private:
       return;
     }
 
-    // 에피소드 시작: |fx| >= 10
-    if (abs_fx_over && !recording_) {
+    // 1) 에피소드 시작: |fx| >= 10, 현재 녹화중 아님
+    if (abs_fx_over_start && !recording_) {
       startRecording();
       return;
     }
 
-    // 에피소드 끝: |fy| >= 10
-    if (abs_fy_over && recording_) {
+    // 2) 에피소드 끝: |fy| >= 10, 현재 녹화중
+    if (abs_fy_over_end && recording_) {
       stopRecordingAndSave();
       return;
     }
@@ -244,7 +248,7 @@ private:
       return;
     }
 
-    // 파일 열기 / 만들기
+    // 파일 열기/생성
     hid_t file_id;
     if (fs::exists(hdf5_path_)) {
       file_id = H5Fopen(hdf5_path_.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
@@ -309,7 +313,7 @@ private:
       H5Sclose(space_id);
     }
 
-    // front image 저장: (N, H, W, C)
+    // front image 저장
     if (!buffer_images_front_.empty()) {
       int N = static_cast<int>(buffer_images_front_.size());
       int H = buffer_images_front_[0].rows;
@@ -337,7 +341,7 @@ private:
       H5Sclose(space_id);
     }
 
-    // top image 저장: (N, H, W, C)
+    // top image 저장
     if (!buffer_images_top_.empty()) {
       int N = static_cast<int>(buffer_images_top_.size());
       int H = buffer_images_top_[0].rows;
