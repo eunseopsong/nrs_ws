@@ -68,7 +68,7 @@ public:
     std::tm tm = *std::localtime(&t);
     char buf[32];
     std::strftime(buf, sizeof(buf), "%m%d_%H%M", &tm);
-    base_dir_ = "/home/eunseop/nrs_ws/src/rtde_handarm2/data/" + std::string(buf);
+    base_dir_ = "/home/eunseop/nrs_lab2/datasets/ACT/" + std::string(buf);
     fs::create_directories(base_dir_);
     hdf5_path_ = base_dir_ + "/act_data.hdf5";
 
