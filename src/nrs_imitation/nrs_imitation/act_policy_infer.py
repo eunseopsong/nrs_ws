@@ -167,16 +167,22 @@ class ActPolicyInfer:
             self.curr_joint = np.array(msg.position[:6])
 
     def run(self):
-        rate = self.node.create_rate(20)
+        rate_hz = 20.0
+        period = 1.0 / rate_hz
         try:
             front_np = self.img_recorder.wait_for_image(timeout=10.0)
             self.node.get_logger().info("Camera image ready!")
+
+            step = 0
+            action_seq = None
+            last_time = self.node.get_clock().now()
 
             while rclpy.ok():
                 front_np = self.img_recorder.get_front()
                 if front_np is None:
                     continue
 
+                # --- 보장된 RGB 변환 ---
                 if len(front_np.shape) == 2:
                     front_np = cv2.cvtColor(front_np, cv2.COLOR_GRAY2BGR)
                 elif front_np.shape[2] == 1:
@@ -187,32 +193,45 @@ class ActPolicyInfer:
                 if front_np.dtype != np.uint8:
                     front_np = cv2.convertScaleAbs(front_np)
 
-                print("[DEBUG] front shape:", front_np.shape, "dtype:", front_np.dtype)
                 front = torch.from_numpy(front_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-                print("[DEBUG] front tensor shape:", front.shape)
-
                 imgs_tensor = front.to(self.device)
                 qpos_tensor = torch.tensor(self.curr_joint, dtype=torch.float32).unsqueeze(0).to(self.device)
 
-                with torch.no_grad():
-                    action_tensor = self.policy(qpos_tensor, imgs_tensor)
+                if action_seq is None:
+                    with torch.no_grad():
+                        action_tensor = self.policy(qpos_tensor, imgs_tensor)
+                        if isinstance(action_tensor, tuple):
+                            action_tensor = action_tensor[0]
+                        action_seq = action_tensor.cpu().numpy().flatten()
+                        total_steps = len(action_seq) // 6
+                        self.node.get_logger().info(f"Total predicted steps: {total_steps}")
 
-                    # ✅ tuple 반환 시 첫 번째 값만 사용
-                    if isinstance(action_tensor, tuple):
-                        action_tensor = action_tensor[0]
+                # --- 6개씩 잘라서 퍼블리시 ---
+                if action_seq is not None:
+                    start = step * 6
+                    end = start + 6
+                    if end > len(action_seq):
+                        step = 0
+                        continue
 
-                    action = action_tensor.cpu().numpy().flatten()
+                    action = action_seq[start:end]
+                    msg = JointState()
+                    msg.name = [
+                        "shoulder_pan_joint", "shoulder_lift_joint",
+                        "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"
+                    ]
+                    msg.position = action.tolist()
+                    self.joint_pub.publish(msg)
+                    self.node.get_logger().info(f"[{step:03d}] Published: {np.round(action, 3)}")
 
-                msg = JointState()
-                msg.name = [
-                    "shoulder_pan_joint", "shoulder_lift_joint",
-                    "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"
-                ]
-                msg.position = action.tolist()
-                self.joint_pub.publish(msg)
-                self.node.get_logger().info(f"Published inferred joint command: {np.round(action, 3)}")
+                    step += 1
 
-                rate.sleep()
+                # --- 20 Hz sleep ---
+                now = self.node.get_clock().now()
+                elapsed = (now - last_time).nanoseconds / 1e9
+                if elapsed < period:
+                    time.sleep(period - elapsed)
+                last_time = now
 
         except KeyboardInterrupt:
             self.node.get_logger().warn("Shutting down ACT Policy Infer...")
@@ -228,7 +247,6 @@ class ActPolicyInfer:
 def main(args=None):
     infer = ActPolicyInfer()
     infer.run()
-
 
 if __name__ == "__main__":
     main()
