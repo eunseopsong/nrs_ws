@@ -1,26 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-ACT policy inference node for UR10e (2 cameras: front + top)
-
-권장 구조:
-- 체크포인트 루트:  /home/eunseop/nrs_lab2/checkpoints/ur10e_swing
-- 그 안의 하위 폴더명: MMDD_HHMM (예: 1116_1148)
-- 항상 "가장 최신 폴더"의 policy_best.ckpt 를 자동으로 로드
-- detr_vae.build() 인자들을 custom_imitate_episodes.py 의 학습 설정과 1:1로 맞춤
-"""
-
 import os
 import sys
 import time
 import threading
-import glob
 from datetime import datetime
 
-import torch
 import numpy as np
+import torch
 import cv2
+import h5py
 from cv_bridge import CvBridge
 
 # ======================
@@ -35,46 +25,46 @@ sys.path.extend([
     os.path.join(ROOT_DIR, "act", "detr", "util"),
 ])
 
-from act.detr.models.detr_vae import build as build_act_model  # DETRVAE builder
+from act.detr.models.detr_vae import build as build_act_model
 
 # ======================
 # ROS2 관련 임포트
 # ======================
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, JointState
 from rclpy.executors import SingleThreadedExecutor
+from sensor_msgs.msg import Image, JointState
 
 
 # ==============================================================
-# 🔍 Helper: 최신 체크포인트 폴더 찾기 (MMDD_HHMM 형식)
+# 유틸: 최신 체크포인트 폴더 찾기 (MMDD_HHMM 형식)
 # ==============================================================
-def find_latest_run_dir(ckpt_root: str) -> str:
+def find_latest_ckpt_dir(root_dir: str) -> str:
     """
-    ckpt_root 안에서 MMDD_HHMM 형식의 디렉토리 중 가장 최신(사전순 max)을 반환.
-    없으면 ckpt_root 자체를 반환.
+    root_dir 아래의 하위 디렉토리 중 이름이 'MMDD_HHMM' 형식인 것들 중
+    가장 최신(사전순으로 가장 뒤)을 반환. 없으면 root_dir 자체 반환.
     """
-    if not os.path.isdir(ckpt_root):
-        raise FileNotFoundError(f"[ERROR] Checkpoint root not found: {ckpt_root}")
+    if not os.path.isdir(root_dir):
+        return root_dir
 
     candidates = []
-    for name in os.listdir(ckpt_root):
-        full = os.path.join(ckpt_root, name)
+    for name in os.listdir(root_dir):
+        full = os.path.join(root_dir, name)
         if not os.path.isdir(full):
             continue
-        try:
-            # 이름이 MMDD_HHMM 형식인지 검사
-            datetime.strptime(name, "%m%d_%H%M")
-            candidates.append(name)
-        except ValueError:
-            pass
+        # 4자리_4자리 형식만 후보
+        if len(name) == 9 and name[4] == "_":
+            mmdd = name[:4]
+            hhmm = name[5:]
+            if mmdd.isdigit() and hhmm.isdigit():
+                candidates.append(name)
 
     if not candidates:
-        # 하위 폴더가 없으면 root 바로 아래의 policy_best.ckpt 를 쓰도록 반환
-        return ckpt_root
+        return root_dir
 
-    latest_name = sorted(candidates)[-1]
-    return os.path.join(ckpt_root, latest_name)
+    candidates.sort()
+    latest_name = candidates[-1]
+    return os.path.join(root_dir, latest_name)
 
 
 # ==============================================================
@@ -91,7 +81,13 @@ class ImageRecorder:
         self._stop_evt = threading.Event()
         self.bridge = CvBridge()
 
-        # rclpy.init 은 ActPolicyInfer 쪽에서 한 번만 호출한다고 가정
+        # ROS2 init (이미 되어 있으면 예외 무시)
+        try:
+            rclpy.init(args=None)
+        except RuntimeError as e:
+            if "must only be called once" not in str(e):
+                raise
+
         self.node = Node(node_name)
 
         # 두 카메라 구독
@@ -172,15 +168,14 @@ class ImageRecorder:
 
 
 # ==============================================================
-# 🤖 ACT Policy Inference 클래스 (2 카메라 + 6개씩 20Hz publish)
+# 🤖 ACT Policy Inference + Demo 비교
 # ==============================================================
 class ActPolicyInfer:
     def __init__(self):
-        # ROS2 init (전역에서 한 번만)
+        # ROS2 init (이미 되어 있으면 예외 무시)
         try:
             rclpy.init(args=None)
         except RuntimeError as e:
-            # 이미 초기화돼 있으면 무시
             if "must only be called once" not in str(e):
                 raise
 
@@ -199,22 +194,18 @@ class ActPolicyInfer:
         )
 
         # ======================
-        # 모델 초기화
+        # 모델 초기화 (가장 최신 ckpt 폴더 자동 선택)
         # ======================
         ckpt_root = "/home/eunseop/nrs_lab2/checkpoints/ur10e_swing"
-        latest_dir = find_latest_run_dir(ckpt_root)
-        ckpt_path = os.path.join(latest_dir, "policy_best.ckpt")
-        if not os.path.isfile(ckpt_path):
-            raise FileNotFoundError(f"[ERROR] policy_best.ckpt not found at: {ckpt_path}")
-
+        latest_ckpt_dir = find_latest_ckpt_dir(ckpt_root)
+        ckpt_path = os.path.join(latest_ckpt_dir, "policy_best.ckpt")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.node.get_logger().info(f"[INFO] Loading checkpoint from {ckpt_path}")
 
-        # 학습 스크립트(custom_imitate_episodes.py)와 동일한 설정으로 DETRVAE 빌드
         import argparse
         args = argparse.Namespace(
-            lr=1e-4,             # 실제 inference에서는 사용 안 됨, shape 맞추기용
+            lr=1e-5,
             lr_backbone=1e-5,
             batch_size=1,
             weight_decay=1e-4,
@@ -223,44 +214,72 @@ class ActPolicyInfer:
             clip_max_norm=0.1,
             hidden_dim=512,
             dim_feedforward=3200,
-            num_queries=100,          # chunk_size
+            num_queries=100,
             backbone="resnet18",
             position_embedding="sine",
             dilation=False,
             masks=False,
-            enc_layers=4,             # ✅ 학습 설정과 동일
-            dec_layers=7,             # ✅ 학습 설정과 동일
+            enc_layers=6,
+            dec_layers=6,
             nheads=8,
             dropout=0.1,
             pre_norm=False,
             eval=True,
-            camera_names=["cam_front", "cam_head"],  # ✅ 두 카메라 이름
-            kl_weight=10,
+            camera_names=["cam_front", "cam_head"],
+            kl_weight=10
         )
 
         self.policy = build_act_model(args)
-        # param 수 로그 (학습 때와 동일한지 확인용)
-        n_params = sum(p.numel() for p in self.policy.parameters() if p.requires_grad)
-        self.node.get_logger().info(f"[INFO] DETR-VAE parameters: {n_params/1e6:.2f}M")
+        num_params = sum(p.numel() for p in self.policy.parameters() if p.requires_grad)
+        self.node.get_logger().info(f"[INFO] DETR-VAE parameters: {num_params/1e6:.2f}M")
 
         ckpt = torch.load(ckpt_path, map_location=device)
-        state_dict = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
+        state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
         missing, unexpected = self.policy.load_state_dict(state_dict, strict=False)
-        self.node.get_logger().info(
-            f"✅ Loaded weights (missing={len(missing)}, unexpected={len(unexpected)})"
-        )
-        if missing:
-            self.node.get_logger().warn(f"[WARN] Missing keys: {missing[:5]}{' ...' if len(missing) > 5 else ''}")
-        if unexpected:
-            self.node.get_logger().warn(f"[WARN] Unexpected keys: {unexpected[:5]}{' ...' if len(unexpected) > 5 else ''}")
+        self.node.get_logger().info(f"✅ Loaded weights (missing={len(missing)}, unexpected={len(unexpected)})")
 
         self.policy.to(device).eval()
         self.node.get_logger().info("✅ ACT model ready for inference")
+
+        # ======================
+        # 데모 episode_10 joints 불러오기 (rad)
+        # ======================
+        demo_ep_path = "/home/eunseop/nrs_lab2/datasets/ACT/1114_1643/episodes/episode_10.hdf5"
+        self.demo_joints = None
+        if os.path.exists(demo_ep_path):
+            try:
+                with h5py.File(demo_ep_path, "r") as f:
+                    # /action: (T, 6), /observations/qpos 도 동일
+                    self.demo_joints = f["/action"][()]
+                self.node.get_logger().info(
+                    f"[INFO] Loaded demo joints from {demo_ep_path}, shape = {self.demo_joints.shape}"
+                )
+            except Exception as e:
+                self.node.get_logger().warn(f"[WARN] Failed to load demo joints: {e}")
+        else:
+            self.node.get_logger().warn(f"[WARN] Demo episode file not found: {demo_ep_path}")
+
+        # ======================
+        # Inference & 비교 로그 파일 준비
+        # ======================
+        log_dir = "/home/eunseop/nrs_lab2/analysis_logs"
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.now().strftime("%m%d_%H%M%S")
+        self.log_path = os.path.join(log_dir, f"act_infer_{ts}.csv")
+        self.log_file = open(self.log_path, "w", buffering=1)
+
+        # CSV 헤더: step, ros_time, demo_j0..5, pred_j0..5
+        header = "step,ros_time,d0,d1,d2,d3,d4,d5,p0,p1,p2,p3,p4,p5\n"
+        self.log_file.write(header)
+        self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
 
     def _joint_cb(self, msg):
         if len(msg.position) >= 6:
             self.curr_joint = np.array(msg.position[:6])
 
+    # ==========================================================
+    # 메인 루프
+    # ==========================================================
     def run(self):
         rate_hz = 20.0
         period = 1.0 / rate_hz
@@ -302,62 +321,59 @@ class ActPolicyInfer:
                     top_np = cv2.resize(top_np, (w, h))
 
                 # --------- (B, num_cams, 3, H, W) 텐서 만들기 --------- #
-                front_t = torch.from_numpy(front_np).permute(2, 0, 1).float() / 255.0  # (3,H,W)
-                top_t   = torch.from_numpy(top_np).permute(2, 0, 1).float() / 255.0    # (3,H,W)
+                front_t = torch.from_numpy(front_np).permute(2, 0, 1).float() / 255.0
+                top_t   = torch.from_numpy(top_np).permute(2, 0, 1).float() / 255.0
 
-                cams = torch.stack([front_t, top_t], dim=0)   # (2,3,H,W)
-                imgs_tensor = cams.unsqueeze(0).to(self.device)  # (1,2,3,H,W)
-
+                cams = torch.stack([front_t, top_t], dim=0)       # (2,3,H,W)
+                imgs_tensor = cams.unsqueeze(0).to(self.device)   # (1,2,3,H,W)
                 qpos_tensor = torch.tensor(
                     self.curr_joint, dtype=torch.float32
-                ).unsqueeze(0).to(self.device)  # (1,6)
+                ).unsqueeze(0).to(self.device)
 
-                # --------- 한 번만 inference 해서 시퀀스 저장 (open-loop) --------- #
+                # --------- 한 번만 inference 해서 시퀀스 저장 --------- #
                 if action_seq is None:
                     with torch.no_grad():
                         out = self.policy(qpos_tensor, imgs_tensor)
-                        # DETRVAE.forward 의 반환은 (a_hat, is_pad_hat, [mu, logvar])
-                        if isinstance(out, (list, tuple)) and len(out) >= 1:
-                            a_hat = out[0]   # (B, T, 6) 혹은 (B, 6) 형태일 것
+                        # ACT 구현에 따라 tuple or tensor
+                        if isinstance(out, tuple):
+                            action_tensor = out[0]
                         else:
-                            a_hat = out
-
-                        # a_hat shape에 따라 flatten 방식 다르게 처리
-                        if a_hat.ndim == 3:
-                            # (B, T, 6) -> 첫 번째 배치만 사용
-                            a_np = a_hat[0].cpu().numpy()  # (T,6)
-                            action_seq = a_np.reshape(-1)  # T*6
-                            total_steps = a_np.shape[0]
-                        elif a_hat.ndim == 2:
-                            # (B, 6) -> 1 step 만 있는 경우
-                            a_np = a_hat[0].cpu().numpy()
-                            action_seq = a_np.reshape(-1)
-                            total_steps = 1
+                            action_tensor = out
+                        # (N*6,) 또는 (N,6) 형태라고 가정
+                        action_np = action_tensor.cpu().numpy()
+                        if action_np.ndim == 1:
+                            action_seq = action_np.reshape(-1, 6)  # (N,6)
                         else:
-                            raise RuntimeError(f"Unexpected a_hat shape: {a_hat.shape}")
+                            # (B, T, 6) 또는 (T, 6) 등 -> 전부 (N,6)으로 flatten
+                            action_seq = action_np.reshape(-1, 6)
 
+                    total_steps = action_seq.shape[0]
+                    self.node.get_logger().info(
+                        f"Total predicted steps: {total_steps} (action_seq shape = {action_seq.shape})"
+                    )
+                    if total_steps >= 3:
                         self.node.get_logger().info(
-                            f"Total predicted steps: {total_steps} "
-                            f"(action_seq len = {len(action_seq)})"
+                            f"[DEBUG] First 3 predicted steps (rad):\n{np.round(action_seq[:3], 3)}"
                         )
 
-                        # 디버깅용: 첫 3 step 범위 출력
-                        if total_steps >= 3:
-                            first3 = action_seq[:18].reshape(-1, 6)
-                            self.node.get_logger().info(
-                                f"[DEBUG] First 3 predicted steps (rad):\n{np.round(first3, 3)}"
-                            )
+                    # --------- 데모와의 차이 한 번 계산해서 로그 --------- #
+                    if self.demo_joints is not None:
+                        T = min(self.demo_joints.shape[0], total_steps)
+                        demo_cut = self.demo_joints[:T]
+                        pred_cut = action_seq[:T]
+                        mae = np.mean(np.abs(pred_cut - demo_cut), axis=0)
+                        self.node.get_logger().info(
+                            f"[COMPARE] Using first {T} steps, MAE per joint (rad): {mae}"
+                        )
 
                 # --------- 6개씩 잘라서 20Hz로 publish --------- #
                 if action_seq is not None:
-                    start = step * 6
-                    end = start + 6
-                    if end > len(action_seq):
-                        # 다 썼으면 다시 처음부터 (원하면 break 로 바꿔도 됨)
+                    if step >= action_seq.shape[0]:
+                        # 다 썼으면 다시 처음부터
                         step = 0
                         continue
 
-                    action = action_seq[start:end]
+                    action = action_seq[step]  # shape (6,)
                     msg = JointState()
                     msg.name = [
                         "shoulder_pan_joint", "shoulder_lift_joint",
@@ -366,6 +382,18 @@ class ActPolicyInfer:
                     msg.position = action.tolist()
                     self.joint_pub.publish(msg)
                     self.node.get_logger().info(f"[{step:03d}] Published: {np.round(action, 3)}")
+
+                    # ----- CSV 로깅: demo vs pred ----- #
+                    ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
+                    if self.demo_joints is not None and step < self.demo_joints.shape[0]:
+                        demo_vals = self.demo_joints[step]
+                    else:
+                        demo_vals = np.full(6, np.nan)
+
+                    line = "{:d},{:.6f},".format(step, ros_time_sec)
+                    line += ",".join(f"{v:.6f}" for v in demo_vals) + ","
+                    line += ",".join(f"{v:.6f}" for v in action) + "\n"
+                    self.log_file.write(line)
 
                     step += 1
 
@@ -379,6 +407,12 @@ class ActPolicyInfer:
         except KeyboardInterrupt:
             self.node.get_logger().warn("Shutting down ACT Policy Infer...")
         finally:
+            # 로그 파일 닫기
+            try:
+                self.log_file.close()
+            except Exception:
+                pass
+
             self.img_recorder.shutdown()
             self.node.destroy_node()
             try:
