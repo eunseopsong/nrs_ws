@@ -6,6 +6,7 @@ import sys
 import time
 import threading
 from datetime import datetime
+import pickle
 
 import numpy as np
 import torch
@@ -17,15 +18,21 @@ from cv_bridge import CvBridge
 # 경로 설정
 # ======================
 ROOT_DIR = "/home/eunseop/nrs_lab2/nrs_act"
-sys.path.extend([
-    ROOT_DIR,
-    os.path.join(ROOT_DIR, "act"),
-    os.path.join(ROOT_DIR, "act", "model"),
-    os.path.join(ROOT_DIR, "act", "detr"),
-    os.path.join(ROOT_DIR, "act", "detr", "util"),
-])
+CKPT_ROOT = "/home/eunseop/nrs_lab2/checkpoints/ur10e_swing"
+DATASET_EP_DIR = "/home/eunseop/nrs_lab2/datasets/ACT/1114_1643/episodes"
+LOG_DIR = "/home/eunseop/nrs_lab2/analysis_logs"
 
-from act.detr.models.detr_vae import build as build_act_model
+sys.path.extend(
+    [
+        ROOT_DIR,
+        os.path.join(ROOT_DIR, "act"),
+        os.path.join(ROOT_DIR, "act", "model"),
+        os.path.join(ROOT_DIR, "act", "detr"),
+        os.path.join(ROOT_DIR, "act", "detr", "util"),
+    ]
+)
+
+from act.detr.models.detr_vae import build as build_act_model  # noqa: E402
 
 # ======================
 # ROS2 관련 임포트
@@ -71,10 +78,12 @@ def find_latest_ckpt_dir(root_dir: str) -> str:
 # 📸 Isaac Sim 카메라 수신용 클래스 (front + top)
 # ==============================================================
 class ImageRecorder:
-    def __init__(self,
-                 front_topic="/front_camera/rgb",
-                 top_topic="/top_camera/rgb",
-                 node_name="ur10e_image_recorder"):
+    def __init__(
+        self,
+        front_topic="/front_camera/rgb",
+        top_topic="/top_camera/rgb",
+        node_name="ur10e_image_recorder",
+    ):
         self._lock = threading.Lock()
         self._front_image = None
         self._top_image = None
@@ -100,7 +109,7 @@ class ImageRecorder:
         self._spin_thread = threading.Thread(target=self._spin, daemon=True)
         self._spin_thread.start()
 
-        print(f"[INFO] ImageRecorder initialized:")
+        print("[INFO] ImageRecorder initialized:")
         print(f"  - Front camera: {front_topic}")
         print(f"  - Top camera:   {top_topic}")
 
@@ -144,7 +153,7 @@ class ImageRecorder:
     def get_images(self):
         with self._lock:
             front = self._front_image.copy() if self._front_image is not None else None
-            top   = self._top_image.copy()   if self._top_image   is not None else None
+            top = self._top_image.copy() if self._top_image is not None else None
         return {"front": front, "top": top}
 
     def wait_for_images(self, timeout: float = 5.0):
@@ -183,27 +192,33 @@ class ActPolicyInfer:
         self.curr_joint = np.zeros(6)
 
         # publisher / subscriber
-        self.joint_pub = self.node.create_publisher(JointState, "/isaac_joint_commands", 10)
-        self.node.create_subscription(JointState, "/isaac_joint_states", self._joint_cb, 10)
+        self.joint_pub = self.node.create_publisher(
+            JointState, "/isaac_joint_commands", 10
+        )
+        self.node.create_subscription(
+            JointState, "/isaac_joint_states", self._joint_cb, 10
+        )
 
         # 카메라 수신 (front + top)
         self.img_recorder = ImageRecorder(
             front_topic="/front_camera/rgb",
             top_topic="/top_camera/rgb",
-            node_name="ur10e_image_recorder"
+            node_name="ur10e_image_recorder",
         )
 
         # ======================
         # 모델 초기화 (가장 최신 ckpt 폴더 자동 선택)
         # ======================
-        ckpt_root = "/home/eunseop/nrs_lab2/checkpoints/ur10e_swing"
-        latest_ckpt_dir = find_latest_ckpt_dir(ckpt_root)
+        latest_ckpt_dir = find_latest_ckpt_dir(CKPT_ROOT)
         ckpt_path = os.path.join(latest_ckpt_dir, "policy_best.ckpt")
+        self.ckpt_dir = latest_ckpt_dir
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.node.get_logger().info(f"[INFO] Loading checkpoint from {ckpt_path}")
 
         import argparse
+
         args = argparse.Namespace(
             lr=1e-5,
             lr_backbone=1e-5,
@@ -226,46 +241,72 @@ class ActPolicyInfer:
             pre_norm=False,
             eval=True,
             camera_names=["cam_front", "cam_head"],
-            kl_weight=10
+            kl_weight=10,
         )
 
         self.policy = build_act_model(args)
         num_params = sum(p.numel() for p in self.policy.parameters() if p.requires_grad)
-        self.node.get_logger().info(f"[INFO] DETR-VAE parameters: {num_params/1e6:.2f}M")
+        self.node.get_logger().info(
+            f"[INFO] DETR-VAE parameters: {num_params/1e6:.2f}M"
+        )
 
         ckpt = torch.load(ckpt_path, map_location=device)
         state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
         missing, unexpected = self.policy.load_state_dict(state_dict, strict=False)
-        self.node.get_logger().info(f"✅ Loaded weights (missing={len(missing)}, unexpected={len(unexpected)})")
+        self.node.get_logger().info(
+            f"✅ Loaded weights (missing={len(missing)}, unexpected={len(unexpected)})"
+        )
 
         self.policy.to(device).eval()
         self.node.get_logger().info("✅ ACT model ready for inference")
 
         # ======================
-        # 데모 episode_10 joints 불러오기 (rad)
+        # dataset_stats.pkl 로부터 action mean/std 로드 (denorm 용)
         # ======================
-        demo_ep_path = "/home/eunseop/nrs_lab2/datasets/ACT/1114_1643/episodes/episode_10.hdf5"
-        self.demo_joints = None
-        if os.path.exists(demo_ep_path):
+        self.action_mean = None
+        self.action_std = None
+        stats_path = os.path.join(latest_ckpt_dir, "dataset_stats.pkl")
+        if os.path.exists(stats_path):
             try:
-                with h5py.File(demo_ep_path, "r") as f:
-                    # /action: (T, 6), /observations/qpos 도 동일
-                    self.demo_joints = f["/action"][()]
-                self.node.get_logger().info(
-                    f"[INFO] Loaded demo joints from {demo_ep_path}, shape = {self.demo_joints.shape}"
-                )
+                with open(stats_path, "rb") as f:
+                    stats = pickle.load(f)
+                if "action_mean" in stats and "action_std" in stats:
+                    self.action_mean = np.array(stats["action_mean"], dtype=np.float32)
+                    self.action_std = np.array(stats["action_std"], dtype=np.float32)
+                    self.node.get_logger().info(
+                        "[INFO] Loaded action_mean/std from dataset_stats.pkl "
+                        f"(mean={self.action_mean}, std={self.action_std})"
+                    )
+                else:
+                    self.node.get_logger().warn(
+                        "[WARN] dataset_stats.pkl 에 'action_mean', 'action_std' 키가 없습니다. "
+                        "denormalization 은 비활성화됩니다."
+                    )
             except Exception as e:
-                self.node.get_logger().warn(f"[WARN] Failed to load demo joints: {e}")
+                self.node.get_logger().warn(
+                    f"[WARN] Failed to load dataset_stats.pkl: {e}"
+                )
         else:
-            self.node.get_logger().warn(f"[WARN] Demo episode file not found: {demo_ep_path}")
+            self.node.get_logger().warn(
+                f"[WARN] dataset_stats.pkl not found at {stats_path}. "
+                "denormalization 은 비활성화됩니다."
+            )
+
+        # ======================
+        # Demo episode (episode_10.hdf5) joints + max episode length 로드
+        # ======================
+        self.demo_joints = None
+        self.demo_len = None
+        self.max_demo_len = None
+        self._load_demo_episode(episode_idx=10)
+        self._compute_max_demo_len()
 
         # ======================
         # Inference & 비교 로그 파일 준비
         # ======================
-        log_dir = "/home/eunseop/nrs_lab2/analysis_logs"
-        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(LOG_DIR, exist_ok=True)
         ts = datetime.now().strftime("%m%d_%H%M%S")
-        self.log_path = os.path.join(log_dir, f"act_infer_{ts}.csv")
+        self.log_path = os.path.join(LOG_DIR, f"act_infer_{ts}.csv")
         self.log_file = open(self.log_path, "w", buffering=1)
 
         # CSV 헤더: step, ros_time, demo_j0..5, pred_j0..5
@@ -273,12 +314,140 @@ class ActPolicyInfer:
         self.log_file.write(header)
         self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
 
+        # horizon (한 에피소드 길이)
+        self.horizon_steps = None
+
     def _joint_cb(self, msg):
         if len(msg.position) >= 6:
             self.curr_joint = np.array(msg.position[:6])
 
+    # ----------------------------------------------------------
+    # HDF5 안에서 (T, 6) 모양의 dataset 자동 탐색
+    # ----------------------------------------------------------
+    def _find_episode_dataset(self, f: h5py.File):
+        """
+        f : h5py.File
+        return: (dataset_name, data_np) 또는 (None, None)
+        """
+        candidates = []
+
+        def visitor(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                if obj.ndim == 2 and obj.shape[1] == 6:
+                    candidates.append(name)
+
+        f.visititems(visitor)
+
+        if not candidates:
+            return None, None
+
+        # 이름에 따라 가벼운 우선순위 부여 (actions > joints > qpos ...)
+        def score(name: str):
+            s = 0
+            lname = name.lower()
+            if "action" in lname:
+                s -= 3
+            if "joint" in lname:
+                s -= 2
+            if "qpos" in lname:
+                s -= 1
+            return s
+
+        candidates.sort(key=score)
+        ds_name = candidates[0]
+        data = f[ds_name][()]  # (T, 6)
+        return ds_name, data
+
+    # ----------------------------------------------------------
+    # demo episode 로드 (episode_10)
+    # ----------------------------------------------------------
+    def _load_demo_episode(self, episode_idx: int = 10):
+        ep_path = os.path.join(DATASET_EP_DIR, f"episode_{episode_idx}.hdf5")
+        if not os.path.exists(ep_path):
+            self.node.get_logger().warn(
+                f"[WARN] Demo episode file not found: {ep_path}. "
+                "Demo 기반 비교는 비활성화됩니다."
+            )
+            return
+
+        try:
+            with h5py.File(ep_path, "r") as f:
+                ds_name, data = self._find_episode_dataset(f)
+            if ds_name is None or data is None:
+                self.node.get_logger().warn(
+                    f"[WARN] {ep_path} 안에서 (T,6) dataset 을 찾지 못했습니다. "
+                    "Demo 기반 비교는 비활성화됩니다."
+                )
+                return
+
+            self.demo_joints = np.asarray(data, dtype=np.float32)
+            self.demo_len = self.demo_joints.shape[0]
+            self.node.get_logger().info(
+                f"[INFO] Loaded demo joints from {ep_path}, "
+                f"dataset='{ds_name}', shape={self.demo_joints.shape}"
+            )
+        except Exception as e:
+            self.node.get_logger().warn(
+                f"[WARN] Failed to load demo episode from {ep_path}: {e}"
+            )
+
+    # ----------------------------------------------------------
+    # episodes 폴더 전체에서 가장 긴 (T,6) dataset 길이 계산
+    # ----------------------------------------------------------
+    def _compute_max_demo_len(self):
+        if not os.path.isdir(DATASET_EP_DIR):
+            self.node.get_logger().warn(
+                f"[WARN] DATASET_EP_DIR not found: {DATASET_EP_DIR}. "
+                "horizon 길이 제한은 비활성화됩니다."
+            )
+            return
+
+        max_len = 0
+        for fname in sorted(os.listdir(DATASET_EP_DIR)):
+            if not fname.endswith(".hdf5"):
+                continue
+            path = os.path.join(DATASET_EP_DIR, fname)
+            try:
+                with h5py.File(path, "r") as f:
+                    ds_name, data = self._find_episode_dataset(f)
+                if ds_name is None or data is None:
+                    continue
+                T = int(data.shape[0])
+                max_len = max(max_len, T)
+            except Exception as e:
+                self.node.get_logger().warn(
+                    f"[WARN] Skipping {path} while computing max_len: {e}"
+                )
+                continue
+
+        if max_len > 0:
+            self.max_demo_len = max_len
+            self.node.get_logger().info(
+                f"[INFO] Max episode length across HDF5 = {self.max_demo_len} steps"
+            )
+        else:
+            self.node.get_logger().warn(
+                "[WARN] No valid (T,6) dataset found in episodes dir. "
+                "horizon 길이 제한은 비활성화됩니다."
+            )
+
+    # ----------------------------------------------------------
+    # action denormalization (정규화 해제)
+    # ----------------------------------------------------------
+    def _denorm_actions(self, action_seq: np.ndarray) -> np.ndarray:
+        """
+        action_seq : (N,6) normalized
+        return     : (N,6) denormalized
+        """
+        if self.action_mean is None or self.action_std is None:
+            return action_seq
+        # broadcasting
+        return action_seq * self.action_std.reshape(1, -1) + self.action_mean.reshape(
+            1, -1
+        )
+
     # ==========================================================
-    # 메인 루프
+    # 메인 루프 (한 에피소드만 실행)
     # ==========================================================
     def run(self):
         rate_hz = 20.0
@@ -295,7 +464,7 @@ class ActPolicyInfer:
             while rclpy.ok():
                 imgs = self.img_recorder.get_images()
                 front_np = imgs["front"]
-                top_np   = imgs["top"]
+                top_np = imgs["top"]
 
                 if front_np is None or top_np is None:
                     continue
@@ -313,7 +482,7 @@ class ActPolicyInfer:
                     return img
 
                 front_np = norm_rgb(front_np)
-                top_np   = norm_rgb(top_np)
+                top_np = norm_rgb(top_np)
 
                 # 해상도 안 맞으면 top을 front 사이즈로 리사이즈
                 if front_np.shape[:2] != top_np.shape[:2]:
@@ -321,11 +490,15 @@ class ActPolicyInfer:
                     top_np = cv2.resize(top_np, (w, h))
 
                 # --------- (B, num_cams, 3, H, W) 텐서 만들기 --------- #
-                front_t = torch.from_numpy(front_np).permute(2, 0, 1).float() / 255.0
-                top_t   = torch.from_numpy(top_np).permute(2, 0, 1).float() / 255.0
+                front_t = (
+                    torch.from_numpy(front_np).permute(2, 0, 1).float() / 255.0
+                )  # (3,H,W)
+                top_t = (
+                    torch.from_numpy(top_np).permute(2, 0, 1).float() / 255.0
+                )  # (3,H,W)
 
-                cams = torch.stack([front_t, top_t], dim=0)       # (2,3,H,W)
-                imgs_tensor = cams.unsqueeze(0).to(self.device)   # (1,2,3,H,W)
+                cams = torch.stack([front_t, top_t], dim=0)  # (2,3,H,W)
+                imgs_tensor = cams.unsqueeze(0).to(self.device)  # (1,2,3,H,W)
                 qpos_tensor = torch.tensor(
                     self.curr_joint, dtype=torch.float32
                 ).unsqueeze(0).to(self.device)
@@ -339,56 +512,79 @@ class ActPolicyInfer:
                             action_tensor = out[0]
                         else:
                             action_tensor = out
-                        # (N*6,) 또는 (N,6) 형태라고 가정
+
                         action_np = action_tensor.cpu().numpy()
                         if action_np.ndim == 1:
-                            action_seq = action_np.reshape(-1, 6)  # (N,6)
+                            action_seq = action_np.reshape(-1, 6)
                         else:
-                            # (B, T, 6) 또는 (T, 6) 등 -> 전부 (N,6)으로 flatten
                             action_seq = action_np.reshape(-1, 6)
 
+                    # ---- denorm (정규화 해제) ----
+                    action_seq = self._denorm_actions(action_seq)
+
                     total_steps = action_seq.shape[0]
+                    # horizon 결정: pred 길이 vs max_demo_len
+                    if self.max_demo_len is not None:
+                        self.horizon_steps = min(total_steps, self.max_demo_len)
+                    else:
+                        self.horizon_steps = total_steps
+
                     self.node.get_logger().info(
-                        f"Total predicted steps: {total_steps} (action_seq shape = {action_seq.shape})"
+                        f"Total predicted steps: {total_steps} "
+                        f"(horizon_steps={self.horizon_steps}, "
+                        f"action_seq shape={action_seq.shape})"
                     )
                     if total_steps >= 3:
                         self.node.get_logger().info(
-                            f"[DEBUG] First 3 predicted steps (rad):\n{np.round(action_seq[:3], 3)}"
+                            "[DEBUG] First 3 predicted steps (rad):\n"
+                            f"{np.round(action_seq[:3], 3)}"
                         )
 
                     # --------- 데모와의 차이 한 번 계산해서 로그 --------- #
                     if self.demo_joints is not None:
-                        T = min(self.demo_joints.shape[0], total_steps)
+                        T = min(self.demo_joints.shape[0], self.horizon_steps)
                         demo_cut = self.demo_joints[:T]
                         pred_cut = action_seq[:T]
                         mae = np.mean(np.abs(pred_cut - demo_cut), axis=0)
                         self.node.get_logger().info(
-                            f"[COMPARE] Using first {T} steps, MAE per joint (rad): {mae}"
+                            f"[COMPARE] Using first {T} steps, "
+                            f"MAE per joint (rad): {mae}"
                         )
 
-                # --------- 6개씩 잘라서 20Hz로 publish --------- #
+                # --------- horizon 까지만 20Hz로 publish --------- #
                 if action_seq is not None:
-                    if step >= action_seq.shape[0]:
-                        # 다 썼으면 다시 처음부터
-                        step = 0
-                        continue
+                    if step >= self.horizon_steps:
+                        self.node.get_logger().info(
+                            f"[DONE] Published {step} steps. "
+                            "Shutting down episode."
+                        )
+                        break
 
                     action = action_seq[step]  # shape (6,)
                     msg = JointState()
                     msg.name = [
-                        "shoulder_pan_joint", "shoulder_lift_joint",
-                        "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"
+                        "shoulder_pan_joint",
+                        "shoulder_lift_joint",
+                        "elbow_joint",
+                        "wrist_1_joint",
+                        "wrist_2_joint",
+                        "wrist_3_joint",
                     ]
                     msg.position = action.tolist()
                     self.joint_pub.publish(msg)
-                    self.node.get_logger().info(f"[{step:03d}] Published: {np.round(action, 3)}")
+                    self.node.get_logger().info(
+                        f"[{step:03d}] Published: {np.round(action, 3)}"
+                    )
 
                     # ----- CSV 로깅: demo vs pred ----- #
                     ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
-                    if self.demo_joints is not None and step < self.demo_joints.shape[0]:
+                    if (
+                        self.demo_joints is not None
+                        and step < self.demo_joints.shape[0]
+                    ):
                         demo_vals = self.demo_joints[step]
                     else:
-                        demo_vals = np.full(6, np.nan)
+                        demo_vals = np.full(6, np.nan, dtype=np.float32)
 
                     line = "{:d},{:.6f},".format(step, ros_time_sec)
                     line += ",".join(f"{v:.6f}" for v in demo_vals) + ","
