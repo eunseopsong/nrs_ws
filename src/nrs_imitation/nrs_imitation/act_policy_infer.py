@@ -29,7 +29,7 @@ sys.path.extend(
         os.path.join(ROOT_DIR, "act", "model"),
         os.path.join(ROOT_DIR, "act", "detr"),
         os.path.join(ROOT_DIR, "act", "detr", "util"),
-        os.path.join(ROOT_DIR, "custom"),
+        os.path.join(ROOT_DIR, "custom"),  # custom_constants.py
     ]
 )
 
@@ -74,6 +74,66 @@ def find_latest_ckpt_dir(root_dir: str) -> str:
     candidates.sort()
     latest_name = candidates[-1]
     return os.path.join(root_dir, latest_name)
+
+
+# ==============================================================
+# Temporal Aggregator (closed-loop 재계획 + 시간 가중 평균)
+# ==============================================================
+class TemporalAggregator:
+    """
+    - 매 step마다 policy가 예측한 시퀀스 seq (길이 H)를 buffer에 쌓고
+    - '현재 global step t'에 해당하는 index를 각 시퀀스에서 찾아
+      gamma^idx 로 가중 평균해서 action을 뽑는다.
+    """
+
+    def __init__(self, horizon: int, max_buffer: int = 8, gamma: float = 0.9):
+        """
+        horizon    : chunk_size (예측 시퀀스 길이, num_queries와 동일)
+        max_buffer : buffer에 저장할 최대 시퀀스 수
+        gamma      : 같은 시퀀스 안에서 미래 index에 대한 discount 계수
+        """
+        self.horizon = int(horizon)
+        self.max_buffer = int(max_buffer)
+        self.gamma = float(gamma)
+        self.reset()
+
+    def reset(self):
+        # (t0, seq) 를 저장. t0 = 이 시퀀스를 예측했던 global step
+        self.buffer = []
+        self.t = 0  # global step counter
+
+    def step(self, seq: np.ndarray) -> np.ndarray:
+        """
+        seq : (H, A) 새로 예측된 시퀀스 (denorm된 joint 라디안)
+        return : 현재 global step t에서 사용할 aggregated action (A,)
+        """
+        assert seq.ndim == 2, "seq must be (H, A)"
+        H, A = seq.shape
+
+        # buffer 에 추가
+        self.buffer.append((self.t, seq.copy()))
+        if len(self.buffer) > self.max_buffer:
+            self.buffer.pop(0)
+
+        # 현재 step t 에 대한 가중 평균
+        weighted = np.zeros(A, dtype=np.float32)
+        w_sum = 0.0
+
+        for t0, s in self.buffer:
+            idx = self.t - t0  # 이 시퀀스 안에서의 상대 index
+            if 0 <= idx < H:
+                w = self.gamma ** idx
+                weighted += w * s[idx]
+                w_sum += w
+
+        if w_sum > 0.0:
+            action = weighted / w_sum
+        else:
+            # 이론상 올 일 없지만, 안전하게 seq[0] 사용
+            action = seq[0]
+
+        self.t += 1
+        return action
 
 
 # ==============================================================
@@ -179,7 +239,7 @@ class ImageRecorder:
 
 
 # ==============================================================
-# 🤖 ACT Policy Inference + Demo 비교 (temporal_agg 버전)
+# 🤖 ACT Policy Inference + Demo 비교 (closed-loop + temporal agg)
 # ==============================================================
 class ActPolicyInfer:
     def __init__(self):
@@ -230,7 +290,9 @@ class ActPolicyInfer:
 
         import argparse
 
-        # ⚠️ num_queries 는 학습 시 chunk_size와 맞춰야 함
+        # chunk_size = num_queries (학습 시 사용한 값: 100)
+        self.chunk_size = 100
+
         args = argparse.Namespace(
             lr=1e-5,
             lr_backbone=1e-5,
@@ -241,7 +303,7 @@ class ActPolicyInfer:
             clip_max_norm=0.1,
             hidden_dim=512,
             dim_feedforward=3200,
-            num_queries=100,  # 학습 시 사용한 chunk_size와 동일하게 맞출 것
+            num_queries=self.chunk_size,
             backbone="resnet18",
             position_embedding="sine",
             dilation=False,
@@ -314,6 +376,15 @@ class ActPolicyInfer:
         self._compute_max_demo_len()
 
         # ======================
+        # Temporal Aggregator (closed-loop)
+        # ======================
+        self.temporal_agg = TemporalAggregator(
+            horizon=self.chunk_size,
+            max_buffer=8,
+            gamma=0.9,
+        )
+
+        # ======================
         # Inference & 비교 로그 파일 준비
         # ======================
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -325,6 +396,10 @@ class ActPolicyInfer:
         header = "step,ros_time,d0,d1,d2,d3,d4,d5,p0,p1,p2,p3,p4,p5\n"
         self.log_file.write(header)
         self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
+
+        # demo vs pred 비교용 히스토리
+        self.pred_history = []  # list of (6,)
+        self.demo_history = []  # list of (6,) or nan
 
     def _joint_cb(self, msg):
         if len(msg.position) >= 6:
@@ -455,37 +530,33 @@ class ActPolicyInfer:
         )
 
     # ==========================================================
-    # 메인 루프: temporal_agg 구조
-    #   - episode는 1번만 실행
-    #   - 각 step마다 chunk_size 길이 예측 → 미래 타임스텝에 누적
-    #   - 현재 step의 누적값(가중 평균)을 action으로 사용
+    # 메인 루프: closed-loop + temporal agg
     # ==========================================================
     def run(self):
         rate_hz = 20.0
         period = 1.0 / rate_hz
-        T_ep = self.episode_len
-        act_dim = 6
-
-        # temporal_agg 누적 버퍼
-        sum_actions = np.zeros((T_ep, act_dim), dtype=np.float32)
-        sum_weights = np.zeros(T_ep, dtype=np.float32)
-        executed_actions = np.zeros((T_ep, act_dim), dtype=np.float32)
 
         try:
             # 1) 최초 양 카메라 준비될 때까지 대기
             _ = self.img_recorder.wait_for_images(timeout=10.0)
             self.node.get_logger().info("Camera images ready!")
 
+            # temporal agg 상태 초기화
+            self.temporal_agg.reset()
             step = 0
             last_time = self.node.get_clock().now()
 
-            while rclpy.ok() and step < T_ep:
+            while rclpy.ok() and step < self.episode_len:
+                # JointState 콜백 처리를 위해 spin_once
+                rclpy.spin_once(self.node, timeout_sec=0.0)
+
+                # 현재 이미지 읽기
                 imgs = self.img_recorder.get_images()
                 front_np = imgs["front"]
                 top_np = imgs["top"]
 
                 if front_np is None or top_np is None:
-                    # 이미지 아직 준비 안 됐으면 다음 루프
+                    # 아직 카메라 준비 안되면 skip
                     time.sleep(0.01)
                     continue
 
@@ -523,47 +594,35 @@ class ActPolicyInfer:
                     self.curr_joint, dtype=torch.float32
                 ).unsqueeze(0).to(self.device)
 
-                # --------- (A) 현재 step에서 chunk_size 만큼 예측 --------- #
+                # --------- (1) closed-loop policy 호출 (현재 관측 기준) --------- #
                 with torch.no_grad():
                     out = self.policy(qpos_tensor, imgs_tensor)
+                    # ACT 구현에 따라 tuple or tensor
                     if isinstance(out, tuple):
                         action_tensor = out[0]
                     else:
                         action_tensor = out
 
                     action_np = action_tensor.cpu().numpy()
-                    # (chunk_size, 6) 형태로 reshape
+
+                    # (chunk_size, 6) 로 reshape
                     if action_np.ndim == 1:
-                        chunk_actions = action_np.reshape(-1, act_dim)
+                        action_seq = action_np.reshape(-1, 6)
                     else:
-                        chunk_actions = action_np.reshape(-1, act_dim)
+                        action_seq = action_np.reshape(-1, 6)
 
-                # 정규화 해제
-                chunk_actions = self._denorm_actions(chunk_actions)
-                chunk_len = chunk_actions.shape[0]
+                # ---- denorm (정규화 해제) ----
+                action_seq = self._denorm_actions(action_seq)
 
-                # --------- (B) temporal_agg: 미래 타임스텝에 누적 --------- #
-                # 현재 버전: offset에 대한 uniform weight (필요시 exponential로 변경 가능)
-                weights = np.ones(chunk_len, dtype=np.float32)
+                if action_seq.shape[0] != self.chunk_size:
+                    self.node.get_logger().warn(
+                        f"[WARN] action_seq length {action_seq.shape[0]} != chunk_size {self.chunk_size}"
+                    )
 
-                for j in range(chunk_len):
-                    t_idx = step + j
-                    if t_idx >= T_ep:
-                        break
-                    w = weights[j]
-                    sum_actions[t_idx] += w * chunk_actions[j]
-                    sum_weights[t_idx] += w
+                # --------- (2) temporal agg 로 현재 step action 계산 --------- #
+                action = self.temporal_agg.step(action_seq)  # (6,)
 
-                # --------- (C) 현재 step에 대해 누적값으로 action 결정 --------- #
-                if sum_weights[step] > 1e-8:
-                    action = sum_actions[step] / sum_weights[step]
-                else:
-                    # 혹시 sum_weights가 0이면, 방금 예측한 chunk의 첫 번째 값 사용
-                    action = chunk_actions[0]
-
-                executed_actions[step] = action
-
-                # ROS JointState publish
+                # --------- (3) publish --------- #
                 msg = JointState()
                 msg.name = [
                     "shoulder_pan_joint",
@@ -575,8 +634,9 @@ class ActPolicyInfer:
                 ]
                 msg.position = action.tolist()
                 self.joint_pub.publish(msg)
+
                 self.node.get_logger().info(
-                    f"[{step:03d}] Published(temporal_agg): {np.round(action, 3)}"
+                    f"[{step:03d}] Published (temporal_agg): {np.round(action, 3)}"
                 )
 
                 # ----- CSV 로깅: demo vs pred ----- #
@@ -591,6 +651,10 @@ class ActPolicyInfer:
                 line += ",".join(f"{v:.6f}" for v in action) + "\n"
                 self.log_file.write(line)
 
+                # 히스토리 저장 (나중에 MAE 계산용)
+                self.pred_history.append(action.copy())
+                self.demo_history.append(demo_vals.copy())
+
                 step += 1
 
                 # --------- 20 Hz 맞추기 --------- #
@@ -604,16 +668,20 @@ class ActPolicyInfer:
                 f"[DONE] Published {step} steps with temporal_agg. Shutting down episode."
             )
 
-            # 실행 끝난 후 demo 와의 MAE 한 번 찍어보기 (옵션)
-            if self.demo_joints is not None and step > 0:
-                T_cmp = min(step, self.demo_joints.shape[0])
-                mae = np.mean(
-                    np.abs(executed_actions[:T_cmp] - self.demo_joints[:T_cmp]), axis=0
-                )
-                self.node.get_logger().info(
-                    f"[COMPARE] After execution, using first {T_cmp} steps, "
-                    f"MAE per joint (rad): {mae}"
-                )
+            # --------------------------------------------------
+            # 실행 후: demo vs pred MAE 출력 (가능하면)
+            # --------------------------------------------------
+            if self.demo_joints is not None and len(self.pred_history) > 0:
+                pred_arr = np.stack(self.pred_history, axis=0)  # (T_run, 6)
+                T = min(pred_arr.shape[0], self.demo_joints.shape[0])
+                if T > 0:
+                    demo_cut = self.demo_joints[:T]
+                    pred_cut = pred_arr[:T]
+                    mae = np.mean(np.abs(pred_cut - demo_cut), axis=0)
+                    self.node.get_logger().info(
+                        f"[COMPARE] After execution, using first {T} steps, "
+                        f"MAE per joint (rad): {mae}"
+                    )
 
         except KeyboardInterrupt:
             self.node.get_logger().warn("Shutting down ACT Policy Infer...")
