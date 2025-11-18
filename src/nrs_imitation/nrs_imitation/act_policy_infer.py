@@ -29,10 +29,12 @@ sys.path.extend(
         os.path.join(ROOT_DIR, "act", "model"),
         os.path.join(ROOT_DIR, "act", "detr"),
         os.path.join(ROOT_DIR, "act", "detr", "util"),
+        os.path.join(ROOT_DIR, "custom"),
     ]
 )
 
 from act.detr.models.detr_vae import build as build_act_model  # noqa: E402
+from custom_constants import TASK_CONFIGS  # noqa: E402
 
 # ======================
 # ROS2 관련 임포트
@@ -177,7 +179,7 @@ class ImageRecorder:
 
 
 # ==============================================================
-# 🤖 ACT Policy Inference + Demo 비교
+# 🤖 ACT Policy Inference + Demo 비교 (temporal_agg 버전)
 # ==============================================================
 class ActPolicyInfer:
     def __init__(self):
@@ -207,6 +209,15 @@ class ActPolicyInfer:
         )
 
         # ======================
+        # TASK_CONFIGS 에서 episode_len 읽기
+        # ======================
+        task_cfg = TASK_CONFIGS.get("ur10e_swing", {})
+        self.episode_len = int(task_cfg.get("episode_len", 600))
+        self.node.get_logger().info(
+            f"[INFO] Using episode_len={self.episode_len} from TASK_CONFIGS['ur10e_swing']"
+        )
+
+        # ======================
         # 모델 초기화 (가장 최신 ckpt 폴더 자동 선택)
         # ======================
         latest_ckpt_dir = find_latest_ckpt_dir(CKPT_ROOT)
@@ -219,6 +230,7 @@ class ActPolicyInfer:
 
         import argparse
 
+        # ⚠️ num_queries 는 학습 시 chunk_size와 맞춰야 함
         args = argparse.Namespace(
             lr=1e-5,
             lr_backbone=1e-5,
@@ -229,7 +241,7 @@ class ActPolicyInfer:
             clip_max_norm=0.1,
             hidden_dim=512,
             dim_feedforward=3200,
-            num_queries=100,
+            num_queries=100,  # 학습 시 사용한 chunk_size와 동일하게 맞출 것
             backbone="resnet18",
             position_embedding="sine",
             dilation=False,
@@ -314,9 +326,6 @@ class ActPolicyInfer:
         self.log_file.write(header)
         self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
 
-        # horizon (한 에피소드 길이)
-        self.horizon_steps = None
-
     def _joint_cb(self, msg):
         if len(msg.position) >= 6:
             self.curr_joint = np.array(msg.position[:6])
@@ -398,7 +407,7 @@ class ActPolicyInfer:
         if not os.path.isdir(DATASET_EP_DIR):
             self.node.get_logger().warn(
                 f"[WARN] DATASET_EP_DIR not found: {DATASET_EP_DIR}. "
-                "horizon 길이 제한은 비활성화됩니다."
+                "horizon 길이 통계는 비활성화됩니다."
             )
             return
 
@@ -427,8 +436,7 @@ class ActPolicyInfer:
             )
         else:
             self.node.get_logger().warn(
-                "[WARN] No valid (T,6) dataset found in episodes dir. "
-                "horizon 길이 제한은 비활성화됩니다."
+                "[WARN] No valid (T,6) dataset found in episodes dir."
             )
 
     # ----------------------------------------------------------
@@ -441,32 +449,44 @@ class ActPolicyInfer:
         """
         if self.action_mean is None or self.action_std is None:
             return action_seq
-        # broadcasting
-        return action_seq * self.action_std.reshape(1, -1) + self.action_mean.reshape(
-            1, -1
+        return (
+            action_seq * self.action_std.reshape(1, -1)
+            + self.action_mean.reshape(1, -1)
         )
 
     # ==========================================================
-    # 메인 루프 (한 에피소드만 실행)
+    # 메인 루프: temporal_agg 구조
+    #   - episode는 1번만 실행
+    #   - 각 step마다 chunk_size 길이 예측 → 미래 타임스텝에 누적
+    #   - 현재 step의 누적값(가중 평균)을 action으로 사용
     # ==========================================================
     def run(self):
         rate_hz = 20.0
         period = 1.0 / rate_hz
+        T_ep = self.episode_len
+        act_dim = 6
+
+        # temporal_agg 누적 버퍼
+        sum_actions = np.zeros((T_ep, act_dim), dtype=np.float32)
+        sum_weights = np.zeros(T_ep, dtype=np.float32)
+        executed_actions = np.zeros((T_ep, act_dim), dtype=np.float32)
+
         try:
-            # 최초 양 카메라 준비될 때까지 대기
+            # 1) 최초 양 카메라 준비될 때까지 대기
             _ = self.img_recorder.wait_for_images(timeout=10.0)
             self.node.get_logger().info("Camera images ready!")
 
             step = 0
-            action_seq = None
             last_time = self.node.get_clock().now()
 
-            while rclpy.ok():
+            while rclpy.ok() and step < T_ep:
                 imgs = self.img_recorder.get_images()
                 front_np = imgs["front"]
                 top_np = imgs["top"]
 
                 if front_np is None or top_np is None:
+                    # 이미지 아직 준비 안 됐으면 다음 루프
+                    time.sleep(0.01)
                     continue
 
                 # --------- 안전하게 3채널 맞추기 --------- #
@@ -503,95 +523,75 @@ class ActPolicyInfer:
                     self.curr_joint, dtype=torch.float32
                 ).unsqueeze(0).to(self.device)
 
-                # --------- 한 번만 inference 해서 시퀀스 저장 --------- #
-                if action_seq is None:
-                    with torch.no_grad():
-                        out = self.policy(qpos_tensor, imgs_tensor)
-                        # ACT 구현에 따라 tuple or tensor
-                        if isinstance(out, tuple):
-                            action_tensor = out[0]
-                        else:
-                            action_tensor = out
-
-                        action_np = action_tensor.cpu().numpy()
-                        if action_np.ndim == 1:
-                            action_seq = action_np.reshape(-1, 6)
-                        else:
-                            action_seq = action_np.reshape(-1, 6)
-
-                    # ---- denorm (정규화 해제) ----
-                    action_seq = self._denorm_actions(action_seq)
-
-                    total_steps = action_seq.shape[0]
-                    # horizon 결정: pred 길이 vs max_demo_len
-                    if self.max_demo_len is not None:
-                        self.horizon_steps = min(total_steps, self.max_demo_len)
+                # --------- (A) 현재 step에서 chunk_size 만큼 예측 --------- #
+                with torch.no_grad():
+                    out = self.policy(qpos_tensor, imgs_tensor)
+                    if isinstance(out, tuple):
+                        action_tensor = out[0]
                     else:
-                        self.horizon_steps = total_steps
+                        action_tensor = out
 
-                    self.node.get_logger().info(
-                        f"Total predicted steps: {total_steps} "
-                        f"(horizon_steps={self.horizon_steps}, "
-                        f"action_seq shape={action_seq.shape})"
-                    )
-                    if total_steps >= 3:
-                        self.node.get_logger().info(
-                            "[DEBUG] First 3 predicted steps (rad):\n"
-                            f"{np.round(action_seq[:3], 3)}"
-                        )
+                    action_np = action_tensor.cpu().numpy()
+                    # (chunk_size, 6) 형태로 reshape
+                    if action_np.ndim == 1:
+                        chunk_actions = action_np.reshape(-1, act_dim)
+                    else:
+                        chunk_actions = action_np.reshape(-1, act_dim)
 
-                    # --------- 데모와의 차이 한 번 계산해서 로그 --------- #
-                    if self.demo_joints is not None:
-                        T = min(self.demo_joints.shape[0], self.horizon_steps)
-                        demo_cut = self.demo_joints[:T]
-                        pred_cut = action_seq[:T]
-                        mae = np.mean(np.abs(pred_cut - demo_cut), axis=0)
-                        self.node.get_logger().info(
-                            f"[COMPARE] Using first {T} steps, "
-                            f"MAE per joint (rad): {mae}"
-                        )
+                # 정규화 해제
+                chunk_actions = self._denorm_actions(chunk_actions)
+                chunk_len = chunk_actions.shape[0]
 
-                # --------- horizon 까지만 20Hz로 publish --------- #
-                if action_seq is not None:
-                    if step >= self.horizon_steps:
-                        self.node.get_logger().info(
-                            f"[DONE] Published {step} steps. "
-                            "Shutting down episode."
-                        )
+                # --------- (B) temporal_agg: 미래 타임스텝에 누적 --------- #
+                # 현재 버전: offset에 대한 uniform weight (필요시 exponential로 변경 가능)
+                weights = np.ones(chunk_len, dtype=np.float32)
+
+                for j in range(chunk_len):
+                    t_idx = step + j
+                    if t_idx >= T_ep:
                         break
+                    w = weights[j]
+                    sum_actions[t_idx] += w * chunk_actions[j]
+                    sum_weights[t_idx] += w
 
-                    action = action_seq[step]  # shape (6,)
-                    msg = JointState()
-                    msg.name = [
-                        "shoulder_pan_joint",
-                        "shoulder_lift_joint",
-                        "elbow_joint",
-                        "wrist_1_joint",
-                        "wrist_2_joint",
-                        "wrist_3_joint",
-                    ]
-                    msg.position = action.tolist()
-                    self.joint_pub.publish(msg)
-                    self.node.get_logger().info(
-                        f"[{step:03d}] Published: {np.round(action, 3)}"
-                    )
+                # --------- (C) 현재 step에 대해 누적값으로 action 결정 --------- #
+                if sum_weights[step] > 1e-8:
+                    action = sum_actions[step] / sum_weights[step]
+                else:
+                    # 혹시 sum_weights가 0이면, 방금 예측한 chunk의 첫 번째 값 사용
+                    action = chunk_actions[0]
 
-                    # ----- CSV 로깅: demo vs pred ----- #
-                    ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
-                    if (
-                        self.demo_joints is not None
-                        and step < self.demo_joints.shape[0]
-                    ):
-                        demo_vals = self.demo_joints[step]
-                    else:
-                        demo_vals = np.full(6, np.nan, dtype=np.float32)
+                executed_actions[step] = action
 
-                    line = "{:d},{:.6f},".format(step, ros_time_sec)
-                    line += ",".join(f"{v:.6f}" for v in demo_vals) + ","
-                    line += ",".join(f"{v:.6f}" for v in action) + "\n"
-                    self.log_file.write(line)
+                # ROS JointState publish
+                msg = JointState()
+                msg.name = [
+                    "shoulder_pan_joint",
+                    "shoulder_lift_joint",
+                    "elbow_joint",
+                    "wrist_1_joint",
+                    "wrist_2_joint",
+                    "wrist_3_joint",
+                ]
+                msg.position = action.tolist()
+                self.joint_pub.publish(msg)
+                self.node.get_logger().info(
+                    f"[{step:03d}] Published(temporal_agg): {np.round(action, 3)}"
+                )
 
-                    step += 1
+                # ----- CSV 로깅: demo vs pred ----- #
+                ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
+                if self.demo_joints is not None and step < self.demo_joints.shape[0]:
+                    demo_vals = self.demo_joints[step]
+                else:
+                    demo_vals = np.full(6, np.nan, dtype=np.float32)
+
+                line = "{:d},{:.6f},".format(step, ros_time_sec)
+                line += ",".join(f"{v:.6f}" for v in demo_vals) + ","
+                line += ",".join(f"{v:.6f}" for v in action) + "\n"
+                self.log_file.write(line)
+
+                step += 1
 
                 # --------- 20 Hz 맞추기 --------- #
                 now = self.node.get_clock().now()
@@ -599,6 +599,21 @@ class ActPolicyInfer:
                 if elapsed < period:
                     time.sleep(period - elapsed)
                 last_time = now
+
+            self.node.get_logger().info(
+                f"[DONE] Published {step} steps with temporal_agg. Shutting down episode."
+            )
+
+            # 실행 끝난 후 demo 와의 MAE 한 번 찍어보기 (옵션)
+            if self.demo_joints is not None and step > 0:
+                T_cmp = min(step, self.demo_joints.shape[0])
+                mae = np.mean(
+                    np.abs(executed_actions[:T_cmp] - self.demo_joints[:T_cmp]), axis=0
+                )
+                self.node.get_logger().info(
+                    f"[COMPARE] After execution, using first {T_cmp} steps, "
+                    f"MAE per joint (rad): {mae}"
+                )
 
         except KeyboardInterrupt:
             self.node.get_logger().warn("Shutting down ACT Policy Infer...")
