@@ -35,8 +35,8 @@ def quat_from_two_vectors(a, b):
     if np.any(small):
         axis = np.zeros_like(a)
         idx = np.argmax(np.abs(a), axis=-1).reshape(-1)
-        for i in range(axis.reshape(-1,3).shape[0]):
-            axis.reshape(-1,3)[i, (idx[i] + 1) % 3] = 1.0
+        for i in range(axis.reshape(-1, 3).shape[0]):
+            axis.reshape(-1, 3)[i, (idx[i] + 1) % 3] = 1.0
         axis = _normalize(np.cross(a, axis))
         q = np.concatenate([np.zeros_like(d), axis], axis=-1)  # w=0, 축=axis
 
@@ -145,20 +145,40 @@ class MeshSurface(SurfaceBase):
             remain = np.where(~hit_ok)[0]
             if remain.size > 0:
                 n_fallback = remain.size
-                start = np.column_stack([xy[remain], np.full(remain.size, (z_min + z_max) * 0.5)])
+                start = np.column_stack([
+                    xy[remain],
+                    np.full(remain.size, (z_min + z_max) * 0.5)
+                ])
 
                 closest = None
                 tri_id  = None
+
                 try:
-                    # 신버전 우선: 모듈 함수
-                    if tmprox is not None and hasattr(tmprox, 'closest_point'):
+                    # (1) mesh.nearest.on_surface 사용 가능하면 가장 우선
+                    if hasattr(self.mesh, "nearest") and hasattr(self.mesh.nearest, "on_surface"):
+                        closest, _, tri_id = self.mesh.nearest.on_surface(start)
+
+                    # (2) 모듈 함수 closest_point (일부 버전)
+                    elif tmprox is not None and hasattr(tmprox, "closest_point"):
                         closest, _, tri_id = tmprox.closest_point(self.mesh, start)
+
                     else:
-                        raise AttributeError("tmprox.closest_point not available")
+                        # (3) ProximityQuery 기반 – 최신 버전은 on_surface(), 아주 옛날은 nearest()
+                        pq = trimesh.proximity.ProximityQuery(self.mesh)
+                        if hasattr(pq, "on_surface"):
+                            closest, _, tri_id = pq.on_surface(start)
+                        else:
+                            # 정말 구버전일 때만 nearest 사용
+                            closest, _, tri_id = pq.nearest(start)
+
                 except Exception:
-                    # 구버전: ProximityQuery.nearest
+                    # 위 시도들 실패 시 마지막 폴백: ProximityQuery.on_surface()
                     pq = trimesh.proximity.ProximityQuery(self.mesh)
-                    closest, _, tri_id = pq.nearest(start)
+                    if hasattr(pq, "on_surface"):
+                        closest, _, tri_id = pq.on_surface(start)
+                    else:
+                        # 그래도 안 되면 그대로 예외 던지기
+                        raise
 
                 hit_pos[remain] = closest
                 fn = self.mesh.face_normals[np.asarray(tri_id, dtype=int)]
