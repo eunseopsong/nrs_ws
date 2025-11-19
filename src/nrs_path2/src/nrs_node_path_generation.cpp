@@ -19,14 +19,16 @@ int main(int argc, char **argv)
     // === Path Generation ===
     // callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl";
     // callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl";
-    callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/compound_surface/_comp_flat_0_75_v0_42.stl";
+    // callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/compound_surface/_comp_flat_0_75_v0_42.stl";
+    callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/complex_surface_1.stl";
     // callback_handler.mesh_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/mesh/concave_surface_2.stl";
     callback_handler.geodesic_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/geodesic_waypoints.txt";
     callback_handler.geodesic_waypoints_pub =
         node->create_publisher<nrs_path2::msg::Waypoints>("geodesic_path", 10);
 
     // === Path Interpolation ===
-    callback_handler.interpolated_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints.txt";
+    // callback_handler.interpolated_waypoints_file_path = "/home/eunseop/nrs_ws/src/nrs_path2/data/final_waypoints.txt";
+    callback_handler.interpolated_waypoints_file_path = "/home/eunseop/nrs_ws/src/rtde_handarm2/data/hand_g_recording.txt";
     callback_handler.desired_interval = 0.00004;
     callback_handler.fx = 0.0;
     callback_handler.fy = 0.0;

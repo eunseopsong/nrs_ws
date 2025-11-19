@@ -12,7 +12,9 @@ x = xyz[:, 0]
 y = xyz[:, 1]
 z = xyz[:, 2]
 
-# 3. 3D 산점도 시각화
+# ========================
+# (A) 3D 산점도 시각화
+# ========================
 fig = plt.figure()
 ax = fig.add_subplot(111, projection="3d")
 
@@ -28,3 +30,23 @@ ax.view_init(elev=30, azim=45)  # 보기 각도(원하면 조절)
 plt.tight_layout()
 plt.show()
 
+# ================================
+# (B) x, y, z를 행 순서대로 시각화
+# ================================
+idx = np.arange(len(x))  # 행 인덱스 (0, 1, 2, ...)
+
+fig2, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+
+axes[0].plot(idx, x)
+axes[0].set_ylabel("X")
+axes[0].set_title("X / Y / Z vs Index")
+
+axes[1].plot(idx, y)
+axes[1].set_ylabel("Y")
+
+axes[2].plot(idx, z)
+axes[2].set_ylabel("Z")
+axes[2].set_xlabel("Index (row number)")
+
+plt.tight_layout()
+plt.show()
