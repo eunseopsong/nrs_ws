@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>urp_cvt_sampling</name>
+  <version>0.0.1</version>
+  <description>CVT (k-means) waypoint sampler node for flat surfaces</description>
+  <maintainer email="you@example.com">you</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>urp_cvt_interfaces</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+
