@@ -20,6 +20,7 @@ setup(
         'console_scripts': [
             'cvt_sampler_node = urp_cvt_sampling.cvt_sampler_node:main',
             'path_planner_node = urp_cvt_sampling.path_planner_node:main',
+            'waypoints_publisher = urp_cvt_sampling.waypoints_publisher:main',
         ],
     },
 )

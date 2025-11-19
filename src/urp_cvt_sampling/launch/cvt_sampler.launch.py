@@ -10,11 +10,11 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'surface_type': 'mesh',           # 또는 'flat'
-                'mesh_path': '/home/jiseunghyun/meshes/surface.stl',
+                'mesh_path': '/home/eunseop/nrs_ws/src/nrs_path2/mesh/complex_surface.stl',
                 'standoff': 0.005,
                 'tool_axis': '+Z',
                 'publish_rate_hz': 5.0,
-                'save_txt_path': '/home/jiseunghyun/waypoints.txt',
+                'save_txt_path': '/home/eunseop/nrs_ws/src/nrs_path2/data/urp_waypoints.txt',
             }]
         ),
         Node(
