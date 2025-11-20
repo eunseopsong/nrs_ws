@@ -117,7 +117,7 @@ static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger&
 }
 
 // EE +Z → TCP 오프셋(모든 FK/IK에서 동일 사용)
-static constexpr double TOOL_Z = 0.320;  // [m]
+static constexpr double TOOL_Z = 0.325;  // [m]
 // static constexpr double TOOL_Z = 0.343;  // [m]
 
 
@@ -182,7 +182,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // Timer (1ms). 메인루프에서 실제 dt는 steady_clock으로 산출.
   timer_ = node_->create_wall_timer(
-    std::chrono::milliseconds(1),
+    std::chrono::milliseconds(2),
     std::bind(&JointControl::CalculateAndPublishJoint, this));
 
   // 파일 핸들 정리
@@ -840,7 +840,7 @@ void JointControl::runCartesianForceChain(
     const double Tank_energy = 5.0;
 
     // 바닥부 근처면 접촉으로 보고 K=0
-    bool contact_on = (Xd(2) <= 1.0);
+    bool contact_on = (Xd(2) <= 10.0);
 
     for (int ax = 0; ax < 3; ++ax) {
         if (std::fabs(Fd_cmd(ax)) > 0.01 || FAAC_flag[ax])
@@ -1229,7 +1229,8 @@ void JointControl::CalculateAndPublishJoint() {
       static bool init_done = false;
       static bool follow_done = false;
 
-      if (pre_control_mode != 3) {
+      // ★ 수정: 모드가 변경될 때만 init/follow 상태 리셋
+      if (pre_control_mode != control_mode) {
           init_done   = false;
           follow_done = false;
       }
@@ -1252,6 +1253,7 @@ void JointControl::CalculateAndPublishJoint() {
           }
       }
 
+      // PathFollow 끝난 이후에는 ReturnHomePose를 매 주기 호출
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
