@@ -406,12 +406,17 @@ public:
   : Node("path_projection_node")
   {
     // ---- 파라미터(필요 시 declare_parameter로 외부에서 바꿀 수 있도록) ----
-    desired_interval_   = this->declare_parameter<double>("desired_interval", 0.00005);  // 0.00005 -> len(hand_g_recording) = 64000
+    desired_interval_   = this->declare_parameter<double>("desired_interval", 0.00025);  // 0.00005 -> len(hand_g_recording) = 64000
     sampling_time_      = this->declare_parameter<double>("sampling_time", 0.002);
     starting_time_      = this->declare_parameter<double>("starting_time", 3.0);
     last_resting_time_  = this->declare_parameter<double>("last_resting_time", 3.0);
     acceleration_time_  = this->declare_parameter<double>("acceleration_time", 1.0);
     density_multiplier_ = this->declare_parameter<double>("density_multiplier", 1.0); // 1.0 이상 권장
+
+    // XYZ 진폭 한계 (half-range) 설정; 0 이면 제한 없음
+    x_amplitude_limit_  = this->declare_parameter<double>("x_amplitude_limit", 0.0);
+    y_amplitude_limit_  = this->declare_parameter<double>("y_amplitude_limit", 0.0);
+    z_amplitude_limit_  = this->declare_parameter<double>("z_amplitude_limit", 0.0);
 
     // mesh 파일 경로
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/workpiece.stl");
@@ -435,6 +440,9 @@ public:
     RCLCPP_INFO(this->get_logger(),
                 "Params | desired_interval=%.9f, density_multiplier=%.3f, sampling_time=%.6f, starting=%.3f, last_rest=%.3f, accel=%.3f",
                 desired_interval_, density_multiplier_, sampling_time_, starting_time_, last_resting_time_, acceleration_time_);
+    RCLCPP_INFO(this->get_logger(),
+                "Amplitude limits | x_lim=%.6f, y_lim=%.6f, z_lim=%.6f",
+                x_amplitude_limit_, y_amplitude_limit_, z_amplitude_limit_);
 
     // ---- 퍼블리셔 ----
     using QoS = rclcpp::QoS;
@@ -467,6 +475,10 @@ private:
   double density_multiplier_;
   double time_counter_ = 0.0;
   double projection_z_ = 0.5;
+
+  double x_amplitude_limit_;
+  double y_amplitude_limit_;
+  double z_amplitude_limit_;
 
   std::string mesh_file_path_;
   std::string plane_path_file_path_;
@@ -710,7 +722,58 @@ private:
     projection_z_ = initializeMeshAndGetMaxZ(mesh_file_path_, mesh_, tree_);
 
     std::vector<Point_3> path_2D = readpathfile(plane_path_file_path_, projection_z_, 0.001);
-    RCLCPP_INFO(this->get_logger(), "Number of original points: %zu", path_2D.size());
+    RCLCPP_INFO(this->get_logger(), "Number of original points (plane path): %zu", path_2D.size());
+
+    // =======================
+    // XYZ 진폭 조절 (half-range 기준 scaling)
+    // =======================
+    if (!path_2D.empty()) {
+      double x_min = path_2D[0].x(), x_max = path_2D[0].x();
+      double y_min = path_2D[0].y(), y_max = path_2D[0].y();
+      double z_min = path_2D[0].z(), z_max = path_2D[0].z();
+
+      for (const auto& p : path_2D) {
+        if (p.x() < x_min) x_min = p.x();
+        if (p.x() > x_max) x_max = p.x();
+        if (p.y() < y_min) y_min = p.y();
+        if (p.y() > y_max) y_max = p.y();
+        if (p.z() < z_min) z_min = p.z();
+        if (p.z() > z_max) z_max = p.z();
+      }
+
+      double x_center = 0.5 * (x_min + x_max);
+      double y_center = 0.5 * (y_min + y_max);
+      double z_center = 0.5 * (z_min + z_max);
+
+      double x_half_amp = 0.5 * (x_max - x_min);
+      double y_half_amp = 0.5 * (y_max - y_min);
+      double z_half_amp = 0.5 * (z_max - z_min);
+
+      double sx = 1.0, sy = 1.0, sz = 1.0;
+
+      if (x_amplitude_limit_ > 0.0 && x_half_amp > x_amplitude_limit_) {
+        sx = x_amplitude_limit_ / x_half_amp;
+      }
+      if (y_amplitude_limit_ > 0.0 && y_half_amp > y_amplitude_limit_) {
+        sy = y_amplitude_limit_ / y_half_amp;
+      }
+      if (z_amplitude_limit_ > 0.0 && z_half_amp > z_amplitude_limit_) {
+        sz = z_amplitude_limit_ / z_half_amp;
+      }
+
+      for (auto& p : path_2D) {
+        double x = x_center + (p.x() - x_center) * sx;
+        double y = y_center + (p.y() - y_center) * sy;
+        double z = z_center + (p.z() - z_center) * sz;
+        p = Point_3(x, y, z);
+      }
+
+      RCLCPP_INFO(this->get_logger(),
+                  "[Amplitude scaling] x_half=%.6f->lim=%.6f (s=%.4f), y_half=%.6f->lim=%.6f (s=%.4f), z_half=%.6f->lim=%.6f (s=%.4f)",
+                  x_half_amp, x_amplitude_limit_, sx,
+                  y_half_amp, y_amplitude_limit_, sy,
+                  z_half_amp, z_amplitude_limit_, sz);
+    }
 
     std::vector<Point_3> projected_points = projectPathOntoMesh(path_2D, tree_);
     RCLCPP_INFO(this->get_logger(), "Path projection complete. Number of projected points: %zu", projected_points.size());
@@ -744,25 +807,25 @@ private:
                                   visual_retreat_wps.waypoints.begin(), visual_retreat_wps.waypoints.end());
 
     double accel_for_visual = 0.05;
-visual_final = ACCProfiling(visual_final, sampling_time_, starting_time_, last_resting_time_, accel_for_visual, time_counter_);
+    visual_final = ACCProfiling(visual_final, sampling_time_, starting_time_, last_resting_time_, accel_for_visual, time_counter_);
 
-// 시각화 traj에 힘/토크 채워넣기 (fz=10N 고정) -> interpolatexyzrpy()가 fx/fy/fz까지 보간할 수 있도록
-for (auto& wp : visual_final.waypoints) {
-    wp.fx = 0.0;
-    wp.fy = 0.0;
-    wp.fz = 10.0;
-}
+    // 시각화 traj에 힘/토크 채워넣기 (fz=10N 고정) -> interpolatexyzrpy()가 fx/fy/fz까지 보간할 수 있도록
+    for (auto& wp : visual_final.waypoints) {
+      wp.fx = 0.0;
+      wp.fy = 0.0;
+      wp.fz = 10.0;
+    }
 
-// ---- trajectory density scaling for hand_g_recording.txt ----
-const double interval_effective = desired_interval_ / std::max(1.0, density_multiplier_);
-RCLCPP_INFO(this->get_logger(),
-            "Interpolating VISUAL with interval_effective=%.9f (desired=%.9f / density=%.3f)",
-            interval_effective, desired_interval_, density_multiplier_);
+    // ---- trajectory density scaling for hand_g_recording.txt ----
+    const double interval_effective = desired_interval_ / std::max(1.0, density_multiplier_);
+    RCLCPP_INFO(this->get_logger(),
+                "Interpolating VISUAL with interval_effective=%.9f (desired=%.9f / density=%.3f)",
+                interval_effective, desired_interval_, density_multiplier_);
 
-Waypoints visual_final_dense = interpolatexyzrpy(visual_final, interval_effective);
+    Waypoints visual_final_dense = interpolatexyzrpy(visual_final, interval_effective);
 
-clearFile(visual_file_path_);
-saveWaypointsToFile(visual_final_dense, visual_file_path_);
+    clearFile(visual_file_path_);
+    saveWaypointsToFile(visual_final_dense, visual_file_path_);
 
     // 제어용 보간 (option=2: 가변 간격)
     double interval = 0.00005;
@@ -790,7 +853,7 @@ saveWaypointsToFile(visual_final_dense, visual_file_path_);
             "Interpolating CONTROL with interval_effective=%.9f (desired=%.9f / density=%.3f)",
             interval_effective, desired_interval_, density_multiplier_);
 
-control_final = interpolatexyzrpy(control_final, interval_effective);
+    control_final = interpolatexyzrpy(control_final, interval_effective);
 
     int approach_size = static_cast<int>(control_approach_wps.waypoints.size());
     int original_size = static_cast<int>(control_original_wps.waypoints.size());
