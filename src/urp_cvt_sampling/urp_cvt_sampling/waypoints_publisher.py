@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 import rclpy
 from rclpy.node import Node
@@ -11,97 +12,26 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import PointStamped
 
 
-def extract_corner_indices(points_xyz: np.ndarray,
-                           angle_deg_threshold: float = 45.0):
-    """
-    3D 점열에서 '꺾이는 구간'의 인덱스만 뽑음.
-      - 세 점 (P_{i-1}, P_i, P_{i+1})를 기준으로
-        벡터 v1 = P_i - P_{i-1}, v2 = P_{i+1} - P_i
-      - v1, v2 사이 각도 θ가 angle_deg_threshold 이상이면
-        i를 코너 인덱스로 판정.
-
-    - 연속해서 여러 i가 코너로 나올 수 있어서,
-      한 '코너 구간'에서는 각도가 최대인 i만 채택.
-    """
-    N = points_xyz.shape[0]
-    if N <= 2:
-        return np.arange(N, dtype=int)
-
-    # 1-step 벡터들
-    vec = points_xyz[1:] - points_xyz[:-1]   # (N-1, 3)
-    norm = np.linalg.norm(vec, axis=1)
-
-    corner_indices = []
-
-    in_region = False
-    best_i = None
-    best_theta = -1.0
-
-    for i in range(1, N - 1):
-        v1 = vec[i - 1]
-        v2 = vec[i]
-
-        n1 = norm[i - 1]
-        n2 = norm[i]
-        if n1 < 1e-8 or n2 < 1e-8:
-            continue  # 너무 짧은 segment는 스킵
-
-        cos_theta = np.dot(v1, v2) / (n1 * n2)
-        cos_theta = np.clip(cos_theta, -1.0, 1.0)
-        theta_deg = np.degrees(np.arccos(cos_theta))
-
-        if theta_deg >= angle_deg_threshold:
-            # 코너 구간 진입 or 유지
-            if not in_region:
-                in_region = True
-                best_i = i
-                best_theta = theta_deg
-            else:
-                # 같은 코너 구간에서 더 큰 각도면 갱신
-                if theta_deg > best_theta:
-                    best_theta = theta_deg
-                    best_i = i
-        else:
-            # 코너 구간에서 벗어날 때, 지금까지의 best_i를 저장
-            if in_region and best_i is not None:
-                corner_indices.append(best_i)
-            in_region = False
-            best_i = None
-            best_theta = -1.0
-
-    # 루프 끝났는데 코너 구간이면 마지막 것도 추가
-    if in_region and best_i is not None:
-        corner_indices.append(best_i)
-
-    # 항상 처음과 마지막은 포함
-    indices = [0] + corner_indices + [N - 1]
-    indices = sorted(set(indices))
-    return np.array(indices, dtype=int)
-
-
 class WaypointClickReplay(Node):
     """
     planned_path.txt (또는 동일 형식 파일)에서
       x y z roll pitch yaw
     형식으로 저장된 데이터를 읽어,
-    (x, y, z)를 순서대로 /clicked_point 로 publish.
+    꺾이는 구간(코너)의 특징점만 /clicked_point 로 publish 하는 노드.
 
-    - 꺾이는 구간(방향이 크게 바뀌는 지점)만 추출해서 publish.
-    - publish 종료 후 (loop=False) 3D 플롯으로 시각화 가능.
-
-    파라미터:
-      file_path       (str): txt 파일 경로 (기본: ~/urp_waypoints.txt)
-      publish_rate_hz (float): 1초당 몇 개 step publish (기본: 5.0)
-      frame_id        (str): 헤더 frame_id (기본: "map")
-      loop            (bool): True면 끝까지 간 뒤 처음부터 반복
-      corner_angle_deg(float): 코너 판정 각도 임계값 [deg] (기본: 45.0)
-      enable_plot     (bool): publish 끝나면 3D 플롯 띄울지 (기본: True)
+    - 토픽: /clicked_point (PointStamped)
+    - 파라미터:
+        file_path: txt 파일 경로 (기본: ~/urp_waypoints.txt)
+        publish_rate_hz: 1초당 몇 개 step publish (기본: 5.0)
+        frame_id: 헤더 frame_id (기본: "map")
+        loop: true면 끝까지 간 뒤 처음부터 다시 반복 (기본: False)
+        angle_threshold_deg: 코너로 판단할 최소 방향 변화각 [deg] (기본: 45도)
     """
 
     def __init__(self):
         super().__init__("waypoint_click_replay")
 
-        # QoS 설정
+        # QoS 설정 (기본 reliable, volatile)
         qos = QoSProfile(depth=10)
         qos.reliability = ReliabilityPolicy.RELIABLE
         qos.durability = DurabilityPolicy.VOLATILE
@@ -111,16 +41,16 @@ class WaypointClickReplay(Node):
         self.declare_parameter("publish_rate_hz", 5.0)
         self.declare_parameter("frame_id", "map")
         self.declare_parameter("loop", False)
-        self.declare_parameter("corner_angle_deg", 45.0)
-        self.declare_parameter("enable_plot", True)
+        self.declare_parameter("angle_threshold_deg", 80.0)
 
         file_path_param = str(self.get_parameter("file_path").value)
         self.file_path = str(Path(os.path.expanduser(file_path_param)).resolve())
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.loop = bool(self.get_parameter("loop").value)
-        self.corner_angle_deg = float(self.get_parameter("corner_angle_deg").value)
-        self.enable_plot = bool(self.get_parameter("enable_plot").value)
+        self.angle_threshold_deg = float(
+            self.get_parameter("angle_threshold_deg").value
+        )
 
         # 파일 로드
         if not os.path.exists(self.file_path):
@@ -140,11 +70,10 @@ class WaypointClickReplay(Node):
 
             all_xyz = data[:, :3]  # (N, 3)
 
-            # 코너 인덱스만 추출
-            corner_idxs = extract_corner_indices(
-                all_xyz, angle_deg_threshold=self.corner_angle_deg
+            # 코너 특징점만 추출
+            self.xyz = self._extract_corner_points(
+                all_xyz, angle_threshold_deg=self.angle_threshold_deg
             )
-            self.xyz = all_xyz[corner_idxs]
             self.num_steps = self.xyz.shape[0]
 
         except Exception as e:
@@ -152,21 +81,67 @@ class WaypointClickReplay(Node):
             raise
 
         self.get_logger().info(
-            f"Loaded {all_xyz.shape[0]} waypoints, "
-            f"extracted {self.num_steps} corner points (angle >= {self.corner_angle_deg} deg)."
+            f"Loaded {all_xyz.shape[0]} original waypoints, "
+            f"selected {self.num_steps} corner waypoints "
+            f"from {self.file_path}"
         )
 
-        # publisher
+        # /clicked_point 퍼블리셔
         self.pub_clicked = self.create_publisher(PointStamped, "/clicked_point", qos)
 
+        # 상태 변수
         self.current_idx = 0
         self.ready_to_publish = False
+        self.visualized = False
 
+        # 타이머 생성
         period = 1.0 / max(self.publish_rate_hz, 1e-3)
         self.timer = self.create_timer(period, self._timer_cb)
 
+    # -----------------------------
+    # 코너 추출 함수
+    # -----------------------------
+    def _extract_corner_points(self, xyz: np.ndarray, angle_threshold_deg: float):
+        """
+        xyz : (N,3) array
+        angle_threshold_deg: 연속한 두 세그먼트 방향 차이가 이 각도보다 크면 코너로 판단
+
+        반환: corner_xyz (M,3)
+        """
+        N = xyz.shape[0]
+        if N <= 2:
+            return xyz.copy()
+
+        # 1) xy 평면에서 연속한 세그먼트 벡터
+        xy = xyz[:, :2]              # (N,2)
+        seg = np.diff(xy, axis=0)    # (N-1,2)
+
+        angles = np.arctan2(seg[:, 1], seg[:, 0])  # (N-1,)
+
+        # 2) 세그먼트 각도 차이
+        dtheta = np.diff(angles)  # (N-2,)
+        dtheta = (dtheta + np.pi) % (2.0 * np.pi) - np.pi  # -pi~pi
+
+        th = np.deg2rad(angle_threshold_deg)
+        corner_mask = np.abs(dtheta) > th
+        corner_indices = np.where(corner_mask)[0] + 1  # i+1가 코너
+
+        # 3) 시작/끝 포함
+        selected = np.concatenate(([0], corner_indices, [N - 1]))
+        selected = np.unique(selected)
+
+        self.get_logger().info(
+            f"Corner extraction: N={N}, corners={len(corner_indices)}, "
+            f"selected={len(selected)} (including start/end)."
+        )
+
+        return xyz[selected, :]
+
+    # -----------------------------
+    # 타이머 콜백: publish
+    # -----------------------------
     def _timer_cb(self):
-        # subscriber 체크
+        # subscriber 붙었는지 확인
         if not self.ready_to_publish:
             n_sub = self.pub_clicked.get_subscription_count()
             if n_sub == 0:
@@ -176,7 +151,7 @@ class WaypointClickReplay(Node):
                 f"Found {n_sub} subscriber(s) on /clicked_point. Start replay."
             )
 
-        # 끝까지 보냈는지 체크
+        # 모든 step을 보냈는지 확인
         if self.current_idx >= self.num_steps:
             if self.loop:
                 self.get_logger().info(
@@ -186,13 +161,13 @@ class WaypointClickReplay(Node):
             else:
                 if self.current_idx == self.num_steps:
                     self.get_logger().info(
-                        f"All {self.num_steps} waypoints published. Stopping timer."
+                        f"All {self.num_steps} corner waypoints published. Stopping timer."
                     )
-                    # 3D 시각화
-                    if self.enable_plot:
-                        self.visualize_path_3d()
-                self.current_idx += 1
-                self.timer.cancel()
+                    self.timer.cancel()
+                    # publish가 끝난 뒤 3D 시각화 (한 번만)
+                    if not self.visualized:
+                        self.visualized = True
+                        self.visualize_waypoints_3d()
                 return
 
         x, y, z = self.xyz[self.current_idx]
@@ -208,38 +183,42 @@ class WaypointClickReplay(Node):
 
         step_idx = self.current_idx + 1
         self.get_logger().info(
-            f"step {step_idx}: {x:.6f} {y:.6f} {z:.6f}"
+            f"step {step_idx}/{self.num_steps}: {x:.6f} {y:.6f} {z:.6f}"
         )
 
         self.current_idx += 1
 
-    def visualize_path_3d(self):
-        try:
-            import matplotlib.pyplot as plt
-            from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-        except ImportError as e:
-            self.get_logger().error(
-                f"Failed to import matplotlib for 3D visualization: {e}"
-            )
-            return
-
+    # -----------------------------
+    # 3D 시각화 함수 (publish 완료 후 호출)
+    # -----------------------------
+    def visualize_waypoints_3d(self):
+        """
+        publish 한 코너 waypoint(self.xyz)만 3D 공간에 시각화.
+        """
         if self.xyz is None or self.xyz.shape[0] == 0:
             self.get_logger().warn("No waypoints to visualize.")
             return
 
-        xs = self.xyz[:, 0]
-        ys = self.xyz[:, 1]
-        zs = self.xyz[:, 2]
+        xyz = self.xyz
+        x = xyz[:, 0]
+        y = xyz[:, 1]
+        z = xyz[:, 2]
+
+        self.get_logger().info("Visualizing corner waypoints in 3D...")
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
-        ax.plot(xs, ys, zs, marker="o")
+
+        # 궤적 라인 + 특징점
+        ax.plot(x, y, z, "-o", markersize=4)
+
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
-        ax.set_title("Corner Waypoints (3D)")
+        ax.set_title("Corner Waypoints (Published Points)")
 
-        self.get_logger().info("Showing 3D waypoint visualization window.")
+        ax.view_init(elev=30, azim=45)
+        plt.tight_layout()
         plt.show()
 
 
