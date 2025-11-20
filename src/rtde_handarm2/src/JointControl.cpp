@@ -117,7 +117,7 @@ static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger&
 }
 
 // EE +Z → TCP 오프셋(모든 FK/IK에서 동일 사용)
-static constexpr double TOOL_Z = 0.243;  // [m]
+static constexpr double TOOL_Z = 0.320;  // [m]
 // static constexpr double TOOL_Z = 0.343;  // [m]
 
 
@@ -840,7 +840,7 @@ void JointControl::runCartesianForceChain(
     const double Tank_energy = 5.0;
 
     // 바닥부 근처면 접촉으로 보고 K=0
-    bool contact_on = (Xd(2) <= 0.1);
+    bool contact_on = (Xd(2) <= 1.0);
 
     for (int ax = 0; ax < 3; ++ax) {
         if (std::fabs(Fd_cmd(ax)) > 0.01 || FAAC_flag[ax])
