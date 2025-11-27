@@ -1,6 +1,6 @@
 // JointControl.cpp (v2025-rt-safe)
 // - 기존 기능을 유지하면서 실시간성/일관성/안정성 개선
-// - 주요 수정점: dt 측정, TOOL_Z 일관화, 조인트 소스 단일화, 힘 변환 간소화, 퍼블리시 최적화
+// - 주요 수정점: dt 측정, 조인트 소스 단일화, 힘 변환 간소화, 퍼블리시 최적화
 // - 2025-11-06: control_mode 1/2 공통 force/admittance/IK 체인 함수(runCartesianForceChain)로 통합
 //                /ftsensor/measured_CValue 구독 추가 → control_mode 2 에서 fx fy fz 사용
 //                /calibrated_pose 콜백은 pose만 저장, 실제 계산은 메인루프에서 수행
@@ -116,23 +116,6 @@ static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger&
       }
     }
   }
-}
-
-// EE +Z → TCP 오프셋(모든 FK/IK에서 동일 사용)
-static constexpr double TOOL_Z = 0.3304;   // [m]
-// static constexpr double TOOL_Z = 0.343;  // [m]
-
-// ★ 플랜지 <-> TCP 변환 헬퍼 (z방향 오프셋만)
-static inline Eigen::Vector3d flangeToTcp(const Eigen::Vector3d& flange_xyz) {
-  Eigen::Vector3d tcp = flange_xyz;
-  tcp(2) -= TOOL_Z;
-  return tcp;
-}
-
-static inline Eigen::Vector3d tcpToFlange(const Eigen::Vector3d& tcp_xyz) {
-  Eigen::Vector3d flange = tcp_xyz;
-  flange(2) += TOOL_Z;
-  return flange;
 }
 
 // ★ 추가: 터미널에서 double 배열 읽기 유틸
@@ -347,24 +330,21 @@ void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg)
 }
 
 // ===================== UpdateState() =====================
-// 역할: 현재 조인트(RArm.qc) 기반 FK 계산 → TCP Pose(pos_current, rpy_current) 업데이트
+// 역할: 현재 조인트(RArm.qc) 기반 FK 계산 → EE Pose(pos_current, rpy_current) 업데이트
 void JointControl::UpdateState()
 {
-    // 최신 조인트는 콜백에서 RArm.qc에 유지됨
-    Eigen::Matrix<double, DOF, 1> q = RArm.qc;
+#if TCP_standard == 0
+    AKin.ForwardK_T(&RArm);
+#else
+    AKin.Ycontact_ForwardK_T(&RArm);
+#endif
+    AKin.Rotation2EulerAngle(&RArm); // Tc -> thc
 
-    // EE +Z → TCP 오프셋을 포함한 FK
-    T_current = ur10e_forward(q, TOOL_Z);
-
-    pos_current = T_current.block<3, 1>(0, 3);
-    const Eigen::Matrix3d R_TCP = T_current.block<3, 3>(0, 0);
+    T_current   = RArm.Tc;
+    pos_current = RArm.Tc.block<3, 1>(0, 3);
 
     // XYZ-fixed RPY
-    Eigen::Vector3d rpy;
-    rpy(0) = std::atan2(R_TCP(2,1), R_TCP(2,2));
-    rpy(1) = std::asin(-R_TCP(2,0));
-    rpy(2) = std::atan2(R_TCP(1,0), R_TCP(0,0));
-    rpy_current = rpy;
+    rpy_current = RArm.thc;
 }
 
 // ===================== Force Callback =====================
@@ -453,9 +433,9 @@ bool JointControl::InitMove(double dt_s)
             return false;
         }
 
-        // 현재 실제 위치는 플랜지 기준 → TCP 기준으로 변환해서 사용
-        start_xyz = flangeToTcp(RArm.xc);
-        // TXT 파일에서 읽은 값은 TCP 기준으로 사용
+        // 현재 위치(EE/TCP 기준)
+        start_xyz = RArm.xc;
+        // TXT 파일에서 읽은 값도 EE/TCP 기준
         goal_xyz  = Eigen::Vector3d(x, y, z);
 
         start_rot = RArm.Tc.block<3,3>(0,0);
@@ -483,9 +463,9 @@ bool JointControl::InitMove(double dt_s)
     elapsed += dt_s;
     const double alpha = std::clamp(elapsed / std::max(1e-6, duration), 0.0, 1.0);
 
-    // TCP 기준에서 보간
+    // EE/TCP 기준에서 보간
     const Eigen::Vector3d xyz_interp = (1.0 - alpha) * start_xyz + alpha * goal_xyz;
-    Desired_XYZ = xyz_interp;   // TCP 기준 Desired
+    Desired_XYZ = xyz_interp;   // Desired (TCP)
 
     Eigen::Quaterniond q0(start_rot), q1(goal_rot);
     if (q0.dot(q1) < 0.0) q1.coeffs() *= -1.0;
@@ -493,13 +473,11 @@ bool JointControl::InitMove(double dt_s)
     const Eigen::Matrix3d R_interp = q_interp.toRotationMatrix();
     Desired_RPY = R_interp.eulerAngles(0,1,2);
 
-    // IK 변환: TCP → 플랜지 (z에 TOOL_Z 보정)
-    Eigen::Vector3d flange_xyz = tcpToFlange(Desired_XYZ);
-
-    RArm.Td << R_interp(0,0),R_interp(0,1),R_interp(0,2),flange_xyz(0),
-                R_interp(1,0),R_interp(1,1),R_interp(1,2),flange_xyz(1),
-                R_interp(2,0),R_interp(2,1),R_interp(2,2),flange_xyz(2),
-                0,0,0,1;
+    // IK용 Td (EE/TCP 기준 직접 사용)
+    RArm.Td << R_interp(0,0),R_interp(0,1),R_interp(0,2),Desired_XYZ(0),
+               R_interp(1,0),R_interp(1,1),R_interp(1,2),Desired_XYZ(1),
+               R_interp(2,0),R_interp(2,1),R_interp(2,2),Desired_XYZ(2),
+               0,0,0,1;
 #if TCP_standard == 0
     AKin.InverseK_min(&RArm);
 #else
@@ -527,11 +505,8 @@ void JointControl::runCartesianForceChain(
 {
     // =========================================================================
     // STEP 2) 외력 추정 F_ext (LPF + saturation)
-    //   - 여기서는 기존 PathFollow()에서 하던 것과 동일하게,
-    //     현재 qc 기준 FK를 한 번 더 돌려서 TCP->Base 변환행렬을 만든 다음
-    //     contact_force 를 z축 힘으로 보고 base로 변환한다.
     // =========================================================================
-    Eigen::Matrix4d T_base_TCP_cur = ur10e_forward(RArm.qc, 0); // 센서가 달린 플랜지 기준
+    Eigen::Matrix4d T_base_TCP_cur = RArm.Tc; // 현재 EE/TCP pose
     Eigen::Matrix3d R_base_TCP     = T_base_TCP_cur.block<3,3>(0,0);
     Eigen::Matrix3d R_TCP_base     = R_base_TCP.transpose();
 
@@ -567,8 +542,8 @@ void JointControl::runCartesianForceChain(
         }
     }
 
-    // 현재 실제 EE 위치 (플랜지 → TCP로 변환해서 사용)
-    Eigen::Vector3d X_act = flangeToTcp(RArm.xc);
+    // 현재 실제 EE 위치 (EE/TCP 기준)
+    Eigen::Vector3d X_act = RArm.xc;
 
     // debug step2
     {
@@ -795,21 +770,16 @@ void JointControl::runCartesianForceChain(
     }
 
     // =========================================================================
-    // STEP 5) IK용 pose 만들기
-    //   Kinematics.h 의 EulerAngle2Rotation 이 비-const 참조를 요구하므로
-    //   RPYd 복사본을 만든다.
+    // STEP 5) IK용 pose 만들기 (EE/TCP 기준)
     // =========================================================================
-    // TCP 명령 Xc_cmd → 플랜지 위치로 변환
-    Eigen::Vector3d flange_xyz = tcpToFlange(Xc_cmd);
-
     Eigen::Vector3d rpy_copy = RPYd;   // <- 비-const 참조 요구 때문에 복사
     Eigen::Matrix3d Rd_R_again;
     AKin.EulerAngle2Rotation(Rd_R_again, rpy_copy);
 
     RArm.Td <<
-        Rd_R_again(0,0), Rd_R_again(0,1), Rd_R_again(0,2), flange_xyz(0),
-        Rd_R_again(1,0), Rd_R_again(1,1), Rd_R_again(1,2), flange_xyz(1),
-        Rd_R_again(2,0), Rd_R_again(2,1), Rd_R_again(2,2), flange_xyz(2),
+        Rd_R_again(0,0), Rd_R_again(0,1), Rd_R_again(0,2), Xc_cmd(0),
+        Rd_R_again(1,0), Rd_R_again(1,1), Rd_R_again(1,2), Xc_cmd(1),
+        Rd_R_again(2,0), Rd_R_again(2,1), Rd_R_again(2,2), Xc_cmd(2),
         0,               0,               0,               1;
 
 #if TCP_standard == 0
@@ -1008,7 +978,7 @@ void JointControl::CalculateAndPublishJoint() {
   RArm.qd = RArm.qc;
   RArm.qt = RArm.qc;
 
-  // 최신 FK & RPY (플랜지 기준)
+  // 최신 FK & RPY
 #if TCP_standard == 0
   AKin.ForwardK_T(&RArm);
 #else
@@ -1023,7 +993,7 @@ void JointControl::CalculateAndPublishJoint() {
   // TCP→Base 힘 변환 (for debug print)
   Eigen::Vector3d F_base_dbg = Eigen::Vector3d::Zero();
   {
-      const Eigen::Matrix3d R_TCP_base = RArm.Tc.block<3,3>(0,0);  // Base<-TCP 회전 (플랜지와 동일 방향)
+      const Eigen::Matrix3d R_TCP_base = RArm.Tc.block<3,3>(0,0);  // Base<-TCP 회전
       const Eigen::Vector3d F_TCP(0.0, 0.0, contact_force);        // TCP z축 힘
       Eigen::Vector3d F_base_raw = R_TCP_base * F_TCP;             // 변환된 힘 (Base 기준)
 
@@ -1038,8 +1008,7 @@ void JointControl::CalculateAndPublishJoint() {
   // ====== 디버그 출력(주기 제한) ======
   if (printer_counter >= print_period) {
   #if RT_printing
-      // 플랜지 → TCP 변환 후 출력
-      Eigen::Vector3d tcp_act = flangeToTcp(RArm.xc);
+      Eigen::Vector3d tcp_act = RArm.xc;
 
       printf("======================================== \n");
       printf("Simulation time : %d ms\n", (int)milisec);
@@ -1071,8 +1040,8 @@ void JointControl::CalculateAndPublishJoint() {
   UR10_pose_msg_.data.resize(6);
   UR10_wrench_msg_.data.resize(6);
 
-  // Pose는 TCP 기준으로 퍼블리시
-  Eigen::Vector3d tcp_act = flangeToTcp(RArm.xc);
+  // Pose는 EE/TCP 기준으로 퍼블리시
+  Eigen::Vector3d tcp_act = RArm.xc;
   for(int i=0; i<6; i++){
     if (i < 3) {
       UR10_pose_msg_.data[i] = tcp_act(i);
@@ -1161,27 +1130,24 @@ void JointControl::CalculateAndPublishJoint() {
               return;
           }
 
-          ik_target_xyz << buf[0], buf[1], buf[2];  // TCP 기준 목표
+          ik_target_xyz << buf[0], buf[1], buf[2];  // EE/TCP 기준 목표
           ik_target_rpy << buf[3], buf[4], buf[5];
 
           ik_target_set = true;
       }
 
-      // 디버그용 Desired 값 업데이트 (TCP 기준)
+      // 디버그용 Desired 값 업데이트 (EE/TCP 기준)
       Desired_XYZ = ik_target_xyz;
       Desired_RPY = ik_target_rpy;
-
-      // TCP 기준 목표 → 플랜지 기준 목표 (z축으로 TOOL_Z 보정)
-      Eigen::Vector3d flange_xyz = tcpToFlange(ik_target_xyz);
 
       Eigen::Vector3d rpy_copy = ik_target_rpy; // EulerAngle2Rotation이 non-const ref 요구
       Eigen::Matrix3d Rd;
       AKin.EulerAngle2Rotation(Rd, rpy_copy);
 
       RArm.Td <<
-          Rd(0,0), Rd(0,1), Rd(0,2), flange_xyz(0),
-          Rd(1,0), Rd(1,1), Rd(1,2), flange_xyz(1),
-          Rd(2,0), Rd(2,1), Rd(2,2), flange_xyz(2),
+          Rd(0,0), Rd(0,1), Rd(0,2), ik_target_xyz(0),
+          Rd(1,0), Rd(1,1), Rd(1,2), ik_target_xyz(1),
+          Rd(2,0), Rd(2,1), Rd(2,2), ik_target_xyz(2),
           0,       0,       0,       1;
 
 #if TCP_standard == 0
@@ -1238,7 +1204,7 @@ void JointControl::CalculateAndPublishJoint() {
   // 4) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
   if (control_mode == 4) {
       if (teleop_pose_valid_) {
-          Eigen::Vector3d Xd  = teleop_xyz_;   // TCP 기준
+          Eigen::Vector3d Xd  = teleop_xyz_;   // EE/TCP 기준
           Eigen::Vector3d RPY = teleop_rpy_;
           Eigen::Vector3d Fd  = teleop_force_valid_ ? teleop_force_
                                                     : Eigen::Vector3d::Zero();
