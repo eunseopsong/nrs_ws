@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
 
             joint_command[1] = joint_command[1]*(PI/180);
 
-            yoon_mode_msg.data = Joint_control_mode_cmd;
+            yoon_mode_msg.data = IK_control_mode_cmd;
             joint_command_msg.data.clear();
 
             for(int i=0;i<2;i++)

@@ -2,9 +2,9 @@
 // Rule the mode from 0 ~ 9999
 // the main mode must be under 10 (1000,2000,300 ... ,9000, 0000)
 // if you want sub command add to the additional room like 5000 -> 5001
-#define Posture_control_mode_cmd 1000
+#define FK_control_mode_cmd 1000    // Joints control mode
 
-#define Joint_control_mode_cmd  2000
+#define IK_control_mode_cmd  2000  // EE Positon control mode
 
 #define EE_Posture_control_mode_cmd 3000
 

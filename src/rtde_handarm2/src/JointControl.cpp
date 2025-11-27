@@ -227,12 +227,38 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
     mode_cmd = msg->data;
     printf("[DEBUG] cmdModeCallback called. mode_cmd=%u\n", mode_cmd);
 
-    if (mode_cmd == Hand_guiding_mode_cmd) {
-      ctrl.store(2, std::memory_order_release);
-      set_status(message_status, Hand_guiding_mode);
+    if (mode_cmd == FK_control_mode_cmd) {
+      ctrl.store(1, std::memory_order_release);
+
     }
 
-    // ===================== Continuous Recording Mode for Teleoperation ===================== //
+    else if (mode_cmd == IK_control_mode_cmd) {
+      ctrl.store(2, std::memory_order_release);
+    }
+
+    // ===================== Playback Mode for Path(.txt) Execution ===================== //
+    else if (mode_cmd == Playback_mode_cmd) {
+      auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
+      if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
+        RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
+        ctrl.store(0, std::memory_order_release);
+        set_status(message_status, Motion_stop_mode);
+        return;
+      }
+      if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
+      Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
+      if (!Hand_G_playback) {
+        RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (%s)", hand_path.c_str(), std::strerror(errno));
+        ctrl.store(0, std::memory_order_release);
+        set_status(message_status, Motion_stop_mode);
+        return;
+      }
+      set_status(message_status, ST_path_gen_done);
+      ctrl.store(3, std::memory_order_release);
+      pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
+    }
+
+    // ================= Continuous Recording Mode for Teleoperation using VR tracker ================= //
     else if (mode_cmd == Continuous_reording_start) {
       // control_mode = 2 진입
       ctrl.store(4, std::memory_order_release);
@@ -407,27 +433,6 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       printf("\n Cali points saved \n");
     }
     
-    // ===================== Playback Mode for .txt Execution ===================== //
-    else if (mode_cmd == Playback_mode_cmd) {
-      auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
-      if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
-        RCLCPP_ERROR(node_->get_logger(), "Trajectory file not found: '%s'", hand_path.c_str());
-        ctrl.store(0, std::memory_order_release);
-        set_status(message_status, Motion_stop_mode);
-        return;
-      }
-      if (Hand_G_playback) { std::fclose(Hand_G_playback); Hand_G_playback = nullptr; }
-      Hand_G_playback = std::fopen(hand_path.c_str(), "rt");
-      if (!Hand_G_playback) {
-        RCLCPP_ERROR(node_->get_logger(), "open for read failed: '%s' (%s)", hand_path.c_str(), std::strerror(errno));
-        ctrl.store(0, std::memory_order_release);
-        set_status(message_status, Motion_stop_mode);
-        return;
-      }
-      set_status(message_status, ST_path_gen_done);
-      ctrl.store(3, std::memory_order_release);
-      pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
-    }
 
     else if (mode_cmd == Motion_stop_cmd) {
       ctrl.store(0, std::memory_order_release);
@@ -1224,7 +1229,19 @@ void JointControl::CalculateAndPublishJoint() {
       return;
   }
 
-  // 1) Playback: InitMove → PathFollow → ReturnHomePose
+  // 1) FK Control Mode (Joint Control)
+  if (control_mode == 1) {
+
+      return;
+  }
+
+  // 2) IK Control Mode (EE Position Control)
+  if (control_mode == 2) {
+
+      return;
+  }
+
+  // 3) Playback: InitMove → PathFollow → ReturnHomePose
   if (control_mode == 3) {
       static bool init_done = false;
       static bool follow_done = false;
@@ -1261,7 +1278,7 @@ void JointControl::CalculateAndPublishJoint() {
       return;
   }
 
-  // 2) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
+  // 4) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
   if (control_mode == 4) {
       if (teleop_pose_valid_) {
           Eigen::Vector3d Xd  = teleop_xyz_;
