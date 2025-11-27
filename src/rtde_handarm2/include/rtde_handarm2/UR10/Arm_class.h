@@ -66,6 +66,7 @@ const double d4 = 0.163941;
 const double d5 = 0.1157;
 const double d6 = 0.0922; //basic
 
+
 // magnitude of center of mass
 const double m1 = 7.1;
 const double m2 = 12.7;
