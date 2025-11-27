@@ -1025,33 +1025,50 @@ void Kinematic_func::Jacobian(CArm *A)
 }
 
 
-
 void Kinematic_func::Jacobian_p(CArm *A)
 {
-	s23 = sin(A->qc(1) + A->qc(2));
-	c23 = cos(A->qc(1) + A->qc(2));
-	
+	// --- Recompute all trig terms from qc (안전하게 매번 갱신) ---
+	s1 = sin(A->qc(0));
+	c1 = cos(A->qc(0));
+	s2 = sin(A->qc(1));
+	c2 = cos(A->qc(1));
+	s3 = sin(A->qc(2));
+	c3 = cos(A->qc(2));
+	s4 = sin(A->qc(3));
+	c4 = cos(A->qc(3));
+	s5 = sin(A->qc(4));
+	c5 = cos(A->qc(4));
+	s6 = sin(A->qc(5));
+	c6 = cos(A->qc(5));
+
+	s234 = sin(A->qc(1) + A->qc(2) + A->qc(3));
+	c234 = cos(A->qc(1) + A->qc(2) + A->qc(3));
+	s23  = sin(A->qc(1) + A->qc(2));
+	c23  = cos(A->qc(1) + A->qc(2));
+
+	// --- Position Jacobian Jp(qc) ---
 	A->Jp(0,0) = c1*(d6*c5 + d4) + s1*(d6*s5*c234 - d5*s234 - a3*c23 - a2*c2);
 	A->Jp(0,1) = c1*(d6*s234*s5 + d5*c234 - a3*s23 - a2*s2);
 	A->Jp(0,2) = c1*(d6*s234*s5 + d5*c234 - a3*s23);
 	A->Jp(0,3) = c1*(d6*s234*s5 + d5*c234);
 	A->Jp(0,4) = -c1*d6*c234*c5 - s1*d6*s5;
-	A->Jp(0,5) = 0;
+	A->Jp(0,5) = 0.0;
 
 	A->Jp(1,0) = s1*(d6*c5 + d4) + c1*(-d6*s5*c234 + d5*s234 + a3*c23 + a2*c2);
 	A->Jp(1,1) = s1*(d6*s234*s5 + d5*c234 - a3*s23 - a2*s2);
 	A->Jp(1,2) = s1*(d6*s234*s5 + d5*c234 - a3*s23);
 	A->Jp(1,3) = s1*(d6*s234*s5 + d5*c234);
 	A->Jp(1,4) = -s1*d6*c234*c5 + c1*d6*s5;
-	A->Jp(1,5) = 0;
+	A->Jp(1,5) = 0.0;
 
-	A->Jp(2,0) = 0;
+	A->Jp(2,0) = 0.0;
 	A->Jp(2,1) = a3*c23 + a2*c2 + d5*s234 - d6*c234*s5;
 	A->Jp(2,2) = a3*c23 + d5*s234 - d6*c234*s5;
 	A->Jp(2,3) = d5*s234 - d6*c234*s5;
 	A->Jp(2,4) = -d6*s234*c5;
-	A->Jp(2,5) = 0;
+	A->Jp(2,5) = 0.0;
 }
+
 
 void Kinematic_func::Jacobian_w(CArm *A)
 {
