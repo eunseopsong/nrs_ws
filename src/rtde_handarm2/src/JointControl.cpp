@@ -235,7 +235,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
     // ===================== Continuous Recording Mode for Teleoperation ===================== //
     else if (mode_cmd == Continuous_reording_start) {
       // control_mode = 2 진입
-      ctrl.store(2, std::memory_order_release);
+      ctrl.store(4, std::memory_order_release);
       set_status(message_status, Data_recording_on);
     }
     else if (mode_cmd == Continusous_recording_end) {
@@ -425,7 +425,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
         return;
       }
       set_status(message_status, ST_path_gen_done);
-      ctrl.store(1, std::memory_order_release);
+      ctrl.store(3, std::memory_order_release);
       pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
     }
 
@@ -1225,7 +1225,7 @@ void JointControl::CalculateAndPublishJoint() {
   }
 
   // 1) Playback: InitMove → PathFollow → ReturnHomePose
-  if (control_mode == 1) {
+  if (control_mode == 3) {
       static bool init_done = false;
       static bool follow_done = false;
 
@@ -1262,7 +1262,7 @@ void JointControl::CalculateAndPublishJoint() {
   }
 
   // 2) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
-  if (control_mode == 2) {
+  if (control_mode == 4) {
       if (teleop_pose_valid_) {
           Eigen::Vector3d Xd  = teleop_xyz_;
           Eigen::Vector3d RPY = teleop_rpy_;
