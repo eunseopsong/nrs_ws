@@ -15,6 +15,8 @@
 #include <chrono>
 #include <mutex>
 #include <filesystem>
+#include <iostream>   // ★ 추가: 터미널 입력용
+#include <limits>     // ★ 추가: 터미널 입력 오류 처리용
 
 #include <geometry_msgs/msg/wrench.hpp>
 
@@ -119,6 +121,20 @@ static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger&
 // EE +Z → TCP 오프셋(모든 FK/IK에서 동일 사용)
 static constexpr double TOOL_Z = 0.325;  // [m]
 // static constexpr double TOOL_Z = 0.343;  // [m]
+
+// ★ 추가: 터미널에서 double 배열 읽기 유틸
+static bool readDoublesFromStdin(const char* prompt, int n, double* out) {
+  std::cout << prompt << std::flush;
+  for (int i = 0; i < n; ++i) {
+    if (!(std::cin >> out[i])) {
+      std::cin.clear();
+      std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+      return false;
+    }
+  }
+  std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+  return true;
+}
 
 
 
@@ -1231,13 +1247,95 @@ void JointControl::CalculateAndPublishJoint() {
 
   // 1) FK Control Mode (Joint Control)
   if (control_mode == 1) {
+      // FK: 사용자가 터미널에 입력한 조인트(deg)를 그대로 명령
+      static bool     fk_target_set = false;
+      static Vector6d fk_target_q   = Vector6d::Zero();
 
+      // 모드 진입 시 한 번만 입력
+      if (pre_control_mode != control_mode || !fk_target_set) {
+          double qdeg[6];
+          if (!readDoublesFromStdin(
+                  "\n[FK mode] Enter 6 joint angles [deg]: ",
+                  6, qdeg)) {
+              std::cerr << "[FK mode] invalid input. Keep current pose.\n";
+              pre_ctrl.store(control_mode, std::memory_order_relaxed);
+              return;
+          }
+
+          for (int i = 0; i < DOF; ++i) {
+              fk_target_q(i) = qdeg[i] * M_PI / 180.0;  // deg -> rad
+          }
+          fk_target_set = true;
+      }
+
+      for (int i = 0; i < DOF; ++i) {
+          RArm.qd(i) = fk_target_q(i);
+      }
+
+      joint_state_.header.stamp = node_->now();
+      for (int i = 0; i < DOF; ++i) {
+          joint_state_.position[i] = RArm.qd(i);
+      }
+      joint_commands_pub_->publish(joint_state_);
+
+      pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
 
   // 2) IK Control Mode (EE Position Control)
   if (control_mode == 2) {
+      // IK: 사용자가 터미널에 입력한 EE pose [x y z r p y] (m, rad)을 IK로 변환
+      static bool            ik_target_set  = false;
+      static Eigen::Vector3d ik_target_xyz  = Eigen::Vector3d::Zero();
+      static Eigen::Vector3d ik_target_rpy  = Eigen::Vector3d::Zero();
 
+      if (pre_control_mode != control_mode || !ik_target_set) {
+          double buf[6];
+          if (!readDoublesFromStdin(
+                  "\n[IK mode] Enter EE pose [x y z r p y] (m, rad): ",
+                  6, buf)) {
+              std::cerr << "[IK mode] invalid input. Keep current pose.\n";
+              pre_ctrl.store(control_mode, std::memory_order_relaxed);
+              return;
+          }
+
+          ik_target_xyz << buf[0], buf[1], buf[2];
+          ik_target_rpy << buf[3], buf[4], buf[5];
+
+          ik_target_set = true;
+      }
+
+      // 디버그용 Desired 값 업데이트
+      Desired_XYZ = ik_target_xyz;
+      Desired_RPY = ik_target_rpy;
+
+      // TCP 기준 목표 → 플랜지 기준 목표 (z축으로 TOOL_Z 보정)
+      Eigen::Vector3d flange_xyz = ik_target_xyz;
+      flange_xyz(2) += TOOL_Z;
+
+      Eigen::Vector3d rpy_copy = ik_target_rpy; // EulerAngle2Rotation이 non-const ref 요구
+      Eigen::Matrix3d Rd;
+      AKin.EulerAngle2Rotation(Rd, rpy_copy);
+
+      RArm.Td <<
+          Rd(0,0), Rd(0,1), Rd(0,2), flange_xyz(0),
+          Rd(1,0), Rd(1,1), Rd(1,2), flange_xyz(1),
+          Rd(2,0), Rd(2,1), Rd(2,2), flange_xyz(2),
+          0,       0,       0,       1;
+
+#if TCP_standard == 0
+      AKin.InverseK_min(&RArm);
+#else
+      AKin.Ycontact_InverseK_min(&RArm);
+#endif
+
+      joint_state_.header.stamp = node_->now();
+      for (int i = 0; i < DOF; ++i) {
+          joint_state_.position[i] = RArm.qd(i);
+      }
+      joint_commands_pub_->publish(joint_state_);
+
+      pre_ctrl.store(control_mode, std::memory_order_relaxed);
       return;
   }
 
