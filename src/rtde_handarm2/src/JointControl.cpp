@@ -1205,8 +1205,6 @@ void JointControl::CalculateAndPublishJoint() {
           }
       }
 
-
-      
       // PathFollow 끝난 이후에는 ReturnHomePose를 매 주기 호출
       ReturnHomePose(dt_s);
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
