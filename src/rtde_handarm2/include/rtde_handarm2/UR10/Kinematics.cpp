@@ -1,45 +1,310 @@
 ////////////////////////////////////////////////////////////
 // Kinematics.cpp
-// Kinematics functions
-// Create on 2013. 12. 24
-// See the header file for update information
+// Kinematics functions for UR-type 6-DOF manipulator
+//
+// Original creation : 2013-12-24
+// Major refactor    : 2025-11-27 (UR10e, TCP calibration, contact TCP, cleanup)
 ////////////////////////////////////////////////////////////
 //
-// Functional overview (updated 2025-11-27)
+// 1. 목적(Purpose)
 // --------------------------------------------------------
-// - Closed-form kinematics for a 6-DOF UR-type arm (UR10 / UR10e style)
-// - Link/DH parameters (d1, a2, a3, d4, d5, d6) are defined in Arm_class.h
-// - Main function groups:
-//   * iForwardK_P / iForwardK_T
-//       - Forward kinematics with raw joint vector (no CArm).
-//       - Optional 'endlength' allows adding virtual tool length on joint 6.
-//   * ForwardK_P / ForwardK_T
-//       - Forward kinematics for the current joint configuration A->qc.
-//       - Writes end-effector transform Tc and position xc into CArm.
-//   * ForwardK_Td
-//       - Forward kinematics for the desired joint configuration A->qd.
-//       - Writes Td and xd into CArm.
-//   * Ycontact_ForwardK_T / Ycontact_InverseK / Ycontact_InverseK_min
-//       - FK/IK pair with an additional EE→TCP transform
-//         (Ycontact_EE2TCP built from Ycontact_TCP_pos[]).
-//       - Used when the physical TCP (e.g., contact point on a tool) is
-//         offset from the flange frame.
-//   * InverseK / InverseK_min
-//       - Analytic inverse kinematics for UR-style arm, returning up to 8
-//         solutions and selecting the one closest to the current A->qc.
-//   * Jacobian / Jacobian_p / Jacobian_w
-//       - 6x6 geometric Jacobian (linear+angular) and its 3x6 parts.
-//   * Rotation / quaternion utilities
-//       - Rotation<->Euler, angle-axis, quaternion<->rotation conversions.
+// 이 파일은 UR10 / UR10e 스타일 6자유도 매니퓰레이터에 대한
+//   - 정기구학(Forward Kinematics)
+//   - 역기구학(Inverse Kinematics, 최대 8해)
+//   - 기하 자코비안(Geometric Jacobian)
+//   - 회전/쿼터니언/각-축(angle-axis) 변환
+// 을 제공하는 순수 수학 계층이다.
 //
-// - This file can embed small calibration terms so that the analytical
-//   model better matches a specific real/simulated robot without touching
-//   the rest of the control pipeline.
-//   In particular, TCP_Z_OFFSET below compensates a measured steady Z-bias
-//   between FK and the actual TCP position.
+// 모든 수식은 "관절공간 q = [q1 ... q6]^T" 에서
+//   - EE(End-Effector, 플랜지)의 위치/자세 x(q), R(q)
+//   - TCP(Tool Center Point)의 위치/자세 x_TCP(q), R_TCP(q)
+//   - 자코비안 J(q) = [ Jp(q); Jw(q) ]
+// 을 계산하는 것을 목표로 한다.
+//
+// 제어 파이프라인의 상위 계층(Whole-body control, Admittance control,
+// Cartesian PD 등)은 이 파일에서 제공하는 x(q), R(q), J(q) 를 이용해
+// 원하는 작업공간 궤적을 구현한다.
+//
+//
+// 2. 좌표계와 수식 요약
 // --------------------------------------------------------
+// - q ∈ R^6 : 조인트 각도 벡터 (단위 rad)
+// - T_0^6(q) ∈ SE(3) : Base(0) → EE(6) 변환 행렬
+// - R_0^6(q) ∈ SO(3) : T_0^6(q)의 상위 3x3 회전 행렬
+// - p_0^6(q) ∈ R^3  : T_0^6(q)의 상위 3x1 위치 벡터
+// - T_0^TCP(q) = T_0^6(q) * T_6^TCP : EE에서 TCP로의 추가 변환 포함
+// - x(q) = p_0^TCP(q) : TCP의 base 좌표 위치
+// - rpy(q) : R_0^TCP(q)를 Roll-Pitch-Yaw(Euler)로 변환한 값
+//
+// 자코비안:
+//   - Jp(q) = ∂x/∂q ∈ R^(3x6)  : TCP 위치에 대한 조인트 속도의 선속도 매핑
+//   - Jw(q) ∈ R^(3x6)          : TCP 회전축(각속도)에 대한 매핑
+//   - J(q)  ∈ R^(6x6)          : [ Jp(q); Jw(q) ]
+//
+// 역기구학:
+//   - InverseK : Td(=T_0^TCP_des) 가 주어졌을 때
+//                q 를 해석적으로 0~8개까지 구해 qA->q 에 저장.
+//   - InverseK_min : 위에서 구한 해 중에서 현재 qc 에 가장 가까운 해를 선택.
+//
+//
+// 3. 주요 함수별 역할(수식 관점 설명)
+// --------------------------------------------------------
+// [1] iForwardK_P(VectorXd &q, Vector3d &x, double endlength)
+//  - 입력: 조인트 각도 q, 툴 길이 endlength
+//  - 출력: x = p_0^TCP(q) (현재 조인트에서의 TCP 위치)
+//  - 실제로는:
+//      1) UR-타입 DH/기하 모델을 이용해서 EE(플랜지) 위치 p_0^6(q)를 계산.
+//      2) 조인트 6 축 방향으로 endlength 만큼 연장 (T_6^TCP 의 z축 이동).
+//      3) 마지막에 TCP_Z_OFFSET을 더해 수직 방향 오차를 보정:
+//           x_z(q) ← x_z(q) + TCP_Z_OFFSET
+//    즉, 이 함수는 순수한 수식 기반 FK + Z축 보정까지 포함된
+//    "좌표계 레벨의 TCP 위치"를 반환하는 역할.
+//
+//
+// [2] iForwardK_T(VectorXd &q, Matrix4d &T, double endlength)
+//  - 입력: q, endlength
+//  - 출력: T = T_0^TCP(q)
+//  - 내부적으로 UR 기하식을 이용해 T_0^6(q)를 구성한 뒤,
+//    끝단에 endlength 효과와 TCP_Z_OFFSET을 반영하여
+//      T(2,3) ← T(2,3) + TCP_Z_OFFSET
+//    를 수행한다.
+//  - 제어 코드에서 별도의 CArm 없이 "조인트 → 변환행렬"이 필요할 때 사용.
+//
+//
+// [3] ForwardK_P(CArm *A)
+//  - 입력: A->qc (현재 조인트)
+//  - 출력: A->xc = p_0^6(qc)  (플랜지 위치, TCP_Z_OFFSET 미반영)
+//  - 이 함수는 플랜지 좌표만 빠르게 구할 때 사용하도록 남겨둔,
+//    "원본 2013 버전 스타일"의 플랜지 위치용 FK이다.
+//  - 실제 제어 루프에서는 ForwardK_T 를 통해 TCP_Z_OFFSET이 적용된
+//    A->Tc, A->xc 를 사용하는 것을 권장.
+//
+//
+// [4] ForwardK_Td(CArm *A)
+//  - 입력: A->qd (목표 조인트)
+//  - 출력: A->Td = T_0^TCP(qd), A->xd = p_0^TCP(qd)
+//  - 수식 관점에서는
+//       T_0^6(qd) 를 계산 → (필요 시) 툴 오프셋 고려
+//       → Z 보정: Td(2,3) += TCP_Z_OFFSET
+//    를 수행하고, Td의 위치 부분을 xd에 복사한다.
+//  - 이 값은 "Des_XYZ / Des_RPY"를 출력할 때 기준이 된다.
+//
+//
+// [5] ForwardK_T(CArm *A)
+//  - 입력: A->qc (현재 조인트)
+//  - 출력: A->Tc = T_0^TCP(qc), A->xc = p_0^TCP(qc)
+//  - 제어 루프에서 "Act_XYZ / Act_RPY"를 계산하는 핵심 FK:
+//      1) 조인트 qc에서 EE 변환 T_0^6(qc)를 계산
+//      2) TCP_Z_OFFSET을 반영: Tc(2,3) += TCP_Z_OFFSET
+//      3) Tc의 위치를 xc에 복사
+//  - Rotation2RPY() 와 연계되어,
+//      Act_RPY = RPY(Tc) 를 통해 실제 TCP 자세를 얻는다.
+//
+//
+// [6] Ycontact_ForwardK_T(CArm *A)
+//  - 입력: A->qc, this->Ycontact_TCP_pos[] (EE→TCP 오프셋)
+//  - 출력: A->Tc = T_0^TCP(qc), A->xc
+//  - 수식 관점:
+//      T_0^TCP(q) = T_0^6(q) * T_6^TCP
+//      여기서 T_6^TCP 는
+//         T_6^TCP = [ I, p_EE^TCP;
+//                      0,      1 ]
+//      로 구성되고, p_EE^TCP = Ycontact_TCP_pos.
+//  - 그 후, 마찬가지로 Tc(2,3) += TCP_Z_OFFSET 을 적용한다.
+//  - Polishing/contact control에서 "공구 끝 접촉점" 좌표계를 사용할 때
+//    필수적인 FK 체인.
+//
+//
+// [7] Rotation2EulerAngle(CArm *A)
+//  - 입력: A->Tc(0:2,0:2) = R_0^TCP(qc)
+//  - 출력: A->thc = [roll, pitch, yaw]^T
+//  - 표준적인 R → Euler 변환:
+//      roll(=thc(0)), pitch(=thc(1)), yaw(=thc(2))
+//    을 atan2, sqrt 등을 이용해 계산하고,
+//    2π wrap-around 보정(이전 각도와의 차이를 최소화)까지 수행한다.
+//
+//
+// [8] iRotation2EulerAngle(Matrix3d &R, Vector3d &th)
+//  - 입력: 일반 회전행렬 R
+//  - 출력: th = [roll, pitch, yaw]^T
+//  - 위와 유사하지만, CArm 상태와 독립적이며, wrap 보정을 하지 않는
+//    "순수 수학 함수" 버전.
+//
+//
+// [9] EulerAngle2Rotation(Matrix3d &R, Vector3d &th)
+//  - 입력: th = [roll, pitch, yaw]^T
+//  - 출력: R(th)
+//  - 수식: R = Rz(yaw) * Ry(pitch) * Rx(roll) 형태의 회전행렬 구성.
+//
+//
+// [10] VR_Rot2RPY(const Matrix3d& rotationMatrix)
+//  - 입력: VR 등 외부에서 들어온 회전행렬 R
+//  - 출력: rpy = [roll, pitch, yaw]^T
+//  - 특이점(±90°) 근처에서의 안정성을 고려한 R→RPY 변환이며,
+//    내부적으로 this->R2E_pre_rpy 를 사용해 연속적인 각도(unwrap)를 보장.
+//  - VR 기반 티칭 시, 갑작스러운 2π 점프를 막기 위한 전용 함수.
+//
+//
+// [11] Rotation2RPY(CArm *A)
+//  - 입력: A->Tc(0:2,0:2)
+//  - 출력: A->rpyc = [roll, pitch, yaw]^T
+//  - 수식:
+//       yaw   = atan2( Tc(1,0), Tc(0,0) )
+//       pitch = atan2( -Tc(2,0), Tc(0,0)*cos(yaw) + Tc(1,0)*sin(yaw) )
+//       roll  = atan2( -Tc(1,2)*cos(yaw) - Tc(0,2)*sin(yaw),
+//                      Tc(1,1)*cos(yaw) - Tc(0,1)*sin(yaw) )
+//    의 형태로 구현되어 있다.
+//  - Calibrated Tc를 기준으로 Act_RPY를 얻는 "메인 RPY 변환" 함수.
+//
+//
+// [12] InverseK / InverseK_min
+//  - InverseK(CArm *qA)
+//      입력: qA->Td = 목표 변환행렬 T_0^TCP_des
+//      출력: qA->q에 최대 8개의 해(q1~q6)를 저장하고, 개수 반환.
+//      수식:
+//        - q1: 어깨 회전, d4, d6, Td(0,2), Td(0,3) 등을 이용한 해석 해.
+//        - q5, q6: 손목 2,3축에 대한 해석 해.
+//        - q2, q3, q4: RRR 체인(어깨-팔꿈치-손목Pitch)에 대한 삼각법/코사인 법칙.
+//  - InverseK_min(CArm *A)
+//      입력: A->qc, InverseK로부터의 후보해들 A->q
+//      출력: A->qd (qc에 가장 가까운 해)
+//      수식:
+//        idx = argmin_i Σ_j (q(i,j) - qc(j))^2
+//        qd = q(idx,:)
+//      를 수행해, 실제 로봇이 "지금 관절 상태에서 자연스럽게 도달 가능한"
+//      해를 선택한다.
+//
+//
+// [13] Ycontact_InverseK / Ycontact_InverseK_min
+//  - Ycontact_InverseK(CArm *qA)
+//      입력: qA->Td = TCP 기준 목표 변환(T_0^TCP_des)
+//      수식 처리는
+//        1) T_0^EE_des = T_0^TCP_des * (T_6^TCP)^(-1)
+//        2) 위에서 얻은 T_0^EE_des 를 일반 InverseK에 넣어 q를 구함.
+//  - Ycontact_InverseK_min(CArm *A)
+//      위와 같이 해석적으로 구한 해 중에서 qc에 가장 가까운 해를 선택.
+//  - 즉, "물리적인 접촉점(TCP)"를 목표로 하는 역기구학을 반영.
+//
+//
+// [14] Jacobian / Jacobian_p / Jacobian_w
+//  - Jacobian(CArm *A)
+//      입력: A->qc
+//      출력: A->Jp, A->Jw, A->J = [Jp; Jw]
+//      수식:
+//        각 관절에 해당하는 z축 방향과 링크 위치를 이용해
+//        표준 UR-타입 기하 자코비안을 해석적으로 구성.
+//  - Jacobian_p(CArm *A)
+//      Jp 부분만 다시 계산하는 버전 (필요 시 선속도 부분만 갱신).
+//  - Jacobian_w(CArm *A)
+//      Jw 부분(각속도 매핑)만 구성.
+//
+//  - J(q)는 추종 제어에서 다음과 같은 수식에 직접 사용된다:
+//        ẋ = Jp(q) * q̇
+//        ω = Jw(q) * q̇
+//        τ = J(q)^T * F_task      (역자코비안 기반 힘/토크 분배 등)
+//
+//
+// [15] RotX / RotY / RotZ
+//  - 입력: 회전각 th
+//  - 출력: 각 축에 대한 기본 회전행렬 Rx(th), Ry(th), Rz(th)
+//  - 다른 함수(EulerAngle2Rotation, angle-axis 검증 등)에서 빌딩 블록으로 사용.
+//
+//
+// [16] angle_axis_representation(Vector3d rot_axis, double rot_angle)
+//  - 입력: 회전축 rot_axis (단위벡터), 회전각 rot_angle
+//  - 출력: R = I * cosθ + [axis]_× * sinθ + axis*axis^T*(1 - cosθ)
+//  - 즉, 로드리게스 공식(Rodrigues' formula)에 기반한 angle-axis → R 변환.
+//  - 2025 버전에서는 명시적으로
+//      c = cosθ, s = sinθ, t = 1 - c
+//    를 사용한 깔끔한 구현으로 수정.
+//
+//
+// [17] Quaternion2Rotation(CArm *A), Qua2Rot(...), Rot2Qua(...)
+//  - Quaternion2Rotation(CArm *A)
+//      A->Quat[] (w,x,y,z)를 회전행렬 A->QuatM / QuatM4 로 변환.
+//  - Qua2Rot(w,x,y,z)
+//      독립 함수 버전의 q → R.
+//  - Rot2Qua(const Matrix3d& R)
+//      R → q (Quaterniond) 변환.
+//  - 이들 함수는 IMU, VR, 외부 센서에서 들어오는 회전 정보를
+//    로봇 FK/IK 좌표계에 통합하는 데 사용된다.
+//
+//
+// 4. TCP_Z_OFFSET (2025 보정 항목)
+// --------------------------------------------------------
+// - 상단에 정의된 상수:
+//      static const double TCP_Z_OFFSET = 0.0054;
+//   는 기본 FK 수식과 실제(또는 Isaac Sim)에서 관측된 TCP 위치 사이의
+//   "항상 같은 방향의 Z 오차"를 보정하기 위한 것이다.
+// - 실험적으로,
+//      Des_Z - Act_Z ≈ +0.0054 m
+//   이 반복적으로 관측되었고, 이는 모델 상 TCP가 실제보다 5.4 mm 정도
+//   위에 있다고 가정할 수 있다.
+// - 따라서,
+//      T_0^TCP(q) 의 z 위치에 TCP_Z_OFFSET을 더해 줌으로써
+//      FK와 실제 사이의 steady bias를 제거한다.
+// - 이 보정은 iForwardK_P, iForwardK_T, ForwardK_T, ForwardK_Td,
+//   Ycontact_ForwardK_T 등 "TCP 좌표를 최종적으로 반환하는 경로"
+//   에 일관되게 적용되어 있다.
+//
+//
+// 5. 2013 버전 대비 2025 버전 변경 사항 요약
+// --------------------------------------------------------
+// (1) TCP Z 보정 추가
+//  - 새로 추가:
+//      static const double TCP_Z_OFFSET = 0.0054;
+//  - 적용 위치:
+//      iForwardK_P, iForwardK_T, ForwardK_T, ForwardK_Td,
+//      Ycontact_ForwardK_T 의 z 좌표(T(2,3), x(2))에 공통 적용.
+//  - 목적:
+//      UR10e 실제/시뮬레이터와 Analytical FK 사이의 상시적인 Z bias 제거.
+//
+// (2) Ycontact_* 계열 함수 정리 및 통합
+//  - Ycontact_ForwardK_T / Ycontact_InverseK / Ycontact_InverseK_min 에서
+//    EE→TCP 오프셋 행렬 Ycontact_EE2TCP를 명시적으로 사용하도록 정리.
+//  - 수식적으로
+//      T_0^TCP = T_0^EE * T_6^TCP
+//    관계가 코드 상에서 명확히 드러나도록 리팩토링.
+//  - Polishing, contact-based 제어 등에서 실제 공구 끝 접촉점을 정확히
+//    다루기 위한 기반 제공.
+//
+// (3) Jacobian_p 분리
+//  - 원래 Jacobian 함수가 Jp, Jw, J 전체를 한 번에 계산하던 구조에서,
+//    Jp만 따로 갱신 가능하도록 Jacobian_p 를 별도 함수로 정의.
+//  - 선속도만 자주 쓰는 경우(예: 순수 위치 제어) 계산 부담/의존성을 줄임.
+//
+// (4) angle_axis_representation 정리
+//  - 2013 버전의 수동 계산식을 보다 표준적인 로드리게스 공식 형태로
+//    재작성하여 가독성과 안정성 향상.
+//  - 불필요한 변수(v0 등)를 제거하고, Eigen::Matrix3d::Identity() 기반
+//    초기화를 사용.
+//
+// (5) VR_Rot2RPY 추가 및 연속성 보정
+//  - VR에서 들어오는 임의의 회전행렬에 대해 R→RPY 변환을 안정적으로
+//    제공하기 위해 VR_Rot2RPY 함수를 도입.
+//  - Singular case(±90°) 핸들링 및 2π unwrap 로직을 포함해,
+//    장시간 기록 시 각도 점프가 발생하지 않도록 개선.
+//
+// (6) 주석 및 문서화 강화
+//  - 각 함수의 수식적 의미(FK/IK/Jacobian/회전 변환)를 코드 상단에
+//    정리하여, 제어 논문/보고서와 코드 매핑이 쉬워지도록 함.
+//  - UR10e, TCP, contact 제어 등 현재 연구에서 실제 사용하는
+//    개념(EE/TCP, Z-bias 등)을 중심으로 설명 보강.
+//
+//
+// 6. 사용 시 주의사항
+// --------------------------------------------------------
+// - 이 파일은 "수학/기구학 계층"이므로, 실제 제어 노드는
+//   항상 ForwardK_T / ForwardK_Td / Rotation2RPY / Jacobian 계열 함수와
+//   동일한 convention을 사용해야 한다.
+// - Des_XYZ / Act_XYZ, Des_RPY / Act_RPY를 비교할 때는
+//   반드시 같은 FK/변환 함수를 사용해야 하며,
+//   TCP_Z_OFFSET 이 어느 경로에 들어가 있는지 일관되게 맞춰야 한다.
+// - UR 파라미터(d1, a2, a3, d4, d5, d6)가 바뀌면
+//   FK/IK/Jacobian의 해석 수식에도 영향이 있으므로,
+//   Arm_class.h 의 파라미터 변경 시 반드시 재검증이 필요하다.
+////////////////////////////////////////////////////////////
 
-//////
 #include <cmath>
 #include <ctime>
 #include <iostream>
