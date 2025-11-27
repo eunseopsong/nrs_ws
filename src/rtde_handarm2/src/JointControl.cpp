@@ -119,7 +119,7 @@ static void ensure_parent_dir(const std::string& filepath, const rclcpp::Logger&
 }
 
 // EE +Z → TCP 오프셋(모든 FK/IK에서 동일 사용)
-static constexpr double TOOL_Z = 0.325;  // [m]
+static constexpr double TOOL_Z = 0.3304;   // [m]
 // static constexpr double TOOL_Z = 0.343;  // [m]
 
 // ★ 플랜지 <-> TCP 변환 헬퍼 (z방향 오프셋만)
