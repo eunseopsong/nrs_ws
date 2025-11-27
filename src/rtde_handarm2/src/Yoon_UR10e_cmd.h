@@ -4,7 +4,7 @@
 // if you want sub command add to the additional room like 5000 -> 5001
 #define FK_control_mode_cmd 1000    // Joints control mode
 
-#define IK_control_mode_cmd  2000  // EE Positon control mode
+#define IK_control_mode_cmd  2000   // EE Positon control mode
 
 #define EE_Posture_control_mode_cmd 3000
 
