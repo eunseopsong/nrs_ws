@@ -21,8 +21,8 @@
 //   - 자코비안 J(q) = [ Jp(q); Jw(q) ]
 // 을 계산하는 것을 목표로 한다.
 //
-// 제어 파이프라인의 상위 계층(Whole-body control, Admittance control,
-// Cartesian PD 등)은 이 파일에서 제공하는 x(q), R(q), J(q) 를 이용해
+// 제어 파이프라인의 상위 계층(Admittance control, Cartesian PD 등)
+// 은 이 파일에서 제공하는 x(q), R(q), J(q) 를 이용해
 // 원하는 작업공간 궤적을 구현한다.
 //
 //
