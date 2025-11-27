@@ -4,8 +4,40 @@
 // Create on 2013. 12. 24
 // See the header file for update information
 ////////////////////////////////////////////////////////////
-////////////////// Ver 2.00 ////////////////////////////////
-////////////////////////////////////////////////////////////
+//
+// Functional overview (updated 2025-11-27)
+// --------------------------------------------------------
+// - Closed-form kinematics for a 6-DOF UR-type arm (UR10 / UR10e style)
+// - Link/DH parameters (d1, a2, a3, d4, d5, d6) are defined in Arm_class.h
+// - Main function groups:
+//   * iForwardK_P / iForwardK_T
+//       - Forward kinematics with raw joint vector (no CArm).
+//       - Optional 'endlength' allows adding virtual tool length on joint 6.
+//   * ForwardK_P / ForwardK_T
+//       - Forward kinematics for the current joint configuration A->qc.
+//       - Writes end-effector transform Tc and position xc into CArm.
+//   * ForwardK_Td
+//       - Forward kinematics for the desired joint configuration A->qd.
+//       - Writes Td and xd into CArm.
+//   * Ycontact_ForwardK_T / Ycontact_InverseK / Ycontact_InverseK_min
+//       - FK/IK pair with an additional EE→TCP transform
+//         (Ycontact_EE2TCP built from Ycontact_TCP_pos[]).
+//       - Used when the physical TCP (e.g., contact point on a tool) is
+//         offset from the flange frame.
+//   * InverseK / InverseK_min
+//       - Analytic inverse kinematics for UR-style arm, returning up to 8
+//         solutions and selecting the one closest to the current A->qc.
+//   * Jacobian / Jacobian_p / Jacobian_w
+//       - 6x6 geometric Jacobian (linear+angular) and its 3x6 parts.
+//   * Rotation / quaternion utilities
+//       - Rotation<->Euler, angle-axis, quaternion<->rotation conversions.
+//
+// - This file can embed small calibration terms so that the analytical
+//   model better matches a specific real/simulated robot without touching
+//   the rest of the control pipeline.
+//   In particular, TCP_Z_OFFSET below compensates a measured steady Z-bias
+//   between FK and the actual TCP position.
+// --------------------------------------------------------
 
 //////
 #include <cmath>
@@ -13,6 +45,15 @@
 #include <iostream>
 #include "Arm_class.h"
 #include "Kinematics.h"
+
+// -----------------------------------------------------------------------------
+// Small Z-offset calibration between analytical FK and actual TCP (meters)
+// Positive value shifts the reported TCP position upward in the base Z-axis.
+// This value (0.0054 m) comes from an observed error:
+//   Des_Z - Act_Z ≈ +0.0054  (TCP was 5.4 mm lower than desired)
+// If you re-calibrate, update this constant accordingly.
+// -----------------------------------------------------------------------------
+static const double TCP_Z_OFFSET = 0.0054;
 
 Kinematic_func::Kinematic_func()
 {
@@ -24,7 +65,7 @@ Kinematic_func::Kinematic_func()
 void Kinematic_func::iForwardK_P(VectorXd &q, Vector3d &x, double endlength)
 {
 	// Input = Joint Angle q, additional end length endlength
-	// Output = Current Position x
+	// Output = Current Position x (with endlength along joint-6 + TCP_Z_OFFSET)
 
 	double d6a = d6 + endlength;
 
@@ -46,13 +87,16 @@ void Kinematic_func::iForwardK_P(VectorXd &q, Vector3d &x, double endlength)
 
 	x(0) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6a*(c1*c234-s1*s234)*s5)/2.0 + (d6a*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6a*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
 	x(1) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6a*(s1*c234+c1*s234)*s5)/2.0 + (d6a*(s1*c234-c1*s234)*s5)/2.0 + d6a*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	x(2) = (d1 + (d6a*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6a*(c234*c5+s234*s5))/2.0 - d5*c234);
+	x(2) =  (d1 + (d6a*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6a*(c234*c5+s234*s5))/2.0 - d5*c234);
+
+	// Z calibration
+	x(2) += TCP_Z_OFFSET;
 }
 
 void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // revise on 2025.06.09 //// MatrixXd &T, double endlength)
 {
 	// Input = Joint Angle q, additional end length endlength
-	// Output = Transformation Matrix T
+	// Output = Transformation Matrix T (with endlength on joint-6 + TCP_Z_OFFSET)
 
 	double d6a = d6 + endlength;
 
@@ -87,10 +131,14 @@ void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // 
 	T(2,2) = ((c234*c5-s234*s5)/2.0 - (c234*c5+s234*s5)/2.0);
 	T(3,2) = 0;
 
+	// NOTE: here we keep 'd6' as-is, i.e., endlength is handled separately via d6a if needed.
 	T(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
 	T(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	T(2,3) = (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	T(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	T(3,3) = 1;
+
+	// Z calibration
+	T(2,3) += TCP_Z_OFFSET;
 }
 
 
@@ -99,7 +147,7 @@ void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // 
 void Kinematic_func::ForwardK_P(CArm *A)
 {
 	// Input = Current Joint Angle qc
-	// Output = Current Position xc
+	// Output = Current Position xc  (flange FK, no TCP_Z_OFFSET here – main code uses ForwardK_T)
 
 	s1 = sin(A->qc(0));
 	c1 = cos(A->qc(0));
@@ -119,13 +167,13 @@ void Kinematic_func::ForwardK_P(CArm *A)
 
 	A->xc(0) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
 	A->xc(1) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->xc(2) = (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->xc(2) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 }
 
 void Kinematic_func::ForwardK_Td(CArm *A)
 {
 	// Input = Desire Joint Angle qd
-	// Output = Desire Transform Matrix Td
+	// Output = Desire Transform Matrix Td, Desire Position xd (with TCP_Z_OFFSET)
 
 	s1 = sin(A->qd(0));
 	c1 = cos(A->qd(0));
@@ -160,8 +208,11 @@ void Kinematic_func::ForwardK_Td(CArm *A)
 
 	A->Td(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
 	A->Td(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->Td(2,3) = (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->Td(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	A->Td(3,3) = 1;
+
+	// Z calibration for desired pose representation
+	A->Td(2,3) += TCP_Z_OFFSET;
 
 	A->xd(0) = A->Td(0,3);
 	A->xd(1) = A->Td(1,3);
@@ -171,7 +222,7 @@ void Kinematic_func::ForwardK_Td(CArm *A)
 void Kinematic_func::ForwardK_T(CArm *A)
 {
 	// Input = Current Joint Angle qc
-	// Output = Current Transform Matrix Tc, Current Position xc
+	// Output = Current Transform Matrix Tc, Current Position xc (with TCP_Z_OFFSET)
 
 	s1 = sin(A->qc(0));
 	c1 = cos(A->qc(0));
@@ -212,8 +263,11 @@ void Kinematic_func::ForwardK_T(CArm *A)
 
 	A->Tc(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
 	A->Tc(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->Tc(2,3) = (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->Tc(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	A->Tc(3,3) = 1;
+
+	// Z calibration at the very end (world frame Z)
+	A->Tc(2,3) += TCP_Z_OFFSET;
 
 	A->xc(0) = A->Tc(0,3);
 	A->xc(1) = A->Tc(1,3);
@@ -224,6 +278,8 @@ void Kinematic_func::Ycontact_ForwardK_T(CArm *A)
 {
 	// Input = Current Joint Angle qc
 	// Output = Current Transform Matrix Tc, Current Position xc
+	//          including EE→TCP offset (Ycontact_TCP_pos) and TCP_Z_OFFSET.
+
 	this->Ycontact_EE2TCP <<  1, 0, 0, this->Ycontact_TCP_pos[0],
 						      0, 1, 0, this->Ycontact_TCP_pos[1],
 						      0, 0, 1, this->Ycontact_TCP_pos[2],
@@ -268,10 +324,14 @@ void Kinematic_func::Ycontact_ForwardK_T(CArm *A)
 
 	A->Tc(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
 	A->Tc(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->Tc(2,3) = (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->Tc(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	A->Tc(3,3) = 1;
 
-	A->Tc = A->Tc*this->Ycontact_EE2TCP;
+	// Apply EE -> TCP transform (tool/contact offset)
+	A->Tc = A->Tc * this->Ycontact_EE2TCP;
+
+	// Z calibration in world frame after TCP transform
+	A->Tc(2,3) += TCP_Z_OFFSET;
 
 	A->xc(0) = A->Tc(0,3);
 	A->xc(1) = A->Tc(1,3);
@@ -315,12 +375,6 @@ void Kinematic_func::Rotation2EulerAngle(CArm *A)
 {
 	// Input = Current Rotation Matirx Tc
 	// Output = Current Euler Angle thc
-
-	/*A->thc(1) = atan2(-A->Tc(2,0), sqrt(A->Tc(0,0)*A->Tc(0,0)+A->Tc(1,0)*A->Tc(1,0)));
-	float cb = cos(A->thc(1));
-	A->thc(2) = atan2(A->Tc(1,0)/cb, A->Tc(0,0)/cb);
-	A->thc(0) = atan2(A->Tc(2,1)/cb, A->Tc(2,2)/cb);
-*/
 
 	double orig,orig_PL,orig_MI;
 
@@ -463,6 +517,18 @@ int Kinematic_func::sgn(double x)
 	if(x<0) return -1;
 	if(x==0) return 0;
 }
+
+// ------------------------- IK & Jacobian (unchanged) -------------------------
+// 이하 InverseK, InverseK_min, Ycontact_InverseK(_min), Jacobian,
+// Jacobian_p, Jacobian_w, RotX/Y/Z, angle_axis_representation,
+// Qua2Rot, Rot2Qua 는 기존 코드 그대로 유지
+// (위에서 이미 붙여준 상태라 생략 없이 전부 들어가 있음)
+// ---------------------------------------------------------------------------
+
+// ... (여기부터는 너가 올린 InverseK / Ycontact_InverseK / Jacobian /
+//      RotX/Y/Z / angle_axis_representation / Qua2Rot / Rot2Qua 부분이
+//      그대로 이어짐 – 위에서 이미 포함시켰으니 그대로 사용하면 됨)
+
 
 int Kinematic_func::InverseK(CArm *qA)
 {
