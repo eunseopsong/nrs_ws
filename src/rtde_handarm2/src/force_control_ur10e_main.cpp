@@ -1,8 +1,100 @@
+// force_control_ur10e_main.cpp
+// - UR10e EE/TCP 기준 Admittance + FAAC 기반 힘제어 체인
+// - M/D/K 파라미터는 yaml/ur10e_spindle_parameter.yaml 의 force_control 섹션에서 로드
+//
+//   yaml 예시:
+//   force_control:
+//     mass:      [1.0, 1.0, 1.0, 0.05, 0.05, 0.05]
+//     damping:   [6000.0, 6000.0, 6000.0, 10.0, 10.0, 10.0]
+//     stiffness: [2000.0, 2000.0, 2000.0, 20.0, 20.0, 20.0]
+
 #include "func_ur10e_main.h"
 #include "JointControl.h"
-#include <algorithm>   // std::clamp
 
-// ===================== runCartesianForceChain() =====================
+#include <algorithm>   // std::clamp
+#include <vector>
+#include <memory>
+#include <cmath>
+
+#include <yaml-cpp/yaml.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
+// ============================================================================
+//  YAML 로부터 force_control.{mass,damping,stiffness} 로드
+// ============================================================================
+namespace {
+
+void load_force_control_params(
+    rclcpp::Logger logger,
+    double FC_MASS[6],
+    double FC_DAMPER[6],
+    double FC_STIFFNESS[6])
+{
+    // 1) 기본값 (기존 하드코딩 값)
+    double default_mass[6]      = {1.0,   1.0,   1.0,   0.05, 0.05, 0.05};
+    double default_damper[6]    = {6000., 6000., 6000., 10.0, 10.0, 10.0};
+    double default_stiffness[6] = {2000., 2000., 2000., 20.0, 20.0, 20.0};
+
+    for (int i = 0; i < 6; ++i) {
+        FC_MASS[i]      = default_mass[i];
+        FC_DAMPER[i]    = default_damper[i];
+        FC_STIFFNESS[i] = default_stiffness[i];
+    }
+
+    try {
+        // 패키지 share 디렉토리 기준 경로:
+        //   share/rtde_handarm2/yaml/ur10e_spindle_parameter.yaml
+        std::string pkg_share =
+            ament_index_cpp::get_package_share_directory("rtde_handarm2");
+        std::string yaml_path = pkg_share + "/yaml/ur10e_spindle_parameter.yaml";
+
+        YAML::Node root = YAML::LoadFile(yaml_path);
+        if (!root["force_control"]) {
+            RCLCPP_WARN(logger,
+                "[force_control] YAML node not found in %s, using defaults.",
+                yaml_path.c_str());
+            return;
+        }
+        YAML::Node fc_node = root["force_control"];
+
+        auto load_vec = [&](const char* key, double out[6]){
+            if (!fc_node[key]) {
+                RCLCPP_WARN(logger,
+                    "[force_control.%s] not found in %s, keep defaults.",
+                    key, yaml_path.c_str());
+                return;
+            }
+            auto node = fc_node[key];
+            if (!node.IsSequence() || node.size() != 6) {
+                RCLCPP_WARN(logger,
+                    "[force_control.%s] must be length-6 sequence in %s, keep defaults.",
+                    key, yaml_path.c_str());
+                return;
+            }
+            for (std::size_t i = 0; i < 6; ++i) {
+                out[i] = node[i].as<double>();
+            }
+        };
+
+        load_vec("mass",      FC_MASS);
+        load_vec("damping",   FC_DAMPER);
+        load_vec("stiffness", FC_STIFFNESS);
+
+        RCLCPP_INFO(logger,
+            "Loaded force_control params from %s", yaml_path.c_str());
+
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(logger,
+            "Failed to load force_control params from YAML: %s. Using defaults.",
+            e.what());
+    }
+}
+
+} // namespace
+
+// ============================================================================
+//  JointControl::runCartesianForceChain
+// ============================================================================
 void JointControl::runCartesianForceChain(
     const Eigen::Vector3d& Xd,
     const Eigen::Vector3d& RPYd,
@@ -48,7 +140,7 @@ void JointControl::runCartesianForceChain(
         const double cp = std::cos(rpy(1));
         const double sp = std::sin(rpy(1));
         const double cy = std::cos(rpy(2));
-        const double sy = std::cos(rpy(2)) - 0; // 안전을 위해 분리해도 됨
+        const double sy = std::sin(rpy(2));  // ★ BUGFIX: sin 사용
 
         Eigen::Matrix3d Rz;
         Rz << cy,-sy,0,
@@ -100,7 +192,9 @@ void JointControl::runCartesianForceChain(
     // =========================================================================
     // STEP 4) 어드미턴스 + FAAC (Fd, F_ext 직접 사용)
     // =========================================================================
-    static bool fc_init = false;
+    static bool fc_init         = false;
+    static bool fc_param_loaded = false;
+
     static Yadmittance_control AControl[6] = {
         Yadmittance_control(0.001), Yadmittance_control(0.001),
         Yadmittance_control(0.001), Yadmittance_control(0.001),
@@ -110,9 +204,17 @@ void JointControl::runCartesianForceChain(
     static bool   FAAC_flag[3] = {false,false,false};
     static double AC_pose_pos[3] = {0.0,0.0,0.0};
     static double AC_pose_ori[3] = {0.0,0.0,0.0};
-    static double FC_MASS[6]      = {1.0,   1.0,   1.0,   0.05, 0.05, 0.05};
-    static double FC_DAMPER[6]    = {6000., 6000., 6000., 10.0, 10.0, 10.0};
-    static double FC_STIFFNESS[6] = {2000., 2000., 2000., 20.0, 20.0, 20.0};
+
+    static double FC_MASS[6];
+    static double FC_DAMPER[6];
+    static double FC_STIFFNESS[6];
+
+    // --- 4-0) YAML에서 M/D/K 한 번만 로드 ---
+    if (!fc_param_loaded) {
+        load_force_control_params(node_->get_logger(),
+                                  FC_MASS, FC_DAMPER, FC_STIFFNESS);
+        fc_param_loaded = true;
+    }
 
     if (!fc_init) {
         // admittance 초기화
@@ -124,8 +226,8 @@ void JointControl::runCartesianForceChain(
             );
         }
         // FAAC 초기화
-        std::vector<double> proc_noise = {0.1,0.1,0.1};
-        std::vector<double> meas_noise = {10.0,10.0,10.0};
+        std::vector<double> proc_noise = {0.1, 0.1, 0.1};
+        std::vector<double> meas_noise = {10.0, 10.0, 10.0};
         double dt_for_faac = (dt_s > 0.0 ? dt_s : 0.001);
         for (int ax = 0; ax < 3; ++ax) {
             FAAC3step[ax] = std::make_unique<Nrs3StepFAAC>(
@@ -145,6 +247,7 @@ void JointControl::runCartesianForceChain(
         AC_pose_ori[0] = Wd(0);
         AC_pose_ori[1] = Wd(1);
         AC_pose_ori[2] = Wd(2);
+
         fc_init = true;
     }
 
@@ -163,7 +266,7 @@ void JointControl::runCartesianForceChain(
             auto faac_mdk = FAAC3step[ax]->FAAC_MDKob_RUN(
                 Tank_energy,
                 F_ext(ax),
-                Fd(ax),          // ⬅ 여기서도 Fd_cmd 대신 Fd
+                Fd(ax),          // ⬅ 원하는 힘 Fd
                 AC_pose_pos[ax],
                 X_act(ax)
             );
@@ -215,7 +318,7 @@ void JointControl::runCartesianForceChain(
     AC_pose_ori[1] = Wc_cmd(1);
     AC_pose_ori[2] = Wc_cmd(2);
 
-    // debug step4 (Fd_cmd 대신 Fd 사용)
+    // debug step4
     {
         std_msgs::msg::Float64MultiArray dbg;
         dbg.data.resize(13);
@@ -264,7 +367,7 @@ void JointControl::runCartesianForceChain(
     joint_commands_pub_->publish(joint_state_);
 
     // =========================================================================
-    // STEP 7) 외력 publish
+    // STEP 7) 외력 publish (Base frame 기준 F_ext)
     // =========================================================================
     {
         std_msgs::msg::Float64MultiArray force_msg;
