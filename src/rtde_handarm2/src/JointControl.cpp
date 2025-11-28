@@ -318,15 +318,30 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 3) IK + Admittance mode: EE pose + desired force 입력 → runCartesianForceChain
+  // 3) IK + Admittance mode:
+  //    - 터미널에서 [x y z r p y fx fy fz] 한 번 입력
+  //    - 1단계: 현재 qc -> 목표 EE pose의 IK(q_target)까지 joint-space로 부드럽게 이동(InitMove처럼)
+  //    - 2단계: 목표에 도달 후 runCartesianForceChain으로 어드미턴스+힘제어 수행
   if (control_mode == 3) {
-    static bool            ik_force_cmd_set = false;
-    static Eigen::Vector3d ik_force_xyz     = Eigen::Vector3d::Zero();
-    static Eigen::Vector3d ik_force_rpy     = Eigen::Vector3d::Zero();
-    static Eigen::Vector3d ik_force_Fd      = Eigen::Vector3d::Zero();
+    // ---- 상태 변수들 (이 모드에서만 사용) ----
+    static bool            ik_force_cmd_set   = false;  // 입력 9개 받았는지
+    static bool            init_phase_active  = false;  // InitMove 단계 진행중인지
+    static double          init_interp_s      = 0.0;    // 0~1 보간 인자
+    static Vector6d        q_start            = Vector6d::Zero();
+    static Vector6d        q_target           = Vector6d::Zero();
+    static Eigen::Vector3d ik_force_xyz       = Eigen::Vector3d::Zero();
+    static Eigen::Vector3d ik_force_rpy       = Eigen::Vector3d::Zero();
+    static Eigen::Vector3d ik_force_Fd        = Eigen::Vector3d::Zero();
 
-    // 모드 진입 직후 한 번만 터미널에서 9개 값 입력
-    if (pre_control_mode != control_mode || !ik_force_cmd_set) {
+    // 모드가 바뀌면 상태 초기화
+    if (pre_control_mode != control_mode) {
+      ik_force_cmd_set  = false;
+      init_phase_active = false;
+      init_interp_s     = 0.0;
+    }
+
+    // ---------- ① 터미널에서 목표 pose + 힘 입력 ----------
+    if (!ik_force_cmd_set) {
       double buf[9];
       if (!readDoublesFromStdin(
               "\n[IK + Admittance mode] Enter [x y z r p y fx fy fz] (m, rad, N): ",
@@ -340,21 +355,83 @@ void JointControl::CalculateAndPublishJoint() {
       ik_force_rpy << buf[3], buf[4], buf[5];   // RPY
       ik_force_Fd  << buf[6], buf[7], buf[8];   // 원하는 힘 (N)
 
-      ik_force_cmd_set = true;
+      // 디버그용 Desired 값 갱신
+      Desired_XYZ = ik_force_xyz;
+      Desired_RPY = ik_force_rpy;
+
+      // ---------- ② 목표 EE pose에 대한 IK로 q_target 계산 ----------
+      Eigen::Vector3d rpy_tmp = ik_force_rpy;
+      Eigen::Matrix3d Rd;
+      AKin.EulerAngle2Rotation(Rd, rpy_tmp);
+
+      RArm.Td <<
+          Rd(0,0), Rd(0,1), Rd(0,2), ik_force_xyz(0),
+          Rd(1,0), Rd(1,1), Rd(1,2), ik_force_xyz(1),
+          Rd(2,0), Rd(2,1), Rd(2,2), ik_force_xyz(2),
+          0,       0,       0,       1;
+
+#if TCP_standard == 0
+      AKin.InverseK_min(&RArm);
+#else
+      AKin.Ycontact_InverseK_min(&RArm);
+#endif
+      // IK 결과를 q_target으로 저장
+      for (int i = 0; i < DOF; ++i) {
+        q_target(i) = RArm.qd(i);
+      }
+
+      // 시작 조인트는 현재 qc
+      for (int i = 0; i < DOF; ++i) {
+        q_start(i) = RArm.qc(i);
+      }
+
+      // InitMove 단계 시작
+      init_phase_active = true;
+      init_interp_s     = 0.0;
+      ik_force_cmd_set  = true;
     }
 
-    // 디버그용 Desired 값 갱신 (선택)
-    Desired_XYZ = ik_force_xyz;
-    Desired_RPY = ik_force_rpy;
+    // ---------- ③ InitMove 단계: q_start -> q_target 부드럽게 이동 ----------
+    if (init_phase_active) {
+      // 총 이동 시간을 T_move [s]로 가정 (필요하면 파라미터로 빼도 됨)
+      const double T_move = 5.0;  // 2초 동안 서서히 이동
+      double ds = dt_s / T_move;
+      if (ds > 1.0) ds = 1.0;
 
-    // Admittance + IK + joint publish를 한 번에 수행
+      init_interp_s += ds;
+      if (init_interp_s >= 1.0) {
+        init_interp_s   = 1.0;
+        init_phase_active = false;  // 보간 끝 → 다음부터 힘제어 단계
+      }
+
+      // 선형 보간: q(t) = (1-s)*q_start + s*q_target
+      for (int i = 0; i < DOF; ++i) {
+        RArm.qd(i) = (1.0 - init_interp_s) * q_start(i)
+                     + init_interp_s * q_target(i);
+      }
+
+      // 조인트 명령 퍼블리시
+      joint_state_.header.stamp = node_->now();
+      for (int i = 0; i < DOF; ++i) {
+        joint_state_.position[i] = RArm.qd(i);
+      }
+      joint_commands_pub_->publish(joint_state_);
+
+      // 아직 InitMove 진행중이면 여기서 종료 (힘제어 X)
+      pre_ctrl.store(control_mode, std::memory_order_relaxed);
+      return;
+    }
+
+    // ---------- ④ InitMove 완료 후: Admittance + Force control 실행 ----------
+    // 이 시점부터는 항상 같은 목표 Xd/RPYd/Fd 를 기준으로 어드미턴스 제어
     runCartesianForceChain(ik_force_xyz, ik_force_rpy, ik_force_Fd, dt_s);
 
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
 
-  // 3) Playback mode: InitMove -> PathFollow -> ReturnHomePose
+
+  // 4) Playback mode: InitMove -> PathFollow -> ReturnHomePose
   if (control_mode == 4) {
     static bool init_done   = false;
     static bool follow_done = false;
