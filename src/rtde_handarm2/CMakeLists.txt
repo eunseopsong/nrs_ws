@@ -117,7 +117,7 @@ list(REMOVE_ITEM sources ${EXCLUDE_SOURCES})
 #   (반드시 rtde_handarm2/src/func_ur10e_main.cpp 경로에 있어야 함)
 list(APPEND sources "${CMAKE_CURRENT_SOURCE_DIR}/src/func_ur10e_main.cpp")
 list(APPEND sources "${CMAKE_CURRENT_SOURCE_DIR}/src/callback_ur10e_main.cpp")
-list(APPEND sources "${CMAKE_CURRENT_SOURCE_DIR}/src/force_control_ur10e_main.cpp")
+# list(APPEND sources "${CMAKE_CURRENT_SOURCE_DIR}/src/force_control_ur10e_main.cpp")
 list(REMOVE_DUPLICATES sources)
 
 # ------- ur10e_main node -------- #
