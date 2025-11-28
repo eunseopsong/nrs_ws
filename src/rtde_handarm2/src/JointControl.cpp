@@ -1,5 +1,5 @@
-// JointControl.cpp (v2025-rt-safe, TCP-base version)
-// - 모든 외부/내부 좌표를 EE/TCP 기준으로 통일
+// JointControl.cpp (v2025-rt-safe, TCP-only version)
+// - 모든 외부/내부 좌표를 EE/TCP 기준(= Ycontact TCP)으로 완전 통일
 // - dt 측정, 조인트 소스 단일화, 힘 변환/퍼블리시 최적화
 // - Path/Teleop/IK 모드에서 Xd, Act_XYZ 모두 TCP 좌표 사용
 // - InitMove/PathFollow/ReturnHomePose/runCartesianForceChain 의 실제 구현은
@@ -279,14 +279,12 @@ void JointControl::CalculateAndPublishJoint() {
   RArm.qd = RArm.qc;
   RArm.qt = RArm.qc;
 
-  // FK (EE/TCP 기준으로 가정)
-#if TCP_standard == 0
-  AKin.ForwardK_T(&RArm);
-#else
-  AKin.Ycontact_ForwardK_T(&RArm);
-#endif
-  AKin.Rotation2EulerAngle(&RArm); // Tc -> thc
-  RArm.Td = RArm.Tc;
+  // =====================================================================
+  // FK: 항상 Base -> TCP (Ycontact 기준) 으로 통일
+  // =====================================================================
+  AKin.Ycontact_ForwardK_T(&RArm);   // Base -> TCP
+  AKin.Rotation2EulerAngle(&RArm);   // Tc(TCP) -> thc (RPY)
+  RArm.Td = RArm.Tc;                 // 기본적으로 Td 도 현재 TCP pose 로 맞춰둠
 
   // 가시화용
   for (int i = 0; i < DOF; ++i) joint_pos[i] = RArm.qc(i);
@@ -306,7 +304,7 @@ void JointControl::CalculateAndPublishJoint() {
   // 디버그 프린트
   if (printer_counter >= print_period) {
 #if RT_printing
-    Eigen::Vector3d tcp_act = RArm.xc;
+    Eigen::Vector3d tcp_act = RArm.xc;  // 실제 TCP 위치
 
     printf("======================================== \n");
     printf("Simulation time : %d ms\n", (int)milisec);
@@ -336,7 +334,7 @@ void JointControl::CalculateAndPublishJoint() {
     printer_counter++;
   }
 
-  // Pose / Wrench 토픽 퍼블리시 (EE/TCP 기준)
+  // Pose / Wrench 토픽 퍼블리시 (TCP 기준)
   UR10_pose_msg_.data.resize(6);
   UR10_wrench_msg_.data.resize(6);
   Eigen::Vector3d tcp_act = RArm.xc;
@@ -410,7 +408,7 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 2) IK mode: EE/TCP pose 명령
+  // 2) IK mode: EE/TCP pose 명령 (항상 TCP 기준)
   if (control_mode == 2) {
     static bool            ik_target_set = false;
     static Eigen::Vector3d ik_target_xyz = Eigen::Vector3d::Zero();
@@ -446,11 +444,8 @@ void JointControl::CalculateAndPublishJoint() {
         Rd(2,0), Rd(2,1), Rd(2,2), ik_target_xyz(2),
         0,       0,       0,       1;
 
-#if TCP_standard == 0
-    AKin.InverseK_min(&RArm);
-#else
+    // 항상 Base->TCP (Ycontact) 기준 IK
     AKin.Ycontact_InverseK_min(&RArm);
-#endif
 
     joint_state_.header.stamp = node_->now();
     for (int i = 0; i < DOF; ++i)
