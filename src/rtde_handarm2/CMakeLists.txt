@@ -55,9 +55,9 @@ find_package(yaml-cpp REQUIRED)
 find_package(nrs_forcecon2 REQUIRED)
 find_package(nrs_msgmonitoring2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
-find_package(HDF5 REQUIRED COMPONENTS C CXX)         # 기존 joint_recorder에서 쓰던 것
-find_package(OpenCV REQUIRED)                        # ⬅️ 새 노드에서 이미지 저장용
-find_package(cv_bridge REQUIRED)                     # ⬅️ /camera/rgb → cv::Mat 변환용
+find_package(HDF5 REQUIRED COMPONENTS C CXX)
+find_package(OpenCV REQUIRED)
+find_package(cv_bridge REQUIRED)
 
 ament_export_dependencies(
   rclcpp
@@ -107,11 +107,16 @@ set(EXCLUDE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_cmd.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_path_receiver.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_joint_recorder.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/ur10e_act_data_gen.cpp"   # ⬅️ 새 노드는 따로 빌드
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ur10e_act_data_gen.cpp"
 )
 
 # 3. 리스트에서 제외
 list(REMOVE_ITEM sources ${EXCLUDE_SOURCES})
+
+# 🔴 func_ur10e_main.cpp를 확실히 포함시키기
+#   (반드시 rtde_handarm2/src/func_ur10e_main.cpp 경로에 있어야 함)
+list(APPEND sources "${CMAKE_CURRENT_SOURCE_DIR}/src/func_ur10e_main.cpp")
+list(REMOVE_DUPLICATES sources)
 
 # ------- ur10e_main node -------- #
 add_executable(nrs_ctrl src/node_ur10e_main.cpp ${sources} ${Yoon_LIB})
@@ -139,14 +144,14 @@ add_executable(path_receiver src/node_path_receiver.cpp)
 ament_target_dependencies(path_receiver rclcpp std_msgs)
 install(TARGETS path_receiver DESTINATION lib/${PROJECT_NAME})
 
-# -------- joint_recorder node (기존) --------- #
+# -------- joint_recorder node --------- #
 add_executable(joint_recorder src/node_joint_recorder.cpp)
 target_include_directories(joint_recorder PUBLIC ${HDF5_INCLUDE_DIRS})
 target_link_libraries(joint_recorder ${HDF5_LIBRARIES})
 ament_target_dependencies(joint_recorder rclcpp sensor_msgs)
 install(TARGETS joint_recorder DESTINATION lib/${PROJECT_NAME})
 
-# -------- act data gen node (새로 추가) -------- #
+# -------- act data gen node --------- #
 add_executable(ur10e_act_data_gen src/ur10e_act_data_gen.cpp)
 target_include_directories(ur10e_act_data_gen PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
