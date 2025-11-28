@@ -7,12 +7,15 @@
 #define IK_control_mode_cmd  2000   // EE Positon control mode
 
 #define EE_Posture_control_mode_cmd 3000
-
 #define Hand_guiding_mode_cmd 4000
-
 #define Data_recording_mode_cmd 5000
-#define Continuous_reording_start 5001
-#define Continusous_recording_end 5002
+
+#define VR_teleop_start 5001
+#define VR_teleop_end 5002
+
+#define Keyboard_teleop_start 5003
+// #define VR_teleop_end 5002
+
 #define Discrete_reording_start 5101
 #define Discrete_recording_end 5102
 #define Discrete_recording_save 5103

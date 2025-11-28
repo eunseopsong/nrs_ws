@@ -184,32 +184,32 @@ int main(int argc, char *argv[])
         {
             int recording_mode = -1;
             std::cout << "\n[ -- Recording mode selection -- ]" << std::endl;
-            std::cout << "1 : Continuous reording start, 2 : Continuous reording end" << std::endl;
+            std::cout << "1 : VR teleop start, 2 : VR teleop end" << std::endl;
             std::cout << "3 : Discrete point rececording start " << std::endl;
             std::cout << "0 : quit" << std::endl;
             std::cin >> recording_mode;
 
             if(recording_mode == 1)
             {
-                yoon_mode_msg.data = Continuous_reording_start;
+                yoon_mode_msg.data = VR_teleop_start;
                 yoon_mode_pub->publish(yoon_mode_msg);
                 rclcpp::spin_some(node); //// ros::spinOnce();
                 std::cout << "To terminate the recording press '2'" << std::endl;
                 std::cin >> recording_mode;
                 if(recording_mode == 2)
                 {
-                    yoon_mode_msg.data = Continusous_recording_end;
+                    yoon_mode_msg.data = VR_teleop_end;
                     yoon_mode_pub->publish(yoon_mode_msg);
                     rclcpp::spin_some(node); //// ros::spinOnce();
                 }
             }
             else if(recording_mode == 2)
             {
-                yoon_mode_msg.data = Continusous_recording_end;
+                yoon_mode_msg.data = VR_teleop_end;
                 yoon_mode_pub->publish(yoon_mode_msg);
                 rclcpp::spin_some(node);     //// ros::spinOnce();
             }
-            else if(recording_mode == 3) 
+            else if(recording_mode == 3)
             {
                 int point_counter = 0;
                 while(1)
