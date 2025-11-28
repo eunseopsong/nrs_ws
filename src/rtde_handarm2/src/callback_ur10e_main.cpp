@@ -41,8 +41,13 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
     }
 
     // ===================== IK Control Mode wo/ Force Control ===================== //
-    else if (mode_cmd == IK_control_mode_cmd) {
+    else if (mode_cmd == IK_w_force_control_mode_cmd) {
       ctrl.store(2, std::memory_order_release);
+    }
+
+    // ===================== IK Control Mode w/ Force Control ===================== //
+    else if (mode_cmd == IK_wo_force_control_mode_cmd) {
+      ctrl.store(3, std::memory_order_release);
     }
 
     // ===================== Playback Mode for Path(.txt) Execution ===================== //

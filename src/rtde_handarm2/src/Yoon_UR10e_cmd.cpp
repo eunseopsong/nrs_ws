@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
 
             joint_command[1] = joint_command[1]*(PI/180);
 
-            yoon_mode_msg.data = IK_control_mode_cmd;
+            yoon_mode_msg.data = IK_w_force_control_mode_cmd;
             joint_command_msg.data.clear();
 
             for(int i=0;i<2;i++)
@@ -184,7 +184,7 @@ int main(int argc, char *argv[])
         {
             int recording_mode = -1;
             std::cout << "\n[ -- Recording mode selection -- ]" << std::endl;
-            std::cout << "1 : VR teleop start, 2 : VR teleop end" << std::endl;
+            std::cout << "1 : VR teleop start, 2 : VR end" << std::endl;
             std::cout << "3 : Discrete point rececording start " << std::endl;
             std::cout << "0 : quit" << std::endl;
             std::cin >> recording_mode;
