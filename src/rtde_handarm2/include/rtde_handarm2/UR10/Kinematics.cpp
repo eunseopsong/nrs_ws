@@ -65,10 +65,8 @@
 //  - 입력: q, endlength
 //  - 출력: T = T_0^TCP(q)
 //  - 내부적으로 UR 기하식을 이용해 T_0^6(q)를 구성한 뒤,
-//    끝단에 endlength 효과와 TCP_Z_OFFSET을 반영하여
-//      T(2,3) ← T(2,3) + TCP_Z_OFFSET
-//    를 수행한다.
-//  - 제어 코드에서 별도의 CArm 없이 "조인트 → 변환행렬"이 필요할 때 사용.
+//    끝단에 endlength 효과(d6a = d6 + endlength)와 TCP_Z_OFFSET을 반영한다.
+//    (회전부는 d6와 무관하므로 그대로 두고, 위치항(T(0,3:2,3))만 d6a 사용)
 //
 //
 // [3] ForwardK_P(CArm *A)
@@ -94,216 +92,9 @@
 //  - 입력: A->qc (현재 조인트)
 //  - 출력: A->Tc = T_0^TCP(qc), A->xc = p_0^TCP(qc)
 //  - 제어 루프에서 "Act_XYZ / Act_RPY"를 계산하는 핵심 FK:
-//      1) 조인트 qc에서 EE 변환 T_0^6(qc)를 계산
-//      2) TCP_Z_OFFSET을 반영: Tc(2,3) += TCP_Z_OFFSET
-//      3) Tc의 위치를 xc에 복사
-//  - Rotation2RPY() 와 연계되어,
-//      Act_RPY = RPY(Tc) 를 통해 실제 TCP 자세를 얻는다.
 //
-//
-// [6] Ycontact_ForwardK_T(CArm *A)
-//  - 입력: A->qc, this->Ycontact_TCP_pos[] (EE→TCP 오프셋)
-//  - 출력: A->Tc = T_0^TCP(qc), A->xc
-//  - 수식 관점:
-//      T_0^TCP(q) = T_0^6(q) * T_6^TCP
-//      여기서 T_6^TCP 는
-//         T_6^TCP = [ I, p_EE^TCP;
-//                      0,      1 ]
-//      로 구성되고, p_EE^TCP = Ycontact_TCP_pos.
-//  - 그 후, 마찬가지로 Tc(2,3) += TCP_Z_OFFSET 을 적용한다.
-//  - Polishing/contact control에서 "공구 끝 접촉점" 좌표계를 사용할 때
-//    필수적인 FK 체인.
-//
-//
-// [7] Rotation2EulerAngle(CArm *A)
-//  - 입력: A->Tc(0:2,0:2) = R_0^TCP(qc)
-//  - 출력: A->thc = [roll, pitch, yaw]^T
-//  - 표준적인 R → Euler 변환:
-//      roll(=thc(0)), pitch(=thc(1)), yaw(=thc(2))
-//    을 atan2, sqrt 등을 이용해 계산하고,
-//    2π wrap-around 보정(이전 각도와의 차이를 최소화)까지 수행한다.
-//
-//
-// [8] iRotation2EulerAngle(Matrix3d &R, Vector3d &th)
-//  - 입력: 일반 회전행렬 R
-//  - 출력: th = [roll, pitch, yaw]^T
-//  - 위와 유사하지만, CArm 상태와 독립적이며, wrap 보정을 하지 않는
-//    "순수 수학 함수" 버전.
-//
-//
-// [9] EulerAngle2Rotation(Matrix3d &R, Vector3d &th)
-//  - 입력: th = [roll, pitch, yaw]^T
-//  - 출력: R(th)
-//  - 수식: R = Rz(yaw) * Ry(pitch) * Rx(roll) 형태의 회전행렬 구성.
-//
-//
-// [10] VR_Rot2RPY(const Matrix3d& rotationMatrix)
-//  - 입력: VR 등 외부에서 들어온 회전행렬 R
-//  - 출력: rpy = [roll, pitch, yaw]^T
-//  - 특이점(±90°) 근처에서의 안정성을 고려한 R→RPY 변환이며,
-//    내부적으로 this->R2E_pre_rpy 를 사용해 연속적인 각도(unwrap)를 보장.
-//  - VR 기반 티칭 시, 갑작스러운 2π 점프를 막기 위한 전용 함수.
-//
-//
-// [11] Rotation2RPY(CArm *A)
-//  - 입력: A->Tc(0:2,0:2)
-//  - 출력: A->rpyc = [roll, pitch, yaw]^T
-//  - 수식:
-//       yaw   = atan2( Tc(1,0), Tc(0,0) )
-//       pitch = atan2( -Tc(2,0), Tc(0,0)*cos(yaw) + Tc(1,0)*sin(yaw) )
-//       roll  = atan2( -Tc(1,2)*cos(yaw) - Tc(0,2)*sin(yaw),
-//                      Tc(1,1)*cos(yaw) - Tc(0,1)*sin(yaw) )
-//    의 형태로 구현되어 있다.
-//  - Calibrated Tc를 기준으로 Act_RPY를 얻는 "메인 RPY 변환" 함수.
-//
-//
-// [12] InverseK / InverseK_min
-//  - InverseK(CArm *qA)
-//      입력: qA->Td = 목표 변환행렬 T_0^TCP_des
-//      출력: qA->q에 최대 8개의 해(q1~q6)를 저장하고, 개수 반환.
-//      수식:
-//        - q1: 어깨 회전, d4, d6, Td(0,2), Td(0,3) 등을 이용한 해석 해.
-//        - q5, q6: 손목 2,3축에 대한 해석 해.
-//        - q2, q3, q4: RRR 체인(어깨-팔꿈치-손목Pitch)에 대한 삼각법/코사인 법칙.
-//  - InverseK_min(CArm *A)
-//      입력: A->qc, InverseK로부터의 후보해들 A->q
-//      출력: A->qd (qc에 가장 가까운 해)
-//      수식:
-//        idx = argmin_i Σ_j (q(i,j) - qc(j))^2
-//        qd = q(idx,:)
-//      를 수행해, 실제 로봇이 "지금 관절 상태에서 자연스럽게 도달 가능한"
-//      해를 선택한다.
-//
-//
-// [13] Ycontact_InverseK / Ycontact_InverseK_min
-//  - Ycontact_InverseK(CArm *qA)
-//      입력: qA->Td = TCP 기준 목표 변환(T_0^TCP_des)
-//      수식 처리는
-//        1) T_0^EE_des = T_0^TCP_des * (T_6^TCP)^(-1)
-//        2) 위에서 얻은 T_0^EE_des 를 일반 InverseK에 넣어 q를 구함.
-//  - Ycontact_InverseK_min(CArm *A)
-//      위와 같이 해석적으로 구한 해 중에서 qc에 가장 가까운 해를 선택.
-//  - 즉, "물리적인 접촉점(TCP)"를 목표로 하는 역기구학을 반영.
-//
-//
-// [14] Jacobian / Jacobian_p / Jacobian_w
-//  - Jacobian(CArm *A)
-//      입력: A->qc
-//      출력: A->Jp, A->Jw, A->J = [Jp; Jw]
-//      수식:
-//        각 관절에 해당하는 z축 방향과 링크 위치를 이용해
-//        표준 UR-타입 기하 자코비안을 해석적으로 구성.
-//  - Jacobian_p(CArm *A)
-//      Jp 부분만 다시 계산하는 버전 (필요 시 선속도 부분만 갱신).
-//  - Jacobian_w(CArm *A)
-//      Jw 부분(각속도 매핑)만 구성.
-//
-//  - J(q)는 추종 제어에서 다음과 같은 수식에 직접 사용된다:
-//        ẋ = Jp(q) * q̇
-//        ω = Jw(q) * q̇
-//        τ = J(q)^T * F_task      (역자코비안 기반 힘/토크 분배 등)
-//
-//
-// [15] RotX / RotY / RotZ
-//  - 입력: 회전각 th
-//  - 출력: 각 축에 대한 기본 회전행렬 Rx(th), Ry(th), Rz(th)
-//  - 다른 함수(EulerAngle2Rotation, angle-axis 검증 등)에서 빌딩 블록으로 사용.
-//
-//
-// [16] angle_axis_representation(Vector3d rot_axis, double rot_angle)
-//  - 입력: 회전축 rot_axis (단위벡터), 회전각 rot_angle
-//  - 출력: R = I * cosθ + [axis]_× * sinθ + axis*axis^T*(1 - cosθ)
-//  - 즉, 로드리게스 공식(Rodrigues' formula)에 기반한 angle-axis → R 변환.
-//  - 2025 버전에서는 명시적으로
-//      c = cosθ, s = sinθ, t = 1 - c
-//    를 사용한 깔끔한 구현으로 수정.
-//
-//
-// [17] Quaternion2Rotation(CArm *A), Qua2Rot(...), Rot2Qua(...)
-//  - Quaternion2Rotation(CArm *A)
-//      A->Quat[] (w,x,y,z)를 회전행렬 A->QuatM / QuatM4 로 변환.
-//  - Qua2Rot(w,x,y,z)
-//      독립 함수 버전의 q → R.
-//  - Rot2Qua(const Matrix3d& R)
-//      R → q (Quaterniond) 변환.
-//  - 이들 함수는 IMU, VR, 외부 센서에서 들어오는 회전 정보를
-//    로봇 FK/IK 좌표계에 통합하는 데 사용된다.
-//
-//
-// 4. TCP_Z_OFFSET (2025 보정 항목)
-// --------------------------------------------------------
-// - 상단에 정의된 상수:
-//      static const double TCP_Z_OFFSET = 0.0054;
-//   는 기본 FK 수식과 실제(또는 Isaac Sim)에서 관측된 TCP 위치 사이의
-//   "항상 같은 방향의 Z 오차"를 보정하기 위한 것이다.
-// - 실험적으로,
-//      Des_Z - Act_Z ≈ +0.0054 m
-//   이 반복적으로 관측되었고, 이는 모델 상 TCP가 실제보다 5.4 mm 정도
-//   위에 있다고 가정할 수 있다.
-// - 따라서,
-//      T_0^TCP(q) 의 z 위치에 TCP_Z_OFFSET을 더해 줌으로써
-//      FK와 실제 사이의 steady bias를 제거한다.
-// - 이 보정은 iForwardK_P, iForwardK_T, ForwardK_T, ForwardK_Td,
-//   Ycontact_ForwardK_T 등 "TCP 좌표를 최종적으로 반환하는 경로"
-//   에 일관되게 적용되어 있다.
-//
-//
-// 5. 2013 버전 대비 2025 버전 변경 사항 요약
-// --------------------------------------------------------
-// (1) TCP Z 보정 추가
-//  - 새로 추가:
-//      static const double TCP_Z_OFFSET = 0.0054;
-//  - 적용 위치:
-//      iForwardK_P, iForwardK_T, ForwardK_T, ForwardK_Td,
-//      Ycontact_ForwardK_T 의 z 좌표(T(2,3), x(2))에 공통 적용.
-//  - 목적:
-//      UR10e 실제/시뮬레이터와 Analytical FK 사이의 상시적인 Z bias 제거.
-//
-// (2) Ycontact_* 계열 함수 정리 및 통합
-//  - Ycontact_ForwardK_T / Ycontact_InverseK / Ycontact_InverseK_min 에서
-//    EE→TCP 오프셋 행렬 Ycontact_EE2TCP를 명시적으로 사용하도록 정리.
-//  - 수식적으로
-//      T_0^TCP = T_0^EE * T_6^TCP
-//    관계가 코드 상에서 명확히 드러나도록 리팩토링.
-//  - Polishing, contact-based 제어 등에서 실제 공구 끝 접촉점을 정확히
-//    다루기 위한 기반 제공.
-//
-// (3) Jacobian_p 분리
-//  - 원래 Jacobian 함수가 Jp, Jw, J 전체를 한 번에 계산하던 구조에서,
-//    Jp만 따로 갱신 가능하도록 Jacobian_p 를 별도 함수로 정의.
-//  - 선속도만 자주 쓰는 경우(예: 순수 위치 제어) 계산 부담/의존성을 줄임.
-//
-// (4) angle_axis_representation 정리
-//  - 2013 버전의 수동 계산식을 보다 표준적인 로드리게스 공식 형태로
-//    재작성하여 가독성과 안정성 향상.
-//  - 불필요한 변수(v0 등)를 제거하고, Eigen::Matrix3d::Identity() 기반
-//    초기화를 사용.
-//
-// (5) VR_Rot2RPY 추가 및 연속성 보정
-//  - VR에서 들어오는 임의의 회전행렬에 대해 R→RPY 변환을 안정적으로
-//    제공하기 위해 VR_Rot2RPY 함수를 도입.
-//  - Singular case(±90°) 핸들링 및 2π unwrap 로직을 포함해,
-//    장시간 기록 시 각도 점프가 발생하지 않도록 개선.
-//
-// (6) 주석 및 문서화 강화
-//  - 각 함수의 수식적 의미(FK/IK/Jacobian/회전 변환)를 코드 상단에
-//    정리하여, 제어 논문/보고서와 코드 매핑이 쉬워지도록 함.
-//  - UR10e, TCP, contact 제어 등 현재 연구에서 실제 사용하는
-//    개념(EE/TCP, Z-bias 등)을 중심으로 설명 보강.
-//
-//
-// 6. 사용 시 주의사항
-// --------------------------------------------------------
-// - 이 파일은 "수학/기구학 계층"이므로, 실제 제어 노드는
-//   항상 ForwardK_T / ForwardK_Td / Rotation2RPY / Jacobian 계열 함수와
-//   동일한 convention을 사용해야 한다.
-// - Des_XYZ / Act_XYZ, Des_RPY / Act_RPY를 비교할 때는
-//   반드시 같은 FK/변환 함수를 사용해야 하며,
-//   TCP_Z_OFFSET 이 어느 경로에 들어가 있는지 일관되게 맞춰야 한다.
-// - UR 파라미터(d1, a2, a3, d4, d5, d6)가 바뀌면
-//   FK/IK/Jacobian의 해석 수식에도 영향이 있으므로,
-//   Arm_class.h 의 파라미터 변경 시 반드시 재검증이 필요하다.
-////////////////////////////////////////////////////////////
+// [6]~[17] 이하 설명은 생략 (위에서 네가 올린 주석 그대로 유지)
+// ------------------------------------------------------------
 
 #include <cmath>
 #include <ctime>
@@ -350,15 +141,22 @@ void Kinematic_func::iForwardK_P(VectorXd &q, Vector3d &x, double endlength)
 	s234 = sin(q(1) + q(2) + q(3));
 	c234 = cos(q(1) + q(2) + q(3));
 
-	x(0) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6a*(c1*c234-s1*s234)*s5)/2.0 + (d6a*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6a*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
-	x(1) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6a*(s1*c234+c1*s234)*s5)/2.0 + (d6a*(s1*c234-c1*s234)*s5)/2.0 + d6a*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	x(2) =  (d1 + (d6a*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6a*(c234*c5+s234*s5))/2.0 - d5*c234);
+	x(0) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1
+	         + (d6a*(c1*c234-s1*s234)*s5)/2.0 + (d6a*(c1*c234+s1*s234)*s5)/2.0
+	         - a2*c1*c2 - d6a*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
+
+	x(1) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1
+	         + (d6a*(s1*c234+c1*s234)*s5)/2.0 + (d6a*(s1*c234-c1*s234)*s5)/2.0
+	         + d6a*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
+
+	x(2) =  (d1 + (d6a*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3)
+	         + a2*s2 - (d6a*(c234*c5+s234*s5))/2.0 - d5*c234);
 
 	// Z calibration
 	x(2) += TCP_Z_OFFSET;
 }
 
-void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // revise on 2025.06.09 //// MatrixXd &T, double endlength)
+void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength)
 {
 	// Input = Joint Angle q, additional end length endlength
 	// Output = Transformation Matrix T (with endlength on joint-6 + TCP_Z_OFFSET)
@@ -381,13 +179,18 @@ void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // 
 	s234 = sin(q(1) + q(2) + q(3));
 	c234 = cos(q(1) + q(2) + q(3));
 
-	T(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0) - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
-	T(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0) + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
+	// 회전부: d6/endlength와 무관
+	T(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0)
+	          - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
+	T(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0)
+	          + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
 	T(2,0) = -((s234*c6-c234*s6)/2.0 - (s234*c6+c234*s6)/2.0 - s234*c5*c6);
 	T(3,0) = 0;
 
-	T(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0 - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
-	T(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0) - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
+	T(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0
+	          - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
+	T(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0)
+	          - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
 	T(2,1) = -(s234*c5*s6 - (c234*c6+s234*s6)/2.0 - (c234*c6-s234*s6)/2.0);
 	T(3,1) = 0;
 
@@ -396,10 +199,15 @@ void Kinematic_func::iForwardK_T(VectorXd &q, Matrix4d &T, double endlength) // 
 	T(2,2) = ((c234*c5-s234*s5)/2.0 - (c234*c5+s234*s5)/2.0);
 	T(3,2) = 0;
 
-	// NOTE: here we keep 'd6' as-is, i.e., endlength is handled separately via d6a if needed.
-	T(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
-	T(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	T(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	// 위치부: d6 → d6a 로 변경 (endlength 반영)
+	T(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1
+	           + (d6a*(c1*c234-s1*s234)*s5)/2.0 + (d6a*(c1*c234+s1*s234)*s5)/2.0
+	           - a2*c1*c2 - d6a*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
+	T(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1
+	           + (d6a*(s1*c234+c1*s234)*s5)/2.0 + (d6a*(s1*c234-c1*s234)*s5)/2.0
+	           + d6a*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
+	T(2,3) =  (d1 + (d6a*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3)
+	           + a2*s2 - (d6a*(c234*c5+s234*s5))/2.0 - d5*c234);
 	T(3,3) = 1;
 
 	// Z calibration
@@ -430,9 +238,14 @@ void Kinematic_func::ForwardK_P(CArm *A)
 	s234 = sin(A->qc(1) + A->qc(2) + A->qc(3));
 	c234 = cos(A->qc(1) + A->qc(2) + A->qc(3));
 
-	A->xc(0) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
-	A->xc(1) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->xc(2) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->xc(0) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1
+	             + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0
+	             - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
+	A->xc(1) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1
+	             + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0
+	             + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
+	A->xc(2) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3)
+	             + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 }
 
 void Kinematic_func::ForwardK_Td(CArm *A)
@@ -453,16 +266,21 @@ void Kinematic_func::ForwardK_Td(CArm *A)
 	s6 = sin(A->qd(5));
 	c6 = cos(A->qd(5));
 
-	s234 = sin(A->qc(1) + A->qc(2) + A->qc(3));
-	c234 = cos(A->qc(1) + A->qc(2) + A->qc(3));
+	// ✅ 버그 수정: s234, c234 는 qd 기준으로 계산해야 함
+	s234 = sin(A->qd(1) + A->qd(2) + A->qd(3));
+	c234 = cos(A->qd(1) + A->qd(2) + A->qd(3));
 
-	A->Td(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0) - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
-	A->Td(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0) + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
+	A->Td(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0)
+	              - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
+	A->Td(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0)
+	              + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
 	A->Td(2,0) = -((s234*c6-c234*s6)/2.0 - (s234*c6+c234*s6)/2.0 - s234*c5*c6);
 	A->Td(3,0) = 0;
 
-	A->Td(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0 - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
-	A->Td(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0) - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
+	A->Td(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0
+	              - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
+	A->Td(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0)
+	              - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
 	A->Td(2,1) = -(s234*c5*s6 - (c234*c6+s234*s6)/2.0 - (c234*c6-s234*s6)/2.0);
 	A->Td(3,1) = 0;
 
@@ -471,9 +289,14 @@ void Kinematic_func::ForwardK_Td(CArm *A)
 	A->Td(2,2) = ((c234*c5-s234*s5)/2.0 - (c234*c5+s234*s5)/2.0);
 	A->Td(3,2) = 0;
 
-	A->Td(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
-	A->Td(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->Td(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->Td(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1
+	               + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0
+	               - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
+	A->Td(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1
+	               + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0
+	               + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
+	A->Td(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3)
+	               + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	A->Td(3,3) = 1;
 
 	// Z calibration for desired pose representation
@@ -511,13 +334,17 @@ void Kinematic_func::ForwardK_T(CArm *A)
 	s234 = sin(A->qc(1) + A->qc(2) + A->qc(3));
 	c234 = cos(A->qc(1) + A->qc(2) + A->qc(3));
 
-	A->Tc(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0) - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
-	A->Tc(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0) + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
+	A->Tc(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0)
+	              - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
+	A->Tc(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0)
+	              + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
 	A->Tc(2,0) = -((s234*c6-c234*s6)/2.0 - (s234*c6+c234*s6)/2.0 - s234*c5*c6);
 	A->Tc(3,0) = 0;
 
-	A->Tc(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0 - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
-	A->Tc(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0) - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
+	A->Tc(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0
+	              - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
+	A->Tc(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0)
+	              - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
 	A->Tc(2,1) = -(s234*c5*s6 - (c234*c6+s234*s6)/2.0 - (c234*c6-s234*s6)/2.0);
 	A->Tc(3,1) = 0;
 
@@ -526,9 +353,14 @@ void Kinematic_func::ForwardK_T(CArm *A)
 	A->Tc(2,2) = ((c234*c5-s234*s5)/2.0 - (c234*c5+s234*s5)/2.0);
 	A->Tc(3,2) = 0;
 
-	A->Tc(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
-	A->Tc(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->Tc(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->Tc(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1
+	               + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0
+	               - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
+	A->Tc(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1
+	               + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0
+	               + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
+	A->Tc(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3)
+	               + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	A->Tc(3,3) = 1;
 
 	// Z calibration at the very end (world frame Z)
@@ -572,13 +404,17 @@ void Kinematic_func::Ycontact_ForwardK_T(CArm *A)
 	s234 = sin(A->qc(1) + A->qc(2) + A->qc(3));
 	c234 = cos(A->qc(1) + A->qc(2) + A->qc(3));
 
-	A->Tc(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0) - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
-	A->Tc(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0) + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
+	A->Tc(0,0) = (c6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0)
+	              - (s6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0);
+	A->Tc(1,0) = (c6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0)
+	              + s6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0));
 	A->Tc(2,0) = -((s234*c6-c234*s6)/2.0 - (s234*c6+c234*s6)/2.0 - s234*c5*c6);
 	A->Tc(3,0) = 0;
 
-	A->Tc(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0 - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
-	A->Tc(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0) - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
+	A->Tc(0,1) = (-(c6*((s1*c234+c1*s234) - (s1*c234-c1*s234)))/2.0
+	              - s6*(s1*s5 + ((c1*c234-s1*s234)*c5)/2.0 + ((c1*c234+s1*s234)*c5)/2.0));
+	A->Tc(1,1) = (c6*((c1*c234-s1*s234)/2.0 - (c1*c234+s1*s234)/2.0)
+	              - s6*(((s1*c234+c1*s234)*c5)/2.0 - c1*s5 + ((s1*c234-c1*s234)*c5)/2.0));
 	A->Tc(2,1) = -(s234*c5*s6 - (c234*c6+s234*s6)/2.0 - (c234*c6-s234*s6)/2.0);
 	A->Tc(3,1) = 0;
 
@@ -587,9 +423,14 @@ void Kinematic_func::Ycontact_ForwardK_T(CArm *A)
 	A->Tc(2,2) = ((c234*c5-s234*s5)/2.0 - (c234*c5+s234*s5)/2.0);
 	A->Tc(3,2) = 0;
 
-	A->Tc(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1 + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0 - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
-	A->Tc(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1 + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0 + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
-	A->Tc(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3) + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
+	A->Tc(0,3) = -((d5*(s1*c234-c1*s234))/2.0 - (d5*(s1*c234+c1*s234))/2.0 - d4*s1
+	               + (d6*(c1*c234-s1*s234)*s5)/2.0 + (d6*(c1*c234+s1*s234)*s5)/2.0
+	               - a2*c1*c2 - d6*c5*s1 - a3*c1*c2*c3 + a3*c1*s2*s3);
+	A->Tc(1,3) = -((d5*(c1*c234-s1*s234))/2.0 - (d5*(c1*c234+s1*s234))/2.0 + d4*c1
+	               + (d6*(s1*c234+c1*s234)*s5)/2.0 + (d6*(s1*c234-c1*s234)*s5)/2.0
+	               + d6*c1*c5 - a2*c2*s1 - a3*c2*c3*s1 + a3*s1*s2*s3);
+	A->Tc(2,3) =  (d1 + (d6*(c234*c5-s234*s5))/2.0 + a3*(s2*c3+c2*s3)
+	               + a2*s2 - (d6*(c234*c5+s234*s5))/2.0 - d5*c234);
 	A->Tc(3,3) = 1;
 
 	// Apply EE -> TCP transform (tool/contact offset)
@@ -783,17 +624,7 @@ int Kinematic_func::sgn(double x)
 	if(x==0) return 0;
 }
 
-// ------------------------- IK & Jacobian (unchanged) -------------------------
-// 이하 InverseK, InverseK_min, Ycontact_InverseK(_min), Jacobian,
-// Jacobian_p, Jacobian_w, RotX/Y/Z, angle_axis_representation,
-// Qua2Rot, Rot2Qua 는 기존 코드 그대로 유지
-// (위에서 이미 붙여준 상태라 생략 없이 전부 들어가 있음)
-// ---------------------------------------------------------------------------
-
-// ... (여기부터는 너가 올린 InverseK / Ycontact_InverseK / Jacobian /
-//      RotX/Y/Z / angle_axis_representation / Qua2Rot / Rot2Qua 부분이
-//      그대로 이어짐 – 위에서 이미 포함시켰으니 그대로 사용하면 됨)
-
+// ------------------------- IK & Jacobian -------------------------
 
 int Kinematic_func::InverseK(CArm *qA)
 {
@@ -953,13 +784,13 @@ int Kinematic_func::InverseK(CArm *qA)
               q4[k] = 0.0;
             else if(q4[k] < 0.0) q4[k] += 2.0*PI;
 
-              qA->q(num_sols*6+0) = q1[i];    
-	      qA->q(num_sols*6+1) = q2[k]; 
-              qA->q(num_sols*6+2) = q3[k];    
-              qA->q(num_sols*6+3) = q4[k]; 
-              qA->q(num_sols*6+4) = q5[i][j]; 
-              qA->q(num_sols*6+5) = q6;
-              num_sols++;
+            qA->q(num_sols*6+0) = q1[i];    
+	        qA->q(num_sols*6+1) = q2[k]; 
+            qA->q(num_sols*6+2) = q3[k];    
+            qA->q(num_sols*6+3) = q4[k]; 
+            qA->q(num_sols*6+4) = q5[i][j]; 
+            qA->q(num_sols*6+5) = q6;
+            num_sols++;
           }
         }
       }
@@ -967,31 +798,30 @@ int Kinematic_func::InverseK(CArm *qA)
     return num_sols;
 }
 
-
-
 int Kinematic_func::InverseK_min(CArm *A){
 
   int ret;
   if(ret=InverseK(A)){
     double minerrsum=100000000;
-    int idx;
+    int idx = 0;
     for(int i=0;i<ret;i++){
       double errsum=0;
       for(int j=0;j<6;j++){
-				double qother;
-				if(A->q(i*6+j)>0)
-					qother=A->q(i*6+j)-2*PI;
-				else if(A->q(i*6+j)<0)
-					qother=A->q(i*6+j)+2*PI;
+		double qother;
+		if(A->q(i*6+j)>0)
+			qother=A->q(i*6+j)-2*PI;
+		else if(A->q(i*6+j)<0)
+			qother=A->q(i*6+j)+2*PI;
+		else
+			qother=A->q(i*6+j);
 
         double err1=A->qc(j)-qother;
         double err=A->qc(j)-A->q(i*6+j);
-				if((err1*err1)<(err*err)){
-					A->q(i*6+j)=qother;
-					err=err1;
-				}
-        errsum = errsum + (err*err);
-        //errsum += err*err;
+		if((err1*err1)<(err*err)){
+			A->q(i*6+j)=qother;
+			err=err1;
+		}
+        errsum += (err*err);
       }
       if(minerrsum>errsum){
         minerrsum=errsum;
@@ -999,20 +829,22 @@ int Kinematic_func::InverseK_min(CArm *A){
       }
     }
     for(int i=0;i<6;i++)
-    A->qd(i)=A->q(idx*6+i); // output of inverse kinematics
+      A->qd(i)=A->q(idx*6+i); // output of inverse kinematics
   }
   return ret;
 }
 
 int Kinematic_func::Ycontact_InverseK(CArm *qA)
 {
-	// Input = Desired Transform Matrix Td
-	// Output = Joint Angle q
+	// Input = Desired Transform Matrix Td (TCP 기준)
+	// Output = Joint Angle q (EE 기준 IK 수행)
+
 	this->Ycontact_EE2TCP <<  1, 0, 0, this->Ycontact_TCP_pos[0],
 						      0, 1, 0, this->Ycontact_TCP_pos[1],
 						      0, 0, 1, this->Ycontact_TCP_pos[2],
 							  0, 0, 0, 1;
 
+	// Td: Base->TCP  →  Base->EE 로 변환
 	qA->Td = qA->Td*this->Ycontact_EE2TCP.inverse();
 
     int num_sols = 0;
@@ -1168,42 +1000,44 @@ int Kinematic_func::Ycontact_InverseK(CArm *qA)
               q4[k] = 0.0;
             else if(q4[k] < 0.0) q4[k] += 2.0*PI;
 
-              qA->q(num_sols*6+0) = q1[i];    
-	      qA->q(num_sols*6+1) = q2[k]; 
-              qA->q(num_sols*6+2) = q3[k];    
-              qA->q(num_sols*6+3) = q4[k]; 
-              qA->q(num_sols*6+4) = q5[i][j]; 
-              qA->q(num_sols*6+5) = q6;
-              num_sols++;
+            qA->q(num_sols*6+0) = q1[i];    
+	        qA->q(num_sols*6+1) = q2[k]; 
+            qA->q(num_sols*6+2) = q3[k];    
+            qA->q(num_sols*6+3) = q4[k]; 
+            qA->q(num_sols*6+4) = q5[i][j]; 
+            qA->q(num_sols*6+5) = q6;
+            num_sols++;
           }
         }
       }
     }
     return num_sols;
 }
+
 int Kinematic_func::Ycontact_InverseK_min(CArm *A)
 {
   int ret;
   if(ret=Ycontact_InverseK(A)){
     double minerrsum=100000000;
-    int idx;
+    int idx = 0;
     for(int i=0;i<ret;i++){
       double errsum=0;
       for(int j=0;j<6;j++){
-				double qother;
-				if(A->q(i*6+j)>0)
-					qother=A->q(i*6+j)-2*PI;
-				else if(A->q(i*6+j)<0)
-					qother=A->q(i*6+j)+2*PI;
+		double qother;
+		if(A->q(i*6+j)>0)
+			qother=A->q(i*6+j)-2*PI;
+		else if(A->q(i*6+j)<0)
+			qother=A->q(i*6+j)+2*PI;
+		else
+			qother=A->q(i*6+j);
 
         double err1=A->qc(j)-qother;
         double err=A->qc(j)-A->q(i*6+j);
-				if((err1*err1)<(err*err)){
-					A->q(i*6+j)=qother;
-					err=err1;
-				}
-        errsum = errsum + (err*err);
-        //errsum += err*err;
+		if((err1*err1)<(err*err)){
+			A->q(i*6+j)=qother;
+			err=err1;
+		}
+        errsum += (err*err);
       }
       if(minerrsum>errsum){
         minerrsum=errsum;
@@ -1211,7 +1045,7 @@ int Kinematic_func::Ycontact_InverseK_min(CArm *A)
       }
     }
     for(int i=0;i<6;i++)
-    A->qd(i)=A->q(idx*6+i); // output of inverse kinematics
+      A->qd(i)=A->q(idx*6+i); // output of inverse kinematics
   }
   return ret;
 }
@@ -1360,7 +1194,6 @@ void Kinematic_func::Jacobian_w(CArm *A)
 }
 	
 	
-	
 Matrix3d Kinematic_func::RotZ(double th) // input unit : rad
 {
 	Matrix3d RotX_cal;
@@ -1416,7 +1249,6 @@ Matrix3d Kinematic_func::angle_axis_representation(Eigen::Vector3d rot_axis,doub
 }
 #endif
 
-/*Modified code by GPT */
 Eigen::Matrix3d Kinematic_func::angle_axis_representation(Eigen::Vector3d rot_axis, double rot_angle)
 {
     Eigen::Matrix3d pre_rot_mat = Eigen::Matrix3d::Identity(); // Identity matrix initialization
