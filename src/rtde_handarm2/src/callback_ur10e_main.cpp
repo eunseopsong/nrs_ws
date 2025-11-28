@@ -34,13 +34,18 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
     mode_cmd = msg->data;
     printf("[DEBUG] cmdModeCallback called. mode_cmd=%u\n", mode_cmd);
 
+
+    // ===================== FK Control Mode wo/ Force Control ===================== //
     if (mode_cmd == FK_control_mode_cmd) {
       ctrl.store(1, std::memory_order_release);
     }
+
+    // ===================== IK Control Mode wo/ Force Control ===================== //
     else if (mode_cmd == IK_control_mode_cmd) {
       ctrl.store(2, std::memory_order_release);
     }
-    // Playback (.txt) 실행 모드
+
+    // ===================== Playback Mode for Path(.txt) Execution ===================== //
     else if (mode_cmd == Playback_mode_cmd) {
       auto hand_path = yaml_get_path(NRS_recording, "hand_g_recording", node_->get_logger());
       if (hand_path.empty() || !std::filesystem::exists(hand_path)) {
@@ -59,19 +64,21 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
         return;
       }
       set_status(message_status, ST_path_gen_done);
-      ctrl.store(3, std::memory_order_release);
+      ctrl.store(4, std::memory_order_release);
       pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
     }
-    // Teleop continuous recording
+
+    // ===================== Teleop Mode with Force Control ===================== //
     else if (mode_cmd == Continuous_reording_start) {
-      ctrl.store(4, std::memory_order_release);
+      ctrl.store(5, std::memory_order_release);
       set_status(message_status, Data_recording_on);
     }
     else if (mode_cmd == Continusous_recording_end) {
       ctrl.store(0, std::memory_order_release);
       set_status(message_status, Data_recording_off);
     }
-    // Motion stop
+
+    // =============================== Stop Mode =============================== //
     else if (mode_cmd == Motion_stop_cmd) {
       ctrl.store(0, std::memory_order_release);
       set_status(message_status, Motion_stop_mode);
