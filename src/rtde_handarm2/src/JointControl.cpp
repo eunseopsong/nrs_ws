@@ -318,39 +318,42 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 4) Playback mode: InitMove -> PathFollow -> ReturnHomePose
-  if (control_mode == 4) {
-    static bool init_done   = false;
-    static bool follow_done = false;
+  // 3) IK + Admittance mode: EE pose + desired force 입력 → runCartesianForceChain
+  if (control_mode == 3) {
+    static bool            ik_force_cmd_set = false;
+    static Eigen::Vector3d ik_force_xyz     = Eigen::Vector3d::Zero();
+    static Eigen::Vector3d ik_force_rpy     = Eigen::Vector3d::Zero();
+    static Eigen::Vector3d ik_force_Fd      = Eigen::Vector3d::Zero();
 
-    if (pre_control_mode != control_mode) {
-      init_done   = false;
-      follow_done = false;
-    }
-
-    if (!init_done) {
-      bool just_finished = InitMove(dt_s);   // func_ur10e_main.cpp
-      if (!just_finished) {
+    // 모드 진입 직후 한 번만 터미널에서 9개 값 입력
+    if (pre_control_mode != control_mode || !ik_force_cmd_set) {
+      double buf[9];
+      if (!readDoublesFromStdin(
+              "\n[IK + Admittance mode] Enter [x y z r p y fx fy fz] (m, rad, N): ",
+              9, buf)) {
+        std::cerr << "[IK + Admittance mode] invalid input. Keep current pose.\n";
         pre_ctrl.store(control_mode, std::memory_order_relaxed);
         return;
       }
-      init_done = true;
+
+      ik_force_xyz << buf[0], buf[1], buf[2];   // TCP 기준 위치
+      ik_force_rpy << buf[3], buf[4], buf[5];   // RPY
+      ik_force_Fd  << buf[6], buf[7], buf[8];   // 원하는 힘 (N)
+
+      ik_force_cmd_set = true;
     }
 
-    if (!follow_done) {
-      if (PathFollow(dt_s)) {               // func_ur10e_main.cpp
-        pre_ctrl.store(control_mode, std::memory_order_relaxed);
-        return;
-      } else {
-        follow_done = true;
-      }
-    }
+    // 디버그용 Desired 값 갱신 (선택)
+    Desired_XYZ = ik_force_xyz;
+    Desired_RPY = ik_force_rpy;
 
-    // PathFollow 끝나면 home 으로 복귀
-    ReturnHomePose(dt_s);                   // func_ur10e_main.cpp
+    // Admittance + IK + joint publish를 한 번에 수행
+    runCartesianForceChain(ik_force_xyz, ik_force_rpy, ik_force_Fd, dt_s);
+
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
+
 
   // 5) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
   if (control_mode == 5) {
