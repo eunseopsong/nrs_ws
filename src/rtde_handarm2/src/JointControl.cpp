@@ -354,6 +354,39 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
+  // 3) Playback mode: InitMove -> PathFollow -> ReturnHomePose
+  if (control_mode == 4) {
+    static bool init_done   = false;
+    static bool follow_done = false;
+
+    if (pre_control_mode != control_mode) {
+      init_done   = false;
+      follow_done = false;
+    }
+
+    if (!init_done) {
+      bool just_finished = InitMove(dt_s);   // func_ur10e_main.cpp
+      if (!just_finished) {
+        pre_ctrl.store(control_mode, std::memory_order_relaxed);
+        return;
+      }
+      init_done = true;
+    }
+
+    if (!follow_done) {
+      if (PathFollow(dt_s)) {               // func_ur10e_main.cpp
+        pre_ctrl.store(control_mode, std::memory_order_relaxed);
+        return;
+      } else {
+        follow_done = true;
+      }
+    }
+
+    // PathFollow 끝나면 home 으로 복귀
+    ReturnHomePose(dt_s);                   // func_ur10e_main.cpp
+    pre_ctrl.store(control_mode, std::memory_order_relaxed);
+    return;
+  }
 
   // 5) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
   if (control_mode == 5) {

@@ -10,44 +10,17 @@ void JointControl::runCartesianForceChain(
     double dt_s)
 {
     // =========================================================================
-    // STEP 2) 외력 추정 F_ext (LPF + saturation)
+    // STEP 2) 외력 추정 F_ext (TCP z-force → Base frame 변환만 사용)
     // =========================================================================
     Eigen::Matrix4d T_base_TCP_cur = RArm.Tc; // 현재 EE/TCP pose
     Eigen::Matrix3d R_base_TCP     = T_base_TCP_cur.block<3,3>(0,0);
     Eigen::Matrix3d R_TCP_base     = R_base_TCP.transpose();
 
     // contact_force 는 TCP z 로 들어온 값이라고 가정
+    // (부호는 기존 코드처럼 -contact_force 유지)
     Eigen::Vector3d F_TCP(0.0, 0.0, -contact_force);
     Eigen::Vector3d F_base = R_TCP_base * F_TCP;
-    Eigen::Vector3d F_ext  = F_base;
-
-    // LPF
-    {
-        static Eigen::Vector3d F_lp = Eigen::Vector3d::Zero();
-        static bool first_f = true;
-
-        const double fc = 15.0;                                // Hz
-        const double Ts = (dt_s > 0.0 ? dt_s : 0.001);
-        const double alpha = (2.0 * M_PI * fc * Ts) /
-                             (1.0 + 2.0 * M_PI * fc * Ts);
-
-        if (first_f) {
-            F_lp    = F_ext;
-            first_f = false;
-        } else {
-            F_lp = F_lp + alpha * (F_ext - F_lp);
-        }
-        F_ext = F_lp;
-    }
-
-    // Saturation
-    {
-        const double FEXT_SAT = 30.0; // N
-        for (int k = 0; k < 3; ++k) {
-            if (F_ext(k) >  FEXT_SAT) F_ext(k) =  FEXT_SAT;
-            if (F_ext(k) < -FEXT_SAT) F_ext(k) = -FEXT_SAT;
-        }
-    }
+    Eigen::Vector3d F_ext  = F_base;   // ⬅ 필터/램프 없이 바로 사용
 
     // 현재 실제 EE 위치 (EE/TCP 기준)
     Eigen::Vector3d X_act = RArm.xc;
@@ -67,7 +40,7 @@ void JointControl::runCartesianForceChain(
     }
 
     // =========================================================================
-    // STEP 3) RPYd → 회전행렬 → axis-angle
+    // STEP 3) RPYd → 회전행렬 → axis-angle (Wd)
     // =========================================================================
     auto rotFromRPY = [](const Eigen::Vector3d &rpy)->Eigen::Matrix3d {
         const double cr = std::cos(rpy(0));
@@ -75,7 +48,7 @@ void JointControl::runCartesianForceChain(
         const double cp = std::cos(rpy(1));
         const double sp = std::sin(rpy(1));
         const double cy = std::cos(rpy(2));
-        const double sy = std::sin(rpy(2));
+        const double sy = std::cos(rpy(2)) - 0; // 안전을 위해 분리해도 됨
 
         Eigen::Matrix3d Rz;
         Rz << cy,-sy,0,
@@ -125,7 +98,7 @@ void JointControl::runCartesianForceChain(
     }
 
     // =========================================================================
-    // STEP 4) 어드미턴스 + FAAC
+    // STEP 4) 어드미턴스 + FAAC (Fd, F_ext 직접 사용)
     // =========================================================================
     static bool fc_init = false;
     static Yadmittance_control AControl[6] = {
@@ -140,24 +113,6 @@ void JointControl::runCartesianForceChain(
     static double FC_MASS[6]      = {1.0,   1.0,   1.0,   0.05, 0.05, 0.05};
     static double FC_DAMPER[6]    = {6000., 6000., 6000., 10.0, 10.0, 10.0};
     static double FC_STIFFNESS[6] = {2000., 2000., 2000., 20.0, 20.0, 20.0};
-    static Eigen::Vector3d Fd_cmd = Eigen::Vector3d::Zero();
-
-    // 원하는 힘을 부드럽게 램프
-    {
-        const double alpha_up   = 0.02;
-        const double alpha_down = 0.20;
-        for (int k = 0; k < 3; ++k) {
-            double alpha =
-                (std::fabs(Fd(k)) > std::fabs(Fd_cmd(k))) ?
-                alpha_up : alpha_down;
-            Fd_cmd(k) += alpha * (Fd(k) - Fd_cmd(k));
-        }
-        const double FDES_SAT = 30.0;
-        for (int k=0; k<3; ++k) {
-            if (Fd_cmd(k) >  FDES_SAT) Fd_cmd(k) =  FDES_SAT;
-            if (Fd_cmd(k) < -FDES_SAT) Fd_cmd(k) = -FDES_SAT;
-        }
-    }
 
     if (!fc_init) {
         // admittance 초기화
@@ -201,14 +156,14 @@ void JointControl::runCartesianForceChain(
     bool contact_on = (Xd(2) <= 0.1);
 
     for (int ax = 0; ax < 3; ++ax) {
-        if (std::fabs(Fd_cmd(ax)) > 0.01 || FAAC_flag[ax])
+        if (std::fabs(Fd(ax)) > 0.01 || FAAC_flag[ax])
             FAAC_flag[ax] = true;
 
         if (FAAC_flag[ax] && FAAC3step[ax]) {
             auto faac_mdk = FAAC3step[ax]->FAAC_MDKob_RUN(
                 Tank_energy,
                 F_ext(ax),
-                Fd_cmd(ax),
+                Fd(ax),          // ⬅ 여기서도 Fd_cmd 대신 Fd
                 AC_pose_pos[ax],
                 X_act(ax)
             );
@@ -222,16 +177,17 @@ void JointControl::runCartesianForceChain(
             );
         }
 
+        // 순수 어드미턴스: (Xd, Fd, F_ext) 로부터 next_pos 계산
         double next_pos = AControl[ax].adm_1D_control(
             Xd(ax),
-            Fd_cmd(ax),
+            Fd(ax),
             F_ext(ax)
         );
 
         Xc_cmd(ax) = next_pos;
     }
 
-    // 위치 안정화
+    // 위치 안정화 (offset/step 제한은 그대로 두되, 순수 위치 제한 역할만 함)
     {
         static Eigen::Vector3d Xc_prev = Xd;
         const double max_offset = 0.010;
@@ -259,16 +215,16 @@ void JointControl::runCartesianForceChain(
     AC_pose_ori[1] = Wc_cmd(1);
     AC_pose_ori[2] = Wc_cmd(2);
 
-    // debug step4
+    // debug step4 (Fd_cmd 대신 Fd 사용)
     {
         std_msgs::msg::Float64MultiArray dbg;
         dbg.data.resize(13);
         dbg.data[0]  = F_ext(0);
         dbg.data[1]  = F_ext(1);
         dbg.data[2]  = F_ext(2);
-        dbg.data[3]  = Fd_cmd(0);
-        dbg.data[4]  = Fd_cmd(1);
-        dbg.data[5]  = Fd_cmd(2);
+        dbg.data[3]  = Fd(0);
+        dbg.data[4]  = Fd(1);
+        dbg.data[5]  = Fd(2);
         dbg.data[6]  = X_act(0);
         dbg.data[7]  = X_act(1);
         dbg.data[8]  = X_act(2);
