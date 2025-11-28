@@ -443,7 +443,7 @@ void JointControl::runCartesianForceChain(
     const double Tank_energy = 5.0;
 
     // 바닥부 근처면 접촉으로 보고 K=0
-    bool contact_on = (Xd(2) <= 10.0);
+    bool contact_on = (Xd(2) <= 0.1);
 
     for (int ax = 0; ax < 3; ++ax) {
         if (std::fabs(Fd_cmd(ax)) > 0.01 || FAAC_flag[ax])
