@@ -318,8 +318,8 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 4) Playback mode: InitMove -> PathFollow -> ReturnHomePose
-  if (control_mode == 4) {
+  // 3) Playback mode: InitMove -> PathFollow -> ReturnHomePose
+  if (control_mode == 3) {
     static bool init_done   = false;
     static bool follow_done = false;
 
@@ -352,8 +352,8 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 5) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
-  if (control_mode == 5) {
+  // 4) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
+  if (control_mode == 4) {
     if (teleop_pose_valid_) {
       Eigen::Vector3d Xd  = teleop_xyz_;   // TCP 기준
       Eigen::Vector3d RPY = teleop_rpy_;
@@ -385,6 +385,13 @@ void JointControl::CalculateAndPublishJoint() {
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
+
+  // 5) Keyboard teleop mode
+  if (control_mode == 5) {
+
+    return;
+  }
+
 
   // 예외: 보호
   speedmode = 0;
