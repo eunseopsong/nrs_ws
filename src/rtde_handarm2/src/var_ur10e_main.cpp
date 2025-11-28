@@ -182,8 +182,8 @@ char Motion_stop_mode[32] = "Motion stop";
 char Data_recording_on[32] = "Data recording on";
 char Data_recording_off[32] = "Data recording off";
 char Saved_way_point[32] = "Saved way points: ";
-char Playback_terminated[32] = "Payback was terminated";
-char Playback_iteration[32] = "Payback: ";
+char Playback_terminated[32] = "Playback was terminated";
+char Playback_iteration[32] = "Playback: ";
 
 /* Status message end */
 int Path_point_num = -1;

@@ -10,15 +10,15 @@
 //   2) Cartesian Admittance / Force Control 수행
 //   3) Trajectory Playback (InitMove → PathFollow → ReturnHomePose)
 //   4) /calibrated_pose + /ftsensor/measured_Cvalue 로부터 텔레옵 값을 받아
-//      control_mode == 2 에서 PathFollow와 동일한 힘제어 체인 실행
+//      control_mode == 4 에서 PathFollow와 동일한 힘제어 체인 실행
 // ============================================================================
 
+// ROS2 core
 #include <rclcpp/rclcpp.hpp>
 
 // ROS msg
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <geometry_msgs/msg/wrench.hpp>   // FT sensor (/ftsensor/measured_Cvalue)
 
@@ -26,16 +26,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cstdio>
-#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
-#include <mutex>
-#include <fstream>
-#include <sstream>
-#include <iostream>
-#include <filesystem>
-#include <sys/stat.h>
 
 // Eigen
 #include <Eigen/Dense>
@@ -45,6 +38,7 @@
 
 // project
 #include "var_ur10e_main.h"
+#include "func_ur10e_main.h"
 
 // admittance
 #include "rtde_handarm2/ForceControl/admittance_control.hpp"
@@ -55,6 +49,7 @@ public:
     explicit JointControl(const rclcpp::Node::SharedPtr& node);
     ~JointControl();
 
+    // 메인 제어 루프
     void CalculateAndPublishJoint();
 
     // subscribers
@@ -76,8 +71,7 @@ public:
     bool PathFollow(double dt_s);
     bool ReturnHomePose(double dt_s);
 
-    // control_mode 1/2 공통 힘제어 체인 (step 2~7)
-    // cpp 에서 이미 이렇게 구현되어 있으니까 시그니처를 그대로 맞춘다.
+    // control_mode 3/4 공통 힘제어 체인 (step 2~7)
     void runCartesianForceChain(
         const Eigen::Vector3d& Xd,
         const Eigen::Vector3d& RPYd,
@@ -85,7 +79,7 @@ public:
         double dt_s);
 
 private:
-    // 작은 유틸
+    // rad → [-π, π] wrap
     inline double wrapToPi(double a) const {
         const double two_pi = 2.0 * M_PI;
         a = std::fmod(a + M_PI, two_pi);
@@ -93,7 +87,7 @@ private:
         return a - M_PI;
     }
 
-    // 홈 복귀
+    // 홈 복귀 관련
     bool   return_active_   = false;
     double return_elapsed_  = 0.0;
     double return_duration_ = 0.0;
@@ -102,7 +96,7 @@ private:
     // ROS2 core
     rclcpp::Node::SharedPtr       node_;
     rclcpp::TimerBase::SharedPtr  timer_;
-    bool running = true;
+    bool                          running = true;
 
     // subscribers
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            UR10e_mode_sub_;
@@ -110,9 +104,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr            PB_iter_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     joint_states_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr           ft_sub_;
-    // 텔레옵 pose
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr calibrated_pose_sub_;
-    // 텔레옵 force (FT sensor contact 값)
     rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr       ftsensor_sub_;
 
     // publishers
@@ -134,21 +126,21 @@ private:
     Eigen::Matrix4d       T_current;
     Eigen::Vector3d       pos_current;
     Eigen::Vector3d       rpy_current;
-    double contact_force = 0.0;
-    int    key_MODE      = 0;
+    double                contact_force = 0.0;
+    int                   key_MODE      = 0;
 
     // 텔레옵에서 받은 pose
-    bool           teleop_pose_valid_ = false;
-    Eigen::Vector3d teleop_xyz_       = Eigen::Vector3d::Zero();
-    Eigen::Vector3d teleop_rpy_       = Eigen::Vector3d::Zero();
+    bool            teleop_pose_valid_ = false;
+    Eigen::Vector3d teleop_xyz_        = Eigen::Vector3d::Zero();
+    Eigen::Vector3d teleop_rpy_        = Eigen::Vector3d::Zero();
 
     // 텔레옵에서 받은 force (FT sensor)
-    bool           teleop_force_valid_ = false;
-    Eigen::Vector3d teleop_force_      = Eigen::Vector3d::Zero();
+    bool            teleop_force_valid_ = false;
+    Eigen::Vector3d teleop_force_       = Eigen::Vector3d::Zero();
 
     // IK까지 끝난 조인트 버전 (fallback 용)
-    Eigen::Matrix<double, 6, 1> teleop_qd_ = Eigen::Matrix<double, 6, 1>::Zero();
-    bool                        teleop_qd_valid_ = false;
+    Eigen::Matrix<double, 6, 1> teleop_qd_        = Eigen::Matrix<double, 6, 1>::Zero();
+    bool                        teleop_qd_valid_  = false;
 
     // time
     std::chrono::system_clock::time_point start;
