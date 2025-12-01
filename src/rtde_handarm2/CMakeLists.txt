@@ -104,7 +104,7 @@ file(GLOB_RECURSE sources
 set(EXCLUDE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_ur10e_main.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_hbutton.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/Yoon_UR10e_cmd.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ur10e_mode_cmd.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_path_receiver.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/node_joint_recorder.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ur10e_act_data_gen.cpp"
@@ -128,7 +128,7 @@ ament_target_dependencies(nrs_ctrl ${COMMON_DEPENDENCIES})
 install(TARGETS nrs_ctrl DESTINATION lib/${PROJECT_NAME})
 
 # ------- ur10e_mode_cmd node -------- #
-add_executable(ur10e_mode_cmd src/Yoon_UR10e_cmd.cpp ${sources} ${Yoon_LIB})
+add_executable(ur10e_mode_cmd src/ur10e_mode_cmd.cpp ${sources} ${Yoon_LIB})
 target_include_directories(ur10e_mode_cmd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(ur10e_mode_cmd yaml-cpp Eigen3::Eigen)
 ament_target_dependencies(ur10e_mode_cmd ${COMMON_DEPENDENCIES})
