@@ -11,8 +11,10 @@
 #define Hand_guiding_mode_cmd 4000
 #define Data_recording_mode_cmd 5000
 
-#define VR_teleop_start 5001
-#define VR_teleop_end 5002
+#define VR_wo_force_start 5001
+#define VR_wo_force_end 5002
+#define VR_w_force_start 5003
+#define VR_w_force_end 5004
 
 #define Keyboard_teleop_start 5003
 // #define VR_teleop_end 5002

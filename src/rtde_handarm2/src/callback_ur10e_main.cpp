@@ -73,19 +73,30 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       pre_ctrl.store(0, std::memory_order_relaxed); // 다음 사이클에서 init 감지되도록
     }
 
-    // ======================== VR Teleop Mode w/ Force Control ======================== //
-    else if (mode_cmd == VR_teleop_start) {
-      ctrl.store(5, std::memory_order_release);
+    // ======================== VR Teleop Mode wo/ Force Control ======================== //
+    else if (mode_cmd == VR_wo_force_start) {
+      ctrl.store(6, std::memory_order_release);
       set_status(message_status, Data_recording_on);
     }
-    else if (mode_cmd == VR_teleop_end) {
+    else if (mode_cmd == VR_wo_force_end) {
+      ctrl.store(0, std::memory_order_release);
+      set_status(message_status, Data_recording_off);
+    }
+
+
+    // ======================== VR Teleop Mode w/ Force Control ======================== //
+    else if (mode_cmd == VR_w_force_start) {
+      ctrl.store(6, std::memory_order_release);
+      set_status(message_status, Data_recording_on);
+    }
+    else if (mode_cmd == VR_w_force_end) {
       ctrl.store(0, std::memory_order_release);
       set_status(message_status, Data_recording_off);
     }
 
     // ===================== Keyboard Teleop Mode w/ Force Control ===================== //
     else if (mode_cmd == Keyboard_teleop_start) {
-      ctrl.store(6, std::memory_order_release);
+      ctrl.store(7, std::memory_order_release);
     }
 
     // =============================== Stop Mode =============================== //

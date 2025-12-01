@@ -191,21 +191,21 @@ int main(int argc, char *argv[])
 
             if(recording_mode == 1)
             {
-                yoon_mode_msg.data = VR_teleop_start;
+                yoon_mode_msg.data = VR_w_force_start;
                 yoon_mode_pub->publish(yoon_mode_msg);
                 rclcpp::spin_some(node); //// ros::spinOnce();
                 std::cout << "To terminate the recording press '2'" << std::endl;
                 std::cin >> recording_mode;
                 if(recording_mode == 2)
                 {
-                    yoon_mode_msg.data = VR_teleop_end;
+                    yoon_mode_msg.data = VR_w_force_end;
                     yoon_mode_pub->publish(yoon_mode_msg);
                     rclcpp::spin_some(node); //// ros::spinOnce();
                 }
             }
             else if(recording_mode == 2)
             {
-                yoon_mode_msg.data = VR_teleop_end;
+                yoon_mode_msg.data = VR_w_force_end;
                 yoon_mode_pub->publish(yoon_mode_msg);
                 rclcpp::spin_some(node);     //// ros::spinOnce();
             }

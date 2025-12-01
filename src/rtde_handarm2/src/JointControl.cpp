@@ -465,8 +465,15 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 5) Teleop mode: /calibrated_pose + /ftsensor → 공통 force chain
-  if (control_mode == 5) {
+  // 5) Teleop wo/ Force Control mode: /calibrated_pose -> AKin.Ycontact_InverseK_min(&RArm);
+  if (control_mode == 6) {
+
+    return;
+  }
+
+
+  // 6) Teleop w/ Force Control mode: /calibrated_pose + /ftsensor → 공통 force chain
+  if (control_mode == 6) {
     if (teleop_pose_valid_) {
       Eigen::Vector3d Xd  = teleop_xyz_;   // TCP 기준
       Eigen::Vector3d RPY = teleop_rpy_;
@@ -499,8 +506,8 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 5) Keyboard teleop mode
-  if (control_mode == 6) {
+  // 7) Keyboard teleop mode
+  if (control_mode == 7) {
 
     return;
   }
