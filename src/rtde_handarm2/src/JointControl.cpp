@@ -82,7 +82,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // Timer (2 ms)
   timer_ = node_->create_wall_timer(
-    std::chrono::milliseconds(20),
+    std::chrono::milliseconds(2),
     std::bind(&JointControl::CalculateAndPublishJoint, this));
 
   // 파일 핸들 정리
