@@ -466,10 +466,53 @@ void JointControl::CalculateAndPublishJoint() {
   }
 
   // 5) Teleop wo/ Force Control mode: /calibrated_pose -> AKin.Ycontact_InverseK_min(&RArm);
-  if (control_mode == 6) {
+  if (control_mode == 5) {
+    if (teleop_pose_valid_) {
+      // ① VR /calibrated_pose 에서 받은 TCP 기준 pose
+      Eigen::Vector3d Xd  = teleop_xyz_;   // [x y z]
+      Eigen::Vector3d RPY = teleop_rpy_;   // [r p y]
 
+      // 디버그용 Desired 저장 (위 printf 에서 같이 확인 가능)
+      Desired_XYZ = Xd;
+      Desired_RPY = RPY;
+
+      // ② EE 목표 pose(Td) 구성: Base -> TCP (Ycontact 기준)
+      Eigen::Vector3d rpy_tmp = RPY;
+      Eigen::Matrix3d Rd;
+      AKin.EulerAngle2Rotation(Rd, rpy_tmp);
+
+      RArm.Td <<
+          Rd(0,0), Rd(0,1), Rd(0,2), Xd(0),
+          Rd(1,0), Rd(1,1), Rd(1,2), Xd(1),
+          Rd(2,0), Rd(2,1), Rd(2,2), Xd(2),
+          0,       0,       0,       1;
+
+      // ③ 항상 Base->TCP (Ycontact) 기준 IK
+#if TCP_standard == 0
+      AKin.InverseK_min(&RArm);
+#else
+      AKin.Ycontact_InverseK_min(&RArm);
+#endif
+
+      // ④ qd 를 joint command 로 퍼블리시
+      joint_state_.header.stamp = node_->now();
+      for (int i = 0; i < DOF; ++i) {
+        joint_state_.position[i] = RArm.qd(i);
+      }
+      joint_commands_pub_->publish(joint_state_);
+    } else {
+      // pose 아직 안 들어왔으면 현재 qc 유지
+      joint_state_.header.stamp = node_->now();
+      for (int i = 0; i < DOF; ++i) {
+        joint_state_.position[i] = RArm.qc(i);
+      }
+      joint_commands_pub_->publish(joint_state_);
+    }
+
+    pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
+
 
 
   // 6) Teleop w/ Force Control mode: /calibrated_pose + /ftsensor → 공통 force chain

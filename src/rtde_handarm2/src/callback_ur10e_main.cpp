@@ -75,7 +75,7 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
 
     // ======================== VR Teleop Mode wo/ Force Control ======================== //
     else if (mode_cmd == VR_wo_force_start) {
-      ctrl.store(6, std::memory_order_release);
+      ctrl.store(5, std::memory_order_release);
       set_status(message_status, Data_recording_on);
     }
     else if (mode_cmd == VR_wo_force_end) {
