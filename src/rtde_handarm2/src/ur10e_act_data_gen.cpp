@@ -18,6 +18,7 @@
 #include <ctime>
 #include <iostream>
 #include <cmath>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -47,7 +48,7 @@ public:
       10,
       std::bind(&ActDataRecorder::topImageCallback, this, std::placeholders::_1));
 
-    // FT 센서 (소문자 v)
+    // FT 센서
     ft_sub_ = this->create_subscription<geometry_msgs::msg::Wrench>(
       "/ftsensor/measured_Cvalue",
       10,
@@ -243,10 +244,39 @@ private:
   void saveToHDF5()
   {
     std::lock_guard<std::mutex> lock(data_mutex_);
-    if (buffer_joints_.empty()) {
-      RCLCPP_WARN(this->get_logger(), "No data to save.");
+    if (buffer_joints_.size() < 2) {
+      RCLCPP_WARN(this->get_logger(), "Not enough joint data to form (t, t+1) pairs.");
       return;
     }
+
+    // 각 버퍼 길이
+    std::size_t N_joint = buffer_joints_.size();
+    std::size_t N_ft    = buffer_fts_.size();
+    std::size_t N_front = buffer_images_front_.size();
+    std::size_t N_top   = buffer_images_top_.size();
+
+    std::size_t N_min = std::min(
+      std::min(N_joint, N_ft),
+      std::min(N_front, N_top)
+    );
+
+    if (N_min < 2) {
+      RCLCPP_WARN(this->get_logger(),
+                  "Not enough synchronized data (min buffer size = %zu).", N_min);
+      return;
+    }
+
+    // (obs_t, action_t) 쌍 개수: t=0..N_pair-1 에 대해 joints_t / joints_{t+1}
+    std::size_t N_pair = N_min - 1;
+
+    // 이미지 크기 (front 기준)
+    int H_front = buffer_images_front_[0].rows;
+    int W_front = buffer_images_front_[0].cols;
+    int C_front = buffer_images_front_[0].channels();
+
+    int H_top = buffer_images_top_[0].rows;
+    int W_top = buffer_images_top_[0].cols;
+    int C_top = buffer_images_top_[0].channels();
 
     // 파일 열기/생성
     hid_t file_id;
@@ -275,18 +305,21 @@ private:
     hid_t demo_group_id = H5Gcreate(data_group_id, demo_name.c_str(),
                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-    // joints (N,6)
+    // =======================
+    // 1) obs_joints: (N_pair, 6)
+    //    obs_joints[t] = joints_t
+    // =======================
     {
-      hsize_t N = buffer_joints_.size();
-      hsize_t dims[2] = {N, 6};
+      hsize_t dims[2] = { static_cast<hsize_t>(N_pair), 6 };
       hid_t space_id = H5Screate_simple(2, dims, nullptr);
-      hid_t dset_id = H5Dcreate(demo_group_id, "joints", H5T_NATIVE_DOUBLE, space_id,
+      hid_t dset_id = H5Dcreate(demo_group_id, "obs_joints", H5T_NATIVE_DOUBLE, space_id,
                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
       std::vector<double> flat;
-      flat.reserve(N * 6);
-      for (auto &a : buffer_joints_) {
-        for (double v : a) flat.push_back(v);
+      flat.reserve(N_pair * 6);
+      for (std::size_t t = 0; t < N_pair; ++t) {
+        const auto &q_t = buffer_joints_[t];
+        for (double v : q_t) flat.push_back(v);
       }
 
       H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
@@ -294,18 +327,43 @@ private:
       H5Sclose(space_id);
     }
 
-    // ft (N,3)  -> fx=0, fy=0, fz=값
+    // =======================
+    // 2) action_joints: (N_pair, 6)
+    //    action_joints[t] = joints_{t+1}
+    // =======================
     {
-      hsize_t N = buffer_fts_.size();
-      hsize_t dims[2] = {N, 3};
+      hsize_t dims[2] = { static_cast<hsize_t>(N_pair), 6 };
       hid_t space_id = H5Screate_simple(2, dims, nullptr);
-      hid_t dset_id = H5Dcreate(demo_group_id, "ft", H5T_NATIVE_FLOAT, space_id,
+      hid_t dset_id = H5Dcreate(demo_group_id, "action_joints", H5T_NATIVE_DOUBLE, space_id,
+                                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+      std::vector<double> flat;
+      flat.reserve(N_pair * 6);
+      for (std::size_t t = 0; t < N_pair; ++t) {
+        const auto &q_tp1 = buffer_joints_[t + 1];
+        for (double v : q_tp1) flat.push_back(v);
+      }
+
+      H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
+      H5Dclose(dset_id);
+      H5Sclose(space_id);
+    }
+
+    // =======================
+    // 3) action_ft: (N_pair, 3)
+    //    action_ft[t] = [0, 0, fz_{t+1}]
+    // =======================
+    {
+      hsize_t dims[2] = { static_cast<hsize_t>(N_pair), 3 };
+      hid_t space_id = H5Screate_simple(2, dims, nullptr);
+      hid_t dset_id = H5Dcreate(demo_group_id, "action_ft", H5T_NATIVE_FLOAT, space_id,
                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
       std::vector<float> flat;
-      flat.reserve(N * 3);
-      for (auto &a : buffer_fts_) {
-        for (float v : a) flat.push_back(v);
+      flat.reserve(N_pair * 3);
+      for (std::size_t t = 0; t < N_pair; ++t) {
+        const auto &ft_tp1 = buffer_fts_[t + 1];  // [0, 0, fz]
+        for (float v : ft_tp1) flat.push_back(v);
       }
 
       H5Dwrite(dset_id, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
@@ -313,27 +371,26 @@ private:
       H5Sclose(space_id);
     }
 
-    // front image 저장
+    // =======================
+    // 4) obs_image_front: (N_pair, H, W, C)
+    //    obs_image_front[t] = image_front_t
+    // =======================
     if (!buffer_images_front_.empty()) {
-      int N = static_cast<int>(buffer_images_front_.size());
-      int H = buffer_images_front_[0].rows;
-      int W = buffer_images_front_[0].cols;
-      int C = buffer_images_front_[0].channels();
-
       hsize_t dims[4] = {
-        static_cast<hsize_t>(N),
-        static_cast<hsize_t>(H),
-        static_cast<hsize_t>(W),
-        static_cast<hsize_t>(C)
+        static_cast<hsize_t>(N_pair),
+        static_cast<hsize_t>(H_front),
+        static_cast<hsize_t>(W_front),
+        static_cast<hsize_t>(C_front)
       };
       hid_t space_id = H5Screate_simple(4, dims, nullptr);
-      hid_t dset_id = H5Dcreate(demo_group_id, "image_front", H5T_NATIVE_UCHAR, space_id,
+      hid_t dset_id = H5Dcreate(demo_group_id, "obs_image_front", H5T_NATIVE_UCHAR, space_id,
                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
       std::vector<unsigned char> flat;
-      flat.reserve(N * H * W * C);
-      for (auto &img : buffer_images_front_) {
-        flat.insert(flat.end(), img.data, img.data + (H * W * C));
+      flat.reserve(N_pair * H_front * W_front * C_front);
+      for (std::size_t t = 0; t < N_pair; ++t) {
+        const auto &img = buffer_images_front_[t];
+        flat.insert(flat.end(), img.data, img.data + (H_front * W_front * C_front));
       }
 
       H5Dwrite(dset_id, H5T_NATIVE_UCHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
@@ -341,27 +398,26 @@ private:
       H5Sclose(space_id);
     }
 
-    // top image 저장
+    // =======================
+    // 5) obs_image_top: (N_pair, H, W, C)
+    //    obs_image_top[t] = image_top_t
+    // =======================
     if (!buffer_images_top_.empty()) {
-      int N = static_cast<int>(buffer_images_top_.size());
-      int H = buffer_images_top_[0].rows;
-      int W = buffer_images_top_[0].cols;
-      int C = buffer_images_top_[0].channels();
-
       hsize_t dims[4] = {
-        static_cast<hsize_t>(N),
-        static_cast<hsize_t>(H),
-        static_cast<hsize_t>(W),
-        static_cast<hsize_t>(C)
+        static_cast<hsize_t>(N_pair),
+        static_cast<hsize_t>(H_top),
+        static_cast<hsize_t>(W_top),
+        static_cast<hsize_t>(C_top)
       };
       hid_t space_id = H5Screate_simple(4, dims, nullptr);
-      hid_t dset_id = H5Dcreate(demo_group_id, "image_top", H5T_NATIVE_UCHAR, space_id,
+      hid_t dset_id = H5Dcreate(demo_group_id, "obs_image_top", H5T_NATIVE_UCHAR, space_id,
                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
       std::vector<unsigned char> flat;
-      flat.reserve(N * H * W * C);
-      for (auto &img : buffer_images_top_) {
-        flat.insert(flat.end(), img.data, img.data + (H * W * C));
+      flat.reserve(N_pair * H_top * W_top * C_top);
+      for (std::size_t t = 0; t < N_pair; ++t) {
+        const auto &img = buffer_images_top_[t];
+        flat.insert(flat.end(), img.data, img.data + (H_top * W_top * C_top));
       }
 
       H5Dwrite(dset_id, H5T_NATIVE_UCHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
@@ -374,12 +430,13 @@ private:
     H5Fclose(file_id);
 
     RCLCPP_INFO(this->get_logger(),
-                "Saved %s (joints: %zu, ft: %zu, front: %zu, top: %zu)",
+                "Saved %s (pairs: %zu, joints_len=%zu, ft_len=%zu, front_len=%zu, top_len=%zu)",
                 demo_name.c_str(),
-                buffer_joints_.size(),
-                buffer_fts_.size(),
-                buffer_images_front_.size(),
-                buffer_images_top_.size());
+                N_pair,
+                N_joint,
+                N_ft,
+                N_front,
+                N_top);
   }
 
 private:
