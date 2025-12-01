@@ -38,7 +38,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // Publishers
   force_ext_base_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("force_ext_base", 20);
-  UR10e_mode_pub_     = node_->create_publisher<std_msgs::msg::UInt16>("Yoon_UR10e_mode", 20);
+  ur10e_mode_pub_     = node_->create_publisher<std_msgs::msg::UInt16>("ur10e_mode_cmd", 20);
   UR10_pose_pub_      = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_pose", 20);
   UR10_wrench_pub_    = node_->create_publisher<std_msgs::msg::Float64MultiArray>("UR10_wrench", 20);
   joint_commands_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>("/isaac_joint_commands" , 20);
@@ -52,7 +52,7 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // Subscribers
   UR10e_mode_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(
-    "Yoon_UR10e_mode", 20,
+    "ur10e_mode_cmd", 20,
     std::bind(&JointControl::cmdModeCallback, this, std::placeholders::_1));
 
   PB_iter_sub_ = node_->create_subscription<std_msgs::msg::UInt16>(

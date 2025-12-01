@@ -109,7 +109,7 @@ private:
 
     // publishers
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    force_ext_base_pub_;
-    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr               UR10e_mode_pub_;
+    rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr               ur10e_mode_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    UR10_pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    UR10_wrench_pub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr        joint_commands_pub_;
