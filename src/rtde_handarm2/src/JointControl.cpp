@@ -130,7 +130,7 @@ void JointControl::CalculateAndPublishJoint() {
   t_prev = t_now;
   if (dt_s <= 0.0 || dt_s > 0.2) dt_s = 0.01;
 
-  milisec += 1; // Simulation time (ms 단위 카운터)
+  milisec += 2; // Simulation time (ms 단위 카운터)
 
   // 속도/가속도 초기화
   for (int i = 0; i < DOF; i++) {
