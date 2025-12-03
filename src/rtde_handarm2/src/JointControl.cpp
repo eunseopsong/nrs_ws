@@ -80,6 +80,15 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     "/ftsensor/measured_Cvalue", 10,
     std::bind(&JointControl::ftSensorCallback, this, std::placeholders::_1));
 
+  // 🔹 ACT inference node output 구독
+  act_joints_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+    "/isaac_joints_commands", 10,
+    std::bind(&JointControl::actJointsCallback, this, std::placeholders::_1));
+
+  act_force_sub_ = node_->create_subscription<geometry_msgs::msg::Wrench>(
+    "/isaac_force_commands", 10,
+    std::bind(&JointControl::actForceCallback, this, std::placeholders::_1));
+
   // Timer (2 ms)
   timer_ = node_->create_wall_timer(
     std::chrono::milliseconds(2),
@@ -106,6 +115,12 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
   teleop_xyz_.setZero();
   teleop_rpy_.setZero();
   teleop_force_.setZero();
+
+  // 🔹 ACT action 저장 변수 초기화
+  act_joints_valid_ = false;
+  act_force_valid_  = false;
+  act_joints_.setZero();
+  act_force_.setZero();
 }
 
 JointControl::~JointControl() {
@@ -117,6 +132,26 @@ JointControl::~JointControl() {
   if (path_recording_pos)   std::fclose(path_recording_pos);
   if (path_recording_joint) std::fclose(path_recording_joint);
   if (EXPdata1)             std::fclose(EXPdata1);
+}
+
+// ============================================================================
+// ACT inference node callbacks
+// ============================================================================
+void JointControl::actJointsCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+{
+  if (msg->position.size() < DOF) return;
+  for (int i = 0; i < DOF; ++i) {
+    act_joints_(i) = msg->position[i];
+  }
+  act_joints_valid_ = true;
+}
+
+void JointControl::actForceCallback(const geometry_msgs::msg::Wrench::SharedPtr msg)
+{
+  act_force_(0) = msg->force.x;
+  act_force_(1) = msg->force.y;
+  act_force_(2) = msg->force.z;
+  act_force_valid_ = true;
 }
 
 // ============================================================================
@@ -142,7 +177,7 @@ void JointControl::CalculateAndPublishJoint() {
   RArm.qt = RArm.qc;
 
   // =====================================================================
-  // FK: 항상 Base -> TCP (Ycontact 기준) 으로 통일
+  // FK: 항상 Base -> TCP (Ycontact 기준) 으로 통일 (현재 qc 기준)
   // =====================================================================
   AKin.Ycontact_ForwardK_T(&RArm);   // Base -> TCP
   AKin.Rotation2EulerAngle(&RArm);   // Tc(TCP) -> thc (RPY)
@@ -549,9 +584,66 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 7) ACT Policy Infererence mode 
+  // 7) ACT Policy Inference mode
+  //    - ACT inference node: /isaac_joints_commands (JointState), /isaac_force_commands (Wrench)
+  //    - joints 6개 → FK로 Xd, RPY 계산
+  //    - force 3개 → Fd = [fx, fy, fz]
+  //    - runCartesianForceChain(Xd, RPY, Fd, dt_s) 호출 후 qd 퍼블리시
   if (control_mode == 7) {
+    // joints 값이 아직 안 들어왔으면 현재 자세 유지
+    if (!act_joints_valid_) {
+      joint_state_.header.stamp = node_->now();
+      for (int i = 0; i < DOF; ++i)
+        joint_state_.position[i] = RArm.qc(i);
+      joint_commands_pub_->publish(joint_state_);
 
+      pre_ctrl.store(control_mode, std::memory_order_relaxed);
+      return;
+    }
+
+    // --------- 1) ACT joints → FK로 Xd, RPY 계산 ---------
+    // RArm 구조를 건드리지 않기 위해 백업 후 복원 방식 사용
+    Vector6d qc_backup = RArm.qc;
+    auto     Tc_backup = RArm.Tc;
+    auto     xc_backup = RArm.xc;
+    auto     thc_backup = RArm.thc;
+
+    // ACT가 준 joints를 "가상의 qc"로 넣어서 FK
+    for (int i = 0; i < DOF; ++i) {
+      RArm.qc(i) = act_joints_(i);
+    }
+
+    AKin.Ycontact_ForwardK_T(&RArm);
+    AKin.Rotation2EulerAngle(&RArm);
+
+    Eigen::Vector3d Xd  = RArm.xc;   // ACT 기준 desired TCP position
+    Eigen::Vector3d RPY = RArm.thc;  // ACT 기준 desired RPY
+
+    // RArm을 다시 실제 qc 기준 상태로 복원 (실제 Act_XYZ는 위쪽에서 이미 계산됨)
+    RArm.qc  = qc_backup;
+    RArm.Tc  = Tc_backup;
+    RArm.xc  = xc_backup;
+    RArm.thc = thc_backup;
+
+    // --------- 2) force: ACT가 준 force 3개 사용 (없으면 0) ---------
+    Eigen::Vector3d Fd = act_force_valid_ ? act_force_
+                                          : Eigen::Vector3d::Zero();
+
+    // 디버그용 Desired 값 갱신
+    Desired_XYZ = Xd;
+    Desired_RPY = RPY;
+
+    // --------- 3) 공통 어드미턴스 체인 호출 ---------
+    runCartesianForceChain(Xd, RPY, Fd, dt_s);
+
+    // runCartesianForceChain 내부에서 RArm.qd 갱신된다고 가정
+    joint_state_.header.stamp = node_->now();
+    for (int i = 0; i < DOF; ++i) {
+      joint_state_.position[i] = RArm.qd(i);
+    }
+    joint_commands_pub_->publish(joint_state_);
+
+    pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
 

@@ -10,7 +10,9 @@
 //   2) Cartesian Admittance / Force Control 수행
 //   3) Trajectory Playback (InitMove → PathFollow → ReturnHomePose)
 //   4) /calibrated_pose + /ftsensor/measured_Cvalue 로부터 텔레옵 값을 받아
-//      control_mode == 4 에서 PathFollow와 동일한 힘제어 체인 실행
+//      control_mode 에 따라 공통 force/admittance 체인 실행
+//   5) ACT inference 노드(/isaac_joints_commands, /isaac_force_commands) 기반
+//      control_mode == 7: ACT + Admittance 제어
 // ============================================================================
 
 // ROS2 core
@@ -20,7 +22,7 @@
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
-#include <geometry_msgs/msg/wrench.hpp>   // FT sensor (/ftsensor/measured_Cvalue)
+#include <geometry_msgs/msg/wrench.hpp>   // FT sensor, ACT force (/ftsensor/measured_Cvalue, /isaac_force_commands)
 
 // std
 #include <array>
@@ -65,13 +67,19 @@ public:
     // 텔레옵 force 콜백 (/ftsensor/measured_Cvalue → fx fy fz)
     void ftSensorCallback(const geometry_msgs::msg::Wrench::SharedPtr msg);
 
+    // 🔹 ACT inference node 콜백
+    //    /isaac_joints_commands (JointState) → act_joints_
+    //    /isaac_force_commands  (Wrench)     → act_force_
+    void actJointsCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+    void actForceCallback(const geometry_msgs::msg::Wrench::SharedPtr msg);
+
     // state / trajectory
     void UpdateState();
     bool InitMove(double dt_s);
     bool PathFollow(double dt_s);
     bool ReturnHomePose(double dt_s);
 
-    // control_mode 3/4 공통 힘제어 체인 (step 2~7)
+    // control_mode 3/4/6/7 공통 힘제어 체인
     void runCartesianForceChain(
         const Eigen::Vector3d& Xd,
         const Eigen::Vector3d& RPYd,
@@ -107,6 +115,10 @@ private:
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr calibrated_pose_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr       ftsensor_sub_;
 
+    // 🔹 ACT inference node subscribers
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     act_joints_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr       act_force_sub_;
+
     // publishers
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    force_ext_base_pub_;
     rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr               ur10e_mode_pub_;
@@ -141,6 +153,12 @@ private:
     // IK까지 끝난 조인트 버전 (fallback 용)
     Eigen::Matrix<double, 6, 1> teleop_qd_        = Eigen::Matrix<double, 6, 1>::Zero();
     bool                        teleop_qd_valid_  = false;
+
+    // 🔹 ACT inference에서 받은 joints/force
+    Eigen::Matrix<double, 6, 1> act_joints_       = Eigen::Matrix<double, 6, 1>::Zero();  // [rad]
+    Eigen::Vector3d             act_force_        = Eigen::Vector3d::Zero();               // [N]
+    bool                        act_joints_valid_ = false;
+    bool                        act_force_valid_  = false;
 
     // time
     std::chrono::system_clock::time_point start;
