@@ -54,7 +54,6 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import Image, JointState
-from geometry_msgs.msg import Wrench
 from std_msgs.msg import Float64MultiArray   # 🔹 ACT → JointControl 전달용
 
 
@@ -415,6 +414,15 @@ class ActPolicyInfer:
         self.log_file.write(header)
         self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
 
+        # --------------------------------------------------
+        # 🔹 Interpolation (upsampling) 설정
+        #   - policy: 20 Hz
+        #   - publish: 20 * interp_factor Hz
+        # --------------------------------------------------
+        self.interp_factor = 5          # 예: 5면 20Hz → 100Hz
+        self.prev_joints_cmd = None    # 이전 step joint action (6,)
+        self.prev_force_cmd = None     # 이전 step force action (3,)
+
     # ----------------------------------------------------------
     # ROS 콜백
     # ----------------------------------------------------------
@@ -515,21 +523,24 @@ class ActPolicyInfer:
         return action_norm * self.action_std + self.action_mean
 
     # ==========================================================
-    # 메인 루프 (closed-loop, 1-step action + smoothing)
+    # 메인 루프 (closed-loop, 1-step action + smoothing + interpolation)
+    #   - policy 호출: episode_len 번 (예: 400)
+    #   - publish: episode_len * interp_factor 번 (예: 400 * 100 = 40000)
+    #   - publish 주파수는 20 Hz 유지 → 전체 시간은 interp_factor 배로 늘어남
     # ==========================================================
     def run(self):
-        rate_hz = 20.0
-        period = 1.0 / rate_hz
+        policy_rate_hz = 20.0      # policy step 기준 속도 (여기서는 의미상만, 실제는 sub-step 기준)
+        period = 1.0 / policy_rate_hz
 
         try:
             # 최초 양 카메라 준비될 때까지 대기
             _ = self.img_recorder.wait_for_images(timeout=10.0)
             self.node.get_logger().info("Camera images ready!")
 
-            step = 0
-            last_time = self.node.get_clock().now()
+            policy_step = 0          # ACT policy 호출 횟수 (0..episode_len-1)
+            global_step = 0          # 실제 publish step (0..episode_len*interp_factor-1)
 
-            while rclpy.ok() and step < self.episode_len:
+            while rclpy.ok() and policy_step < self.episode_len:
                 imgs = self.img_recorder.get_images()
                 front_np = imgs["front"]
                 top_np = imgs["top"]
@@ -572,7 +583,7 @@ class ActPolicyInfer:
                     self.curr_joint, dtype=torch.float32
                 ).unsqueeze(0).to(self.device)
 
-                # --------- policy 한 번 호출 (closed-loop, 1-step 사용) --------- #
+                # --------- policy 한 번 호출 --------- #
                 with torch.no_grad():
                     out = self.policy(qpos_tensor, imgs_tensor)
                     if isinstance(out, tuple):
@@ -604,16 +615,16 @@ class ActPolicyInfer:
                 # (H, model_action_dim)로 reshape
                 action_np_norm = action_np_norm.reshape(-1, self.model_action_dim)
 
-                if step == 0:
+                if policy_step == 0:
                     self.node.get_logger().info(
                         f"[INFO] First policy output shape (H, D): "
                         f"{action_np_norm.shape}"
                     )
 
-                # --------- 이번 step에서 사용할 1-step action (index 0) --------- #
+                # --------- 이번 policy step에서 사용할 action (index 0) --------- #
                 curr_action_norm = action_np_norm[0]  # (D,)
 
-                # --------- 간단한 temporal smoothing (정규화 공간에서) --------- #
+                # --------- smoothing (정규화 공간에서) --------- #
                 if self.prev_action_norm is None:
                     smoothed_action_norm = curr_action_norm
                 else:
@@ -623,11 +634,11 @@ class ActPolicyInfer:
                     )
                 self.prev_action_norm = smoothed_action_norm
 
-                # denorm → 실제 joint+force (model_action_dim 기준)
+                # denorm → 실제 joint+force
                 action_full = self._denorm_single(smoothed_action_norm)  # (D,)
                 action_full = np.asarray(action_full, dtype=np.float32)
 
-                # 최소 6차원은 확보
+                # 최소 6차원 확보
                 if action_full.shape[0] < 6:
                     pad = np.zeros(6, dtype=np.float32)
                     pad[: action_full.shape[0]] = action_full
@@ -642,48 +653,72 @@ class ActPolicyInfer:
                 else:
                     force_cmd = np.zeros(3, dtype=np.float32)
 
-                # --------- ACT 결과를 JointControl용 토픽으로 publish --------- #
-                j_msg = Float64MultiArray()
-                j_msg.data = joints_cmd.tolist()
-                self.act_joints_pub.publish(j_msg)
+                # 첫 policy step이면 prev를 현재와 동일하게 세팅
+                if self.prev_joints_cmd is None:
+                    self.prev_joints_cmd = joints_cmd.copy()
+                    self.prev_force_cmd = force_cmd.copy()
 
-                f_msg = Float64MultiArray()
-                f_msg.data = force_cmd.tolist()
-                self.act_force_pub.publish(f_msg)
+                # --------------------------------------------------
+                # 🔹 prev → current 를 interp_factor 개로 선형보간해서
+                #    20 Hz 로 publish → 한 policy step당 interp_factor 개의 action
+                # --------------------------------------------------
+                for k in range(self.interp_factor):
+                    alpha = float(k + 1) / float(self.interp_factor)  # 0~1
 
-                self.node.get_logger().info(
-                    f"[{step:03d}] joints={np.round(joints_cmd, 3)}, "
-                    f"force={np.round(force_cmd, 3)}"
-                )
+                    interp_joints = (
+                        (1.0 - alpha) * self.prev_joints_cmd
+                        + alpha * joints_cmd
+                    )
+                    interp_force = (
+                        (1.0 - alpha) * self.prev_force_cmd
+                        + alpha * force_cmd
+                    )
 
-                # --------- CSV 로깅 (demo vs pred) --------- #
-                ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
-                if self.demo_actions is not None and step < self.demo_len:
-                    demo_vals = self.demo_actions[step]  # (9,) [j0..5, fx,fy,fz]
-                else:
-                    demo_vals = np.full(ACTION_DIM, np.nan, dtype=np.float32)
+                    # publish
+                    j_msg = Float64MultiArray()
+                    j_msg.data = interp_joints.tolist()
+                    self.act_joints_pub.publish(j_msg)
 
-                demo_j = demo_vals[:6]
-                demo_f = demo_vals[6:9]
+                    f_msg = Float64MultiArray()
+                    f_msg.data = interp_force.tolist()
+                    self.act_force_pub.publish(f_msg)
 
-                line = "{:d},{:.6f},".format(step, ros_time_sec)
-                line += ",".join(f"{v:.6f}" for v in demo_j) + ","
-                line += ",".join(f"{v:.6f}" for v in demo_f) + ","
-                line += ",".join(f"{v:.6f}" for v in joints_cmd) + ","
-                line += ",".join(f"{v:.6f}" for v in force_cmd) + "\n"
-                self.log_file.write(line)
+                    # 로그 (global_step 기준)
+                    self.node.get_logger().info(
+                        f"[g{global_step:05d} | p{policy_step:03d}] "
+                        f"joints={np.round(interp_joints, 3)}, "
+                        f"force={np.round(interp_force, 3)}"
+                    )
 
-                step += 1
+                    # CSV 로깅: demo 는 해당 policy_step 기준 값 반복
+                    ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
+                    if self.demo_actions is not None and policy_step < self.demo_len:
+                        demo_vals = self.demo_actions[policy_step]
+                    else:
+                        demo_vals = np.full(ACTION_DIM, np.nan, dtype=np.float32)
 
-                # --------- 20 Hz 맞추기 --------- #
-                now = self.node.get_clock().now()
-                elapsed = (now - last_time).nanoseconds / 1e9
-                if elapsed < period:
-                    time.sleep(max(0.0, period - elapsed))
-                last_time = now
+                    demo_j = demo_vals[:6]
+                    demo_f = demo_vals[6:9]
+
+                    line = "{:d},{:.6f},".format(global_step, ros_time_sec)
+                    line += ",".join(f"{v:.6f}" for v in demo_j) + ","
+                    line += ",".join(f"{v:.6f}" for v in demo_f) + ","
+                    line += ",".join(f"{v:.6f}" for v in interp_joints) + ","
+                    line += ",".join(f"{v:.6f}" for v in interp_force) + "\n"
+                    self.log_file.write(line)
+
+                    global_step += 1
+                    time.sleep(period)  # 항상 20 Hz 유지
+
+                # 다음 구간 보간을 위해 prev <- current
+                self.prev_joints_cmd = joints_cmd.copy()
+                self.prev_force_cmd = force_cmd.copy()
+
+                policy_step += 1
 
             self.node.get_logger().info(
-                f"[DONE] Published {step} steps with 1-step ACT control. Shutting down episode."
+                f"[DONE] policy_step={policy_step}, global_step={global_step} "
+                f"(interp_factor={self.interp_factor})"
             )
 
         except KeyboardInterrupt:
@@ -700,6 +735,7 @@ class ActPolicyInfer:
                 rclpy.shutdown()
             except Exception:
                 pass
+
 
 
 # ==============================================================

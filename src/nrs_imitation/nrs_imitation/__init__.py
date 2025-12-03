@@ -19,3 +19,13 @@ class ActPolicyInfer:
         # CSV 헤더: step, ros_time, joint0..5
         self.log_file.write("step,ros_time,j0,j1,j2,j3,j4,j5\n")
         self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
+
+
+        # --------------------------------------------------
+        # 🔹 Interpolation (upsampling) 설정
+        #   - policy: 20 Hz (모델 호출)
+        #   - publish: 20 Hz 에서 한 step을 interp_factor 개로 쪼갬
+        # --------------------------------------------------
+        self.interp_factor = 100       # 예: 5면 한 policy step을 5개로 쪼갬
+        self.prev_joints_cmd = None  # 이전 step의 (6,) joint action
+        self.prev_force_cmd = None   # 이전 step의 (3,) force action
