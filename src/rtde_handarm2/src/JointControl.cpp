@@ -82,11 +82,11 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
 
   // 🔹 ACT inference node output 구독
   act_joints_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-    "/isaac_joints_commands", 10,
+    "/action_joints", 10,
     std::bind(&JointControl::actJointsCallback, this, std::placeholders::_1));
 
   act_force_sub_ = node_->create_subscription<geometry_msgs::msg::Wrench>(
-    "/isaac_force_commands", 10,
+    "/action_force", 10,
     std::bind(&JointControl::actForceCallback, this, std::placeholders::_1));
 
   // Timer (2 ms)
@@ -132,26 +132,6 @@ JointControl::~JointControl() {
   if (path_recording_pos)   std::fclose(path_recording_pos);
   if (path_recording_joint) std::fclose(path_recording_joint);
   if (EXPdata1)             std::fclose(EXPdata1);
-}
-
-// ============================================================================
-// ACT inference node callbacks
-// ============================================================================
-void JointControl::actJointsCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
-{
-  if (msg->position.size() < DOF) return;
-  for (int i = 0; i < DOF; ++i) {
-    act_joints_(i) = msg->position[i];
-  }
-  act_joints_valid_ = true;
-}
-
-void JointControl::actForceCallback(const geometry_msgs::msg::Wrench::SharedPtr msg)
-{
-  act_force_(0) = msg->force.x;
-  act_force_(1) = msg->force.y;
-  act_force_(2) = msg->force.z;
-  act_force_valid_ = true;
 }
 
 // ============================================================================
@@ -585,7 +565,7 @@ void JointControl::CalculateAndPublishJoint() {
   }
 
   // 7) ACT Policy Inference mode
-  //    - ACT inference node: /isaac_joints_commands (JointState), /isaac_force_commands (Wrench)
+  //    - ACT inference node: /action_joints (JointState), /action_force (Wrench)
   //    - joints 6개 → FK로 Xd, RPY 계산
   //    - force 3개 → Fd = [fx, fy, fz]
   //    - runCartesianForceChain(Xd, RPY, Fd, dt_s) 호출 후 qd 퍼블리시

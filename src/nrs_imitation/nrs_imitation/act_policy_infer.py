@@ -55,6 +55,7 @@ from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import Image, JointState
 from geometry_msgs.msg import Wrench
+from std_msgs.msg import Float64MultiArray   # 🔹 ACT → JointControl 전달용
 
 
 # ==============================================================
@@ -124,7 +125,6 @@ def find_latest_episode_dir(root_dir: str) -> str:
         return ep
 
     # 디렉토리가 아직 없어도 일단 episodes_ft 경로를 리턴
-    # (나중에 에러 메시지로 확인 가능)
     return ep_ft
 
 
@@ -256,14 +256,14 @@ class ActPolicyInfer:
         # publisher / subscriber
         # ======================
 
-        # 🔹 JointState 퍼블리셔: joints 6개 → /isaac_joints_commands
-        self.joint_pub = self.node.create_publisher(
-            JointState, "/isaac_joint_commands", 10
+        # 🔹 JointControl의 control_mode == 7 이 subscribe 하는 토픽으로 publish
+        #   - joints 6개  → /action_joints
+        #   - force 3개   → /action_force
+        self.act_joints_pub = self.node.create_publisher(
+            Float64MultiArray, "/action_joints", 10
         )
-
-        # 🔹 Force 명령 퍼블리셔: force 3개 → 별도 토픽 (/isaac_force_commands)
-        self.force_pub = self.node.create_publisher(
-            Wrench, "/isaac_force_commands", 10
+        self.act_force_pub = self.node.create_publisher(
+            Float64MultiArray, "/action_force", 10
         )
 
         # JointState 구독 (현재 관절 상태)
@@ -633,7 +633,7 @@ class ActPolicyInfer:
                     pad[: action_full.shape[0]] = action_full
                     action_full = pad
 
-                # 🔹 joints: 항상 앞 6개 사용 → /isaac_joints_commands 로 publish
+                # 🔹 joints: 항상 앞 6개 사용
                 joints_cmd = action_full[:6]
 
                 # 🔹 force: model이 9차원 이상이면 6:9 사용, 아니면 0
@@ -642,29 +642,14 @@ class ActPolicyInfer:
                 else:
                     force_cmd = np.zeros(3, dtype=np.float32)
 
-                # --------- JointState publish (positions) --------- #
-                js_msg = JointState()
-                js_msg.name = [
-                    "shoulder_pan_joint",
-                    "shoulder_lift_joint",
-                    "elbow_joint",
-                    "wrist_1_joint",
-                    "wrist_2_joint",
-                    "wrist_3_joint",
-                ]
-                js_msg.position = joints_cmd.tolist()
-                self.joint_pub.publish(js_msg)
+                # --------- ACT 결과를 JointControl용 토픽으로 publish --------- #
+                j_msg = Float64MultiArray()
+                j_msg.data = joints_cmd.tolist()
+                self.act_joints_pub.publish(j_msg)
 
-                # --------- Wrench publish (force) --------- #
-                w_msg = Wrench()
-                w_msg.force.x = float(force_cmd[0])
-                w_msg.force.y = float(force_cmd[1])
-                w_msg.force.z = float(force_cmd[2])
-                # moment는 여기서는 0으로 둠 (필요하면 ACT output 차원 늘려서 사용)
-                w_msg.torque.x = 0.0
-                w_msg.torque.y = 0.0
-                w_msg.torque.z = 0.0
-                self.force_pub.publish(w_msg)
+                f_msg = Float64MultiArray()
+                f_msg.data = force_cmd.tolist()
+                self.act_force_pub.publish(f_msg)
 
                 self.node.get_logger().info(
                     f"[{step:03d}] joints={np.round(joints_cmd, 3)}, "
