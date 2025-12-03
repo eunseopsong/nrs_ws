@@ -186,9 +186,11 @@ private:
       buffer_joints_.push_back(std::array<double,6>{0,0,0,0,0,0});
     }
 
-    // ft: fx=0, fy=0, fz 그대로
+    // ft: fx, fy, fz 모두 저장
     std::array<float,3> ft_to_save{0.f, 0.f, 0.f};
     if (ft_received_) {
+      ft_to_save[0] = latest_ft_raw_[0];
+      ft_to_save[1] = latest_ft_raw_[1];
       ft_to_save[2] = latest_ft_raw_[2];
     }
     buffer_fts_.push_back(ft_to_save);
@@ -351,7 +353,7 @@ private:
 
     // =======================
     // 3) action_ft: (N_pair, 3)
-    //    action_ft[t] = [0, 0, fz_{t+1}]
+    //    action_ft[t] = [fx, fy, fz]_{t+1}
     // =======================
     {
       hsize_t dims[2] = { static_cast<hsize_t>(N_pair), 3 };
@@ -362,7 +364,7 @@ private:
       std::vector<float> flat;
       flat.reserve(N_pair * 3);
       for (std::size_t t = 0; t < N_pair; ++t) {
-        const auto &ft_tp1 = buffer_fts_[t + 1];  // [0, 0, fz]
+        const auto &ft_tp1 = buffer_fts_[t + 1];  // [fx, fy, fz]
         for (float v : ft_tp1) flat.push_back(v);
       }
 
@@ -420,6 +422,7 @@ private:
         flat.insert(flat.end(), img.data, img.data + (H_top * W_top * C_top));
       }
 
+      // ← 여기가 H5D_NATIVE_UCHAR → H5T_NATIVE_UCHAR 로 수정된 부분
       H5Dwrite(dset_id, H5T_NATIVE_UCHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT, flat.data());
       H5Dclose(dset_id);
       H5Sclose(space_id);

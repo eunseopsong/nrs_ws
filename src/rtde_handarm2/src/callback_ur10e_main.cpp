@@ -94,8 +94,8 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       set_status(message_status, Data_recording_off);
     }
 
-    // ===================== Keyboard Teleop Mode w/ Force Control ===================== //
-    else if (mode_cmd == Keyboard_teleop_start) {
+    // ===================== ACT Inference Mode w/ Force Control ===================== //
+    else if (mode_cmd == ACT_inference_mode_cmd) {
       ctrl.store(7, std::memory_order_release);
     }
 

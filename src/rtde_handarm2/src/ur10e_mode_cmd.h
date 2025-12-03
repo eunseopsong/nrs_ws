@@ -32,6 +32,8 @@
 
 #define Playback_mode_cmd 7000
 
+#define ACT_inference_mode_cmd 8000
+
 #define Motion_stop_cmd 0000
 
 /* Mode data definition end */

@@ -19,12 +19,20 @@ from cv_bridge import CvBridge
 # ======================
 ROOT_DIR = "/home/eunseop/nrs_lab2/nrs_act"
 CKPT_ROOT = "/home/eunseop/nrs_lab2/checkpoints/ur10e_swing"
-DATASET_EP_DIR = "/home/eunseop/nrs_lab2/datasets/ACT/1114_1643/episodes"
-LOG_DIR = "/home/eunseop/nrs_lab2/analysis_logs"
+
+# 🔹 ACT 데이터 루트 (최신 episodes_ft 자동 탐색용)
+ACT_DATA_ROOT = "/home/eunseop/nrs_lab2/datasets/ACT"
 
 # 비교할 데모 에피소드 인덱스 (episode_0.hdf5, episode_10.hdf5 등)
 DEMO_EP_IDX = 0  # 필요하면 나중에 바꿔서 사용
 
+# publish/데모 기준 action 차원: 6 joint + 3 force
+ACTION_DIM = 9
+
+# 로그 저장 디렉토리
+LOG_DIR = "/home/eunseop/nrs_lab2/analysis_logs"
+
+# sys.path 설정
 sys.path.extend(
     [
         ROOT_DIR,
@@ -46,6 +54,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import Image, JointState
+from geometry_msgs.msg import Wrench
 
 
 # ==============================================================
@@ -73,6 +82,54 @@ def find_latest_ckpt_dir(root_dir: str) -> str:
     candidates.sort()
     latest_name = candidates[-1]
     return os.path.join(root_dir, latest_name)
+
+
+# ==============================================================
+# 유틸: 최신 episode 디렉토리 찾기 (ACT_DATA_ROOT 아래 MMDD_HHMM/episodes_ft)
+# ==============================================================
+def find_latest_episode_dir(root_dir: str) -> str:
+    """
+    root_dir (예: /home/.../datasets/ACT) 아래에서
+    이름이 'MMDD_HHMM' 형식인 폴더 중 가장 최신을 고른 뒤,
+    그 안의 'episodes_ft' 또는 'episodes' 디렉토리 경로를 반환.
+    """
+    if not os.path.isdir(root_dir):
+        return root_dir
+
+    candidates = []
+    for name in os.listdir(root_dir):
+        sub = os.path.join(root_dir, name)
+        if not os.path.isdir(sub):
+            continue
+        # "MMDD_HHMM" 형식 필터링
+        if len(name) == 9 and name[4] == "_":
+            mmdd = name[:4]
+            hhmm = name[5:]
+            if mmdd.isdigit() and hhmm.isdigit():
+                candidates.append(name)
+
+    if not candidates:
+        return root_dir
+
+    candidates.sort()
+    latest_name = candidates[-1]
+    base_dir = os.path.join(root_dir, latest_name)
+
+    ep_ft = os.path.join(base_dir, "episodes_ft")
+    ep    = os.path.join(base_dir, "episodes")
+
+    if os.path.isdir(ep_ft):
+        return ep_ft
+    if os.path.isdir(ep):
+        return ep
+
+    # 디렉토리가 아직 없어도 일단 episodes_ft 경로를 리턴
+    # (나중에 에러 메시지로 확인 가능)
+    return ep_ft
+
+
+# 🔹 이제 DATASET_EP_DIR을 자동으로 결정
+DATASET_EP_DIR = find_latest_episode_dir(ACT_DATA_ROOT)
 
 
 # ==============================================================
@@ -176,8 +233,8 @@ class ImageRecorder:
 
 
 # ==============================================================
-# 🤖 ACT Policy Inference (Closed-loop + Temporal Aggregation)
-#    + Demo joints vs Pred joints CSV 로깅
+# 🤖 ACT Policy Inference (Closed-loop, 1-step action + smoothing)
+#    + Demo action(6 joint + 3 force) vs Pred action CSV 로깅
 # ==============================================================
 class ActPolicyInfer:
     def __init__(self):
@@ -191,10 +248,25 @@ class ActPolicyInfer:
         self.node = Node("act_policy_infer")
         self.curr_joint = np.zeros(6, dtype=np.float32)
 
+        self.node.get_logger().info(
+            f"[INFO] Using DATASET_EP_DIR = {DATASET_EP_DIR}"
+        )
+
+        # ======================
         # publisher / subscriber
+        # ======================
+
+        # 🔹 JointState 퍼블리셔: joints 6개 → /isaac_joints_commands
         self.joint_pub = self.node.create_publisher(
             JointState, "/isaac_joint_commands", 10
         )
+
+        # 🔹 Force 명령 퍼블리셔: force 3개 → 별도 토픽 (/isaac_force_commands)
+        self.force_pub = self.node.create_publisher(
+            Wrench, "/isaac_force_commands", 10
+        )
+
+        # JointState 구독 (현재 관절 상태)
         self.node.create_subscription(
             JointState, "/isaac_joint_states", self._joint_cb, 10
         )
@@ -225,9 +297,6 @@ class ActPolicyInfer:
 
         import argparse
 
-        # training command:
-        # python3 imitate_episodes.py ... --policy_class ACT --kl_weight 10
-        #   --chunk_size 100 --hidden_dim 512 --batch_size 8 ...
         args = argparse.Namespace(
             lr=1e-5,
             lr_backbone=1e-5,
@@ -238,7 +307,7 @@ class ActPolicyInfer:
             clip_max_norm=0.1,
             hidden_dim=512,
             dim_feedforward=3200,
-            num_queries=100,  # == chunk_size
+            num_queries=100,  # == chunk_size (H)
             backbone="resnet18",
             position_embedding="sine",
             dilation=False,
@@ -269,11 +338,14 @@ class ActPolicyInfer:
         self.policy.to(device).eval()
         self.node.get_logger().info("✅ ACT model ready for inference")
 
-        # temporal aggregation 설정 (normalized space에서 동작)
-        self.chunk_size = args.num_queries
-        self.max_hist = 5         # 각 time-offset 별로 최근 몇 개까지만 사용
-        self.alpha = 1.0          # 최근 예측에 더 큰 가중치 (지수 감쇠 계수)
-        self.pred_queue = [list() for _ in range(self.chunk_size)]
+        # ======================
+        # 1-step smoothing (temporal agg 대체)
+        # ======================
+        self.smooth_alpha = 0.4  # 0.0 ~ 1.0 (1.0이면 smoothing 없음)
+        self.prev_action_norm = None  # 정규화 공간에서 smoothing
+
+        # 모델이 실제로 출력하는 action 차원 (처음 forward할 때 결정)
+        self.model_action_dim = None
 
         # ======================
         # dataset_stats.pkl 로부터 action mean/std 로드 (denorm 용)
@@ -290,7 +362,7 @@ class ActPolicyInfer:
                     self.action_std = np.array(stats["action_std"], dtype=np.float32)
                     self.node.get_logger().info(
                         "[INFO] Loaded action_mean/std from dataset_stats.pkl "
-                        f"(mean={self.action_mean}, std={self.action_std})"
+                        f"(len={len(self.action_mean)})"
                     )
                 else:
                     self.node.get_logger().warn(
@@ -308,9 +380,10 @@ class ActPolicyInfer:
             )
 
         # ======================
-        # Demo episode joints 로드 (episode_DEMO_EP_IDX.hdf5)
+        # Demo episode actions 로드 (episode_DEMO_EP_IDX.hdf5)
+        #   - shape: (T, 9) [joints(6) + force(3)] 가정
         # ======================
-        self.demo_joints = None
+        self.demo_actions = None
         self.demo_len = None
         self._load_demo_episode(episode_idx=DEMO_EP_IDX)
 
@@ -331,8 +404,14 @@ class ActPolicyInfer:
         self.log_path = os.path.join(LOG_DIR, f"act_infer_{ts}.csv")
         self.log_file = open(self.log_path, "w", buffering=1)
 
-        # CSV 헤더: step, ros_time, demo_j0..5, pred_j0..5
-        header = "step,ros_time,d0,d1,d2,d3,d4,d5,p0,p1,p2,p3,p4,p5\n"
+        # CSV 헤더: step, ros_time,
+        #   demo_j0..5, demo_fx, demo_fy, demo_fz,
+        #   pred_j0..5, pred_fx, pred_fy, pred_fz
+        header = (
+            "step,ros_time,"
+            "dj0,dj1,dj2,dj3,dj4,dj5,dfx,dfy,dfz,"
+            "pj0,pj1,pj2,pj3,pj4,pj5,pfx,pfy,pfz\n"
+        )
         self.log_file.write(header)
         self.node.get_logger().info(f"[INFO] Inference log -> {self.log_path}")
 
@@ -344,14 +423,14 @@ class ActPolicyInfer:
             self.curr_joint = np.array(msg.position[:6], dtype=np.float32)
 
     # ----------------------------------------------------------
-    # HDF5 안에서 (T, 6) 모양의 dataset 자동 탐색
+    # HDF5 안에서 (T, ACTION_DIM) 또는 (T,6) 모양의 dataset 자동 탐색
     # ----------------------------------------------------------
     def _find_episode_dataset(self, f: h5py.File):
         candidates = []
 
         def visitor(name, obj):
             if isinstance(obj, h5py.Dataset):
-                if obj.ndim == 2 and obj.shape[1] == 6:
+                if obj.ndim == 2 and obj.shape[1] in (6, ACTION_DIM):
                     candidates.append(name)
 
         f.visititems(visitor)
@@ -373,18 +452,19 @@ class ActPolicyInfer:
 
         candidates.sort(key=score)
         ds_name = candidates[0]
-        data = f[ds_name][()]  # (T,6)
+        data = f[ds_name][()]  # (T,6) 또는 (T,9)
         return ds_name, data
 
     # ----------------------------------------------------------
     # demo episode 로드
+    #   - demo_actions: (T, ACTION_DIM) 혹은 (T,6) → 내부에서 분리해서 사용
     # ----------------------------------------------------------
     def _load_demo_episode(self, episode_idx: int):
         ep_path = os.path.join(DATASET_EP_DIR, f"episode_{episode_idx}.hdf5")
         if not os.path.exists(ep_path):
             self.node.get_logger().warn(
                 f"[WARN] Demo episode file not found: {ep_path}. "
-                "d0~d5는 NaN으로 채워집니다."
+                "demo 값은 NaN으로 채워집니다."
             )
             return
 
@@ -393,16 +473,33 @@ class ActPolicyInfer:
                 ds_name, data = self._find_episode_dataset(f)
             if ds_name is None or data is None:
                 self.node.get_logger().warn(
-                    f"[WARN] {ep_path} 안에서 (T,6) dataset 을 찾지 못했습니다. "
-                    "d0~d5는 NaN으로 채워집니다."
+                    f"[WARN] {ep_path} 안에서 (T,6) 또는 (T,{ACTION_DIM}) dataset 을 찾지 못했습니다. "
+                    "demo 값은 NaN으로 채워집니다."
                 )
                 return
 
-            self.demo_joints = np.asarray(data, dtype=np.float32)
-            self.demo_len = self.demo_joints.shape[0]
+            data = np.asarray(data, dtype=np.float32)
+            if data.shape[1] == ACTION_DIM:
+                # joints(6) + force(3)가 그대로 들어있는 경우
+                self.demo_actions = data
+            elif data.shape[1] == 6:
+                # joints만 있는 경우 → force는 NaN으로 채움
+                T = data.shape[0]
+                demo = np.full((T, ACTION_DIM), np.nan, dtype=np.float32)
+                demo[:, :6] = data
+                self.demo_actions = demo
+            else:
+                # 이 경우는 위에서 shape 필터링했으므로 거의 안 옴
+                self.demo_actions = None
+                self.node.get_logger().warn(
+                    f"[WARN] Unexpected demo data shape: {data.shape}"
+                )
+                return
+
+            self.demo_len = self.demo_actions.shape[0]
             self.node.get_logger().info(
-                f"[INFO] Loaded demo joints from {ep_path}, "
-                f"dataset='{ds_name}', shape={self.demo_joints.shape}"
+                f"[INFO] Loaded demo actions from {ep_path}, "
+                f"dataset='{ds_name}', shape={self.demo_actions.shape}"
             )
         except Exception as e:
             self.node.get_logger().warn(
@@ -417,46 +514,8 @@ class ActPolicyInfer:
             return action_norm
         return action_norm * self.action_std + self.action_mean
 
-    # ----------------------------------------------------------
-    # temporal queue 업데이트 + aggregation
-    # ----------------------------------------------------------
-    def _shift_queue(self):
-        # time step 진행에 따라 offset 0 -> 과거, 1 -> 0, ... 식으로 이동
-        self.pred_queue = self.pred_queue[1:] + [list()]
-
-    def _update_queue_with_chunk(self, chunk_norm: np.ndarray):
-        """
-        chunk_norm: (H,6) normalized actions (policy output)
-        pred_queue[k] 에 offset k에 해당하는 예측을 push
-        """
-        H = min(self.chunk_size, chunk_norm.shape[0])
-        for k in range(H):
-            lst = self.pred_queue[k]
-            lst.append(chunk_norm[k].copy())
-            # 너무 오래된 건 버리기
-            if len(lst) > self.max_hist:
-                lst.pop(0)
-
-    def _aggregate_current(self) -> np.ndarray:
-        """
-        pred_queue[0] 에 쌓여 있는 여러 예측을 지수 가중 평균으로 합침.
-        결과는 normalized action (6,)
-        """
-        candidates = self.pred_queue[0]
-        if not candidates:
-            return None
-
-        cand = np.stack(candidates, axis=0)  # (M,6)
-        M = cand.shape[0]
-        # 가장 최근 것이 가장 큰 weight
-        idx = np.arange(M)[::-1]  # 0(가장 최근),1,... 로 쓰고 싶으면 반대로 해도 됨
-        weights = np.exp(-self.alpha * idx)
-        weights = weights / np.sum(weights)
-        agg = (weights[:, None] * cand).sum(axis=0)
-        return agg
-
     # ==========================================================
-    # 메인 루프 (closed-loop + temporal agg, episode_len 동안 1회 실행)
+    # 메인 루프 (closed-loop, 1-step action + smoothing)
     # ==========================================================
     def run(self):
         rate_hz = 20.0
@@ -513,11 +572,7 @@ class ActPolicyInfer:
                     self.curr_joint, dtype=torch.float32
                 ).unsqueeze(0).to(self.device)
 
-                # --------- time step 진행에 따라 queue shift --------- #
-                if step > 0:
-                    self._shift_queue()
-
-                # --------- policy 한 번 호출 (closed-loop) --------- #
+                # --------- policy 한 번 호출 (closed-loop, 1-step 사용) --------- #
                 with torch.no_grad():
                     out = self.policy(qpos_tensor, imgs_tensor)
                     if isinstance(out, tuple):
@@ -526,28 +581,70 @@ class ActPolicyInfer:
                         action_tensor = out
 
                     action_np_norm = action_tensor.detach().cpu().numpy()
-                    action_np_norm = action_np_norm.reshape(-1, 6)  # (H,6)
+
+                # 모델 action 차원 자동 결정 (첫 step에서)
+                if self.model_action_dim is None:
+                    self.model_action_dim = int(action_tensor.shape[-1])
+                    self.node.get_logger().info(
+                        f"[INFO] Detected model_action_dim = {self.model_action_dim}"
+                    )
+
+                    # dataset_stats와 차원 안 맞으면 denorm 비활성화
+                    if (
+                        self.action_mean is not None
+                        and len(self.action_mean) != self.model_action_dim
+                    ):
+                        self.node.get_logger().warn(
+                            "[WARN] model_action_dim과 dataset_stats action_dim 불일치. "
+                            "denormalization 비활성화."
+                        )
+                        self.action_mean = None
+                        self.action_std = None
+
+                # (H, model_action_dim)로 reshape
+                action_np_norm = action_np_norm.reshape(-1, self.model_action_dim)
 
                 if step == 0:
                     self.node.get_logger().info(
-                        f"[INFO] First policy output shape: {action_np_norm.shape}"
+                        f"[INFO] First policy output shape (H, D): "
+                        f"{action_np_norm.shape}"
                     )
 
-                # --------- temporal queue 업데이트 --------- #
-                self._update_queue_with_chunk(action_np_norm)
+                # --------- 이번 step에서 사용할 1-step action (index 0) --------- #
+                curr_action_norm = action_np_norm[0]  # (D,)
 
-                # --------- 현재 step 에 대한 temporal agg --------- #
-                action_norm = self._aggregate_current()
-                if action_norm is None:
-                    # fallback: chunk 첫 번째 값 사용
-                    action_norm = action_np_norm[0]
+                # --------- 간단한 temporal smoothing (정규화 공간에서) --------- #
+                if self.prev_action_norm is None:
+                    smoothed_action_norm = curr_action_norm
+                else:
+                    a = self.smooth_alpha
+                    smoothed_action_norm = (
+                        a * curr_action_norm + (1.0 - a) * self.prev_action_norm
+                    )
+                self.prev_action_norm = smoothed_action_norm
 
-                # denorm → 실제 joint
-                action = self._denorm_single(action_norm)  # (6,)
+                # denorm → 실제 joint+force (model_action_dim 기준)
+                action_full = self._denorm_single(smoothed_action_norm)  # (D,)
+                action_full = np.asarray(action_full, dtype=np.float32)
 
-                # --------- JointState publish --------- #
-                msg = JointState()
-                msg.name = [
+                # 최소 6차원은 확보
+                if action_full.shape[0] < 6:
+                    pad = np.zeros(6, dtype=np.float32)
+                    pad[: action_full.shape[0]] = action_full
+                    action_full = pad
+
+                # 🔹 joints: 항상 앞 6개 사용 → /isaac_joints_commands 로 publish
+                joints_cmd = action_full[:6]
+
+                # 🔹 force: model이 9차원 이상이면 6:9 사용, 아니면 0
+                if action_full.shape[0] >= 9:
+                    force_cmd = action_full[6:9]
+                else:
+                    force_cmd = np.zeros(3, dtype=np.float32)
+
+                # --------- JointState publish (positions) --------- #
+                js_msg = JointState()
+                js_msg.name = [
                     "shoulder_pan_joint",
                     "shoulder_lift_joint",
                     "elbow_joint",
@@ -555,23 +652,40 @@ class ActPolicyInfer:
                     "wrist_2_joint",
                     "wrist_3_joint",
                 ]
-                msg.position = action.tolist()
-                self.joint_pub.publish(msg)
+                js_msg.position = joints_cmd.tolist()
+                self.joint_pub.publish(js_msg)
+
+                # --------- Wrench publish (force) --------- #
+                w_msg = Wrench()
+                w_msg.force.x = float(force_cmd[0])
+                w_msg.force.y = float(force_cmd[1])
+                w_msg.force.z = float(force_cmd[2])
+                # moment는 여기서는 0으로 둠 (필요하면 ACT output 차원 늘려서 사용)
+                w_msg.torque.x = 0.0
+                w_msg.torque.y = 0.0
+                w_msg.torque.z = 0.0
+                self.force_pub.publish(w_msg)
 
                 self.node.get_logger().info(
-                    f"[{step:03d}] Published(temporal_agg): {np.round(action, 3)}"
+                    f"[{step:03d}] joints={np.round(joints_cmd, 3)}, "
+                    f"force={np.round(force_cmd, 3)}"
                 )
 
                 # --------- CSV 로깅 (demo vs pred) --------- #
                 ros_time_sec = self.node.get_clock().now().nanoseconds / 1e9
-                if self.demo_joints is not None and step < self.demo_len:
-                    demo_vals = self.demo_joints[step]
+                if self.demo_actions is not None and step < self.demo_len:
+                    demo_vals = self.demo_actions[step]  # (9,) [j0..5, fx,fy,fz]
                 else:
-                    demo_vals = np.full(6, np.nan, dtype=np.float32)
+                    demo_vals = np.full(ACTION_DIM, np.nan, dtype=np.float32)
+
+                demo_j = demo_vals[:6]
+                demo_f = demo_vals[6:9]
 
                 line = "{:d},{:.6f},".format(step, ros_time_sec)
-                line += ",".join(f"{v:.6f}" for v in demo_vals) + ","
-                line += ",".join(f"{v:.6f}" for v in action) + "\n"
+                line += ",".join(f"{v:.6f}" for v in demo_j) + ","
+                line += ",".join(f"{v:.6f}" for v in demo_f) + ","
+                line += ",".join(f"{v:.6f}" for v in joints_cmd) + ","
+                line += ",".join(f"{v:.6f}" for v in force_cmd) + "\n"
                 self.log_file.write(line)
 
                 step += 1
@@ -580,11 +694,11 @@ class ActPolicyInfer:
                 now = self.node.get_clock().now()
                 elapsed = (now - last_time).nanoseconds / 1e9
                 if elapsed < period:
-                    time.sleep(period - elapsed)
+                    time.sleep(max(0.0, period - elapsed))
                 last_time = now
 
             self.node.get_logger().info(
-                f"[DONE] Published {step} steps with temporal agg. Shutting down episode."
+                f"[DONE] Published {step} steps with 1-step ACT control. Shutting down episode."
             )
 
         except KeyboardInterrupt:
