@@ -202,21 +202,35 @@ void JointControl::ftSensorCallback(
 //   - /action_force  (Wrench)     → act_force_  (3)
 // ============================================================================
 void JointControl::actJointsCallback(
-    const sensor_msgs::msg::JointState::SharedPtr msg)
+    const std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
-  if (msg->position.size() < DOF) return;
+  printf("[ACT CB] /action_joints size = %zu\n", msg->data.size());
+
+  if (msg->data.size() < DOF) {
+    printf("[ACT CB] data size < DOF, ignore\n");
+    return;
+  }
 
   for (int i = 0; i < DOF; ++i) {
-    act_joints_(i) = msg->position[i];
+    act_joints_(i) = msg->data[i];    // 앞 6개를 joint 각도로 사용
   }
   act_joints_valid_ = true;
+  printf("[ACT CB] updated act_joints, act_joints_valid_ = 1\n");
 }
 
 void JointControl::actForceCallback(
-    const geometry_msgs::msg::Wrench::SharedPtr msg)
+    const std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
-  act_force_(0) = msg->force.x;
-  act_force_(1) = msg->force.y;
-  act_force_(2) = msg->force.z;
+  printf("[ACT CB] /action_force size = %zu\n", msg->data.size());
+
+  if (msg->data.size() < 3) {
+    printf("[ACT CB] data size < 3, ignore\n");
+    return;
+  }
+
+  act_force_(0) = msg->data[0];
+  act_force_(1) = msg->data[1];
+  act_force_(2) = msg->data[2];
   act_force_valid_ = true;
+  printf("[ACT CB] updated act_force, act_force_valid_ = 1\n");
 }

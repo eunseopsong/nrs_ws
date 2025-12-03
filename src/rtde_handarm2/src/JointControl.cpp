@@ -81,13 +81,14 @@ JointControl::JointControl(const rclcpp::Node::SharedPtr& node)
     std::bind(&JointControl::ftSensorCallback, this, std::placeholders::_1));
 
   // 🔹 ACT inference node output 구독
-  act_joints_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+  act_joints_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
     "/action_joints", 10,
     std::bind(&JointControl::actJointsCallback, this, std::placeholders::_1));
 
-  act_force_sub_ = node_->create_subscription<geometry_msgs::msg::Wrench>(
+  act_force_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
     "/action_force", 10,
     std::bind(&JointControl::actForceCallback, this, std::placeholders::_1));
+
 
   // Timer (2 ms)
   timer_ = node_->create_wall_timer(
@@ -565,38 +566,28 @@ void JointControl::CalculateAndPublishJoint() {
   }
 
   // 7) ACT Policy Inference mode
-  //    - ACT inference node: /action_joints (JointState), /action_force (Wrench)
+  //    - ACT inference node: /action_joints, /action_force (Float64MultiArray 기반)
   //    - joints 6개 → FK로 Xd, RPY 계산
-  //    - force 3개 → Fd = [fx, fy, fz]
+  //    - force 3개 → Fd = [0, 0, fz]
   //    - runCartesianForceChain(Xd, RPY, Fd, dt_s) 호출 후 qd 퍼블리시
   if (control_mode == 7) {
-    // joints 값이 아직 안 들어왔으면 "지정 joint posture" 유지
+    // === 0) ACT 데이터가 아직 안 들어온 경우: 지정 자세 유지 ===
+    static const Vector6d Q_HOLD = (Vector6d() <<
+        45.722   * M_PI / 180.0,   // q1
+       -80.0     * M_PI / 180.0,   // q2
+      -129.09309 * M_PI / 180.0,   // q3
+       -63.083   * M_PI / 180.0,   // q4
+        93.2145  * M_PI / 180.0,   // q5
+       -48.1342  * M_PI / 180.0    // q6
+    ).finished();
+
     if (!act_joints_valid_) {
-      // [deg]로 주어진 고정 자세를 rad로 변환해서 한 번만 초기화
-      static bool init = false;
-      static Vector6d ACT_WAIT_Q;  // rad
+      // ACT 값이 한 번도 안 들어왔으면 고정 자세 유지
+      RArm.qd = Q_HOLD;
 
-      if (!init) {
-        const double deg[DOF] = {
-          45.722,    // q1
-         -80.0,   // q2
-        -129.09309,  // q3
-         -63.083,    // q4
-          93.2145,   // q5
-         -48.1342    // q6
-        };
-        for (int i = 0; i < DOF; ++i) {
-          ACT_WAIT_Q(i) = deg[i] * M_PI / 180.0;
-        }
-        init = true;
-      }
-
-      // 지정 자세를 qd, joint command로 계속 퍼블리시
       joint_state_.header.stamp = node_->now();
-      for (int i = 0; i < DOF; ++i) {
-        RArm.qd(i)               = ACT_WAIT_Q(i);
+      for (int i = 0; i < DOF; ++i)
         joint_state_.position[i] = RArm.qd(i);
-      }
       joint_commands_pub_->publish(joint_state_);
 
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
@@ -605,38 +596,40 @@ void JointControl::CalculateAndPublishJoint() {
 
     // --------- 1) ACT joints → FK로 Xd, RPY 계산 ---------
     // RArm 구조를 건드리지 않기 위해 백업 후 복원 방식 사용
-    Vector6d qc_backup = RArm.qc;
-    auto     Tc_backup = RArm.Tc;
-    auto     xc_backup = RArm.xc;
-    auto     thc_backup = RArm.thc;
+    Vector6d qc_backup   = RArm.qc;
+    auto     Tc_backup   = RArm.Tc;
+    auto     xc_backup   = RArm.xc;
+    auto     thc_backup  = RArm.thc;
 
     // ACT가 준 joints를 "가상의 qc"로 넣어서 FK
     for (int i = 0; i < DOF; ++i) {
       RArm.qc(i) = act_joints_(i);
     }
 
-    AKin.Ycontact_ForwardK_T(&RArm);
-    AKin.Rotation2EulerAngle(&RArm);
+    AKin.Ycontact_ForwardK_T(&RArm);  // Base -> TCP
+    AKin.Rotation2EulerAngle(&RArm);  // Tc -> thc (RPY)
 
     Eigen::Vector3d Xd  = RArm.xc;   // ACT 기준 desired TCP position
     Eigen::Vector3d RPY = RArm.thc;  // ACT 기준 desired RPY
 
-    // RArm을 다시 실제 qc 기준 상태로 복원 (실제 Act_XYZ는 위쪽에서 이미 계산됨)
+    // RArm을 다시 실제 qc 기준 상태로 복원
     RArm.qc  = qc_backup;
     RArm.Tc  = Tc_backup;
     RArm.xc  = xc_backup;
     RArm.thc = thc_backup;
 
-    // --------- 2) force: ACT가 준 force 3개 사용 (없으면 0) ---------
-    Eigen::Vector3d Fd = act_force_valid_ ? act_force_
-                                          : Eigen::Vector3d::Zero();
+    // --------- 2) force: ACT가 준 fz만 사용 → [0, 0, fz] ---------
+    Eigen::Vector3d Fd = Eigen::Vector3d::Zero();
+    if (act_force_valid_) {
+      Fd(2) = act_force_(2);   // fx, fy는 0, fz만 사용
+    }
 
-    // 디버그용 Desired 값 갱신
+    // 디버그용 Desired 값 갱신 (위쪽 공통 printf에서 찍힘)
     Desired_XYZ = Xd;
     Desired_RPY = RPY;
 
     // --------- 3) 공통 어드미턴스 체인 호출 ---------
-    runCartesianForceChain(Xd, RPY, Fd, dt_s);
+    runCartesianForceChain(Xd, RPY, Fd, dt_s);  // func_ur10e_main.cpp
 
     // runCartesianForceChain 내부에서 RArm.qd 갱신된다고 가정
     joint_state_.header.stamp = node_->now();

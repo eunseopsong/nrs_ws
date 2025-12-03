@@ -68,10 +68,10 @@ public:
     void ftSensorCallback(const geometry_msgs::msg::Wrench::SharedPtr msg);
 
     // 🔹 ACT inference node 콜백
-    //    /isaac_joints_commands (JointState) → act_joints_
-    //    /isaac_force_commands  (Wrench)     → act_force_
-    void actJointsCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
-    void actForceCallback(const geometry_msgs::msg::Wrench::SharedPtr msg);
+    // ACT callbacks
+    void actJointsCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
+    void actForceCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg);
+
 
     // state / trajectory
     void UpdateState();
@@ -116,8 +116,9 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr       ftsensor_sub_;
 
     // 🔹 ACT inference node subscribers
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr     act_joints_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr       act_force_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr act_joints_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr act_force_sub_;
+
 
     // publishers
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr    force_ext_base_pub_;
