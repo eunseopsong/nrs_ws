@@ -549,7 +549,7 @@ void JointControl::CalculateAndPublishJoint() {
     return;
   }
 
-  // 7) Keyboard teleop mode
+  // 7) ACT Policy Infererence mode 
   if (control_mode == 7) {
 
     return;
