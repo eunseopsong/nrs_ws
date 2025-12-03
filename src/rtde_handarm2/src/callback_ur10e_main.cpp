@@ -11,13 +11,6 @@
 #include <filesystem>
 #include <limits>
 
-// 필요하면 여기서도 사용
-// #include <geometry_msgs/msg/wrench.hpp>
-// #include <sensor_msgs/msg/joint_state.hpp>
-// #include <std_msgs/msg/float64_multi_array.hpp>
-// #include <std_msgs/msg/float64.hpp>
-// #include <std_msgs/msg/uint16.hpp>
-
 constexpr int DOF = 6;
 using Vector6d = Eigen::Matrix<double, 6, 1>;
 
@@ -25,15 +18,13 @@ using Vector6d = Eigen::Matrix<double, 6, 1>;
 static std::mutex g_cmdmode_mtx;
 
 // ============================================================================
-// 콜백들 구현부
+// cmdModeCallback
 // ============================================================================
-
 void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
   std::lock_guard<std::mutex> lk(g_cmdmode_mtx);
   try {
     mode_cmd = msg->data;
     printf("[DEBUG] cmdModeCallback called. mode_cmd=%u\n", mode_cmd);
-
 
     // ===================== FK Control Mode wo/ Force Control ===================== //
     if (mode_cmd == FK_control_mode_cmd) {
@@ -83,7 +74,6 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
       set_status(message_status, Data_recording_off);
     }
 
-
     // ======================== VR Teleop Mode w/ Force Control ======================== //
     else if (mode_cmd == VR_w_force_start) {
       ctrl.store(6, std::memory_order_release);
@@ -113,11 +103,17 @@ void JointControl::cmdModeCallback(const std_msgs::msg::UInt16::SharedPtr msg) {
   }
 }
 
+// ============================================================================
+// PbIterCallback
+// ============================================================================
 void JointControl::PbIterCallback(std_msgs::msg::UInt16::SharedPtr msg) {
   PB_iter_cmd = msg->data;
   PB_iter_cur = 1; // 1 is right
 }
 
+// ============================================================================
+// JointCmdCallback
+// ============================================================================
 void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr msg) {
   mjoint_cmd = msg->data;
   printf("\nSelected joint: %1.0f, Target relative joint angle: %4f \n",
@@ -141,12 +137,18 @@ void JointControl::JointCmdCallback(std_msgs::msg::Float64MultiArray::SharedPtr 
   }
 }
 
+// ============================================================================
+// getActualQ
+// ============================================================================
 void JointControl::getActualQ(const sensor_msgs::msg::JointState::SharedPtr msg) {
   for (int i = 0; i < DOF && i < (int)msg->position.size(); ++i){
     RArm.qc[i] = msg->position[i];
   }
 }
 
+// ============================================================================
+// FtCallback (1D contact force)
+// ============================================================================
 void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
 {
   contact_force = msg->data;
@@ -160,6 +162,9 @@ void JointControl::FtCallback(const std_msgs::msg::Float64::SharedPtr msg)
   (void)F_base; // 실제 제어는 runCartesianForceChain 내부에서 처리
 }
 
+// ============================================================================
+// calibratedPoseCallback (VR pose: x,y,z,r,p,y)
+// ============================================================================
 void JointControl::calibratedPoseCallback(
     const std_msgs::msg::Float64MultiArray::SharedPtr msg)
 {
@@ -178,6 +183,9 @@ void JointControl::calibratedPoseCallback(
   teleop_pose_valid_ = true;
 }
 
+// ============================================================================
+// ftSensorCallback (/ftsensor/measured_Cvalue: fx, fy, fz)
+// ============================================================================
 void JointControl::ftSensorCallback(
     const geometry_msgs::msg::Wrench::SharedPtr msg)
 {
@@ -186,4 +194,29 @@ void JointControl::ftSensorCallback(
       msg->force.y,
       msg->force.z;
   teleop_force_valid_ = true;
+}
+
+// ============================================================================
+// ACT inference node callbacks
+//   - /action_joints (JointState) → act_joints_ (6)
+//   - /action_force  (Wrench)     → act_force_  (3)
+// ============================================================================
+void JointControl::actJointsCallback(
+    const sensor_msgs::msg::JointState::SharedPtr msg)
+{
+  if (msg->position.size() < DOF) return;
+
+  for (int i = 0; i < DOF; ++i) {
+    act_joints_(i) = msg->position[i];
+  }
+  act_joints_valid_ = true;
+}
+
+void JointControl::actForceCallback(
+    const geometry_msgs::msg::Wrench::SharedPtr msg)
+{
+  act_force_(0) = msg->force.x;
+  act_force_(1) = msg->force.y;
+  act_force_(2) = msg->force.z;
+  act_force_valid_ = true;
 }
