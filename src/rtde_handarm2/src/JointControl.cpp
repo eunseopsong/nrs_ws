@@ -570,11 +570,33 @@ void JointControl::CalculateAndPublishJoint() {
   //    - force 3개 → Fd = [fx, fy, fz]
   //    - runCartesianForceChain(Xd, RPY, Fd, dt_s) 호출 후 qd 퍼블리시
   if (control_mode == 7) {
-    // joints 값이 아직 안 들어왔으면 현재 자세 유지
+    // joints 값이 아직 안 들어왔으면 "지정 joint posture" 유지
     if (!act_joints_valid_) {
+      // [deg]로 주어진 고정 자세를 rad로 변환해서 한 번만 초기화
+      static bool init = false;
+      static Vector6d ACT_WAIT_Q;  // rad
+
+      if (!init) {
+        const double deg[DOF] = {
+          45.722,    // q1
+         -80.0,   // q2
+        -129.09309,  // q3
+         -63.083,    // q4
+          93.2145,   // q5
+         -48.1342    // q6
+        };
+        for (int i = 0; i < DOF; ++i) {
+          ACT_WAIT_Q(i) = deg[i] * M_PI / 180.0;
+        }
+        init = true;
+      }
+
+      // 지정 자세를 qd, joint command로 계속 퍼블리시
       joint_state_.header.stamp = node_->now();
-      for (int i = 0; i < DOF; ++i)
-        joint_state_.position[i] = RArm.qc(i);
+      for (int i = 0; i < DOF; ++i) {
+        RArm.qd(i)               = ACT_WAIT_Q(i);
+        joint_state_.position[i] = RArm.qd(i);
+      }
       joint_commands_pub_->publish(joint_state_);
 
       pre_ctrl.store(control_mode, std::memory_order_relaxed);
@@ -626,6 +648,7 @@ void JointControl::CalculateAndPublishJoint() {
     pre_ctrl.store(control_mode, std::memory_order_relaxed);
     return;
   }
+
 
 
   // 예외: 보호
