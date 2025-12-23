@@ -1,0 +1,50 @@
+name: WiseVision MCP Server Tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - 'stabilization/**'
+  schedule:
+    - cron: '0 22 * * *'
+
+jobs:
+  test:
+    runs-on: wisevision-runner
+
+    container:
+      image: ros:humble-ros-base
+
+    env:
+      PYTHONPATH: .:/opt/ros/humble/lib/python3.10/site-packages
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        apt-get update && apt-get install -y \
+          python3-pip \
+          python3-colcon-common-extensions \
+          ros-humble-example-interfaces \
+          ros-humble-mavros-msgs \
+          ros-humble-action-tutorials-interfaces
+        python3 -m pip install --upgrade pip
+        pip install uv
+
+    - name: Create and sync uv virtual environment
+      run: |
+        uv venv .venv
+        uv pip install --upgrade pip
+        uv sync --dev  # installs deps from uv.lock
+
+
+    - name: Set PYTHONPATH environment variable
+      run: export PYTHONPATH=$PYTHONPATH:.:/opt/ros/humble/lib/python3.10/site-packages 
+
+    - name: Run tests
+      run: |
+        . /opt/ros/humble/setup.sh
+        uv run pytest
