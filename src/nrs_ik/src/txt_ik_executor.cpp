@@ -13,6 +13,8 @@
 #include <cmath>
 #include <iterator>
 
+
+
 #include "Arm_class.h"
 #include "Kinematics.h"
 
