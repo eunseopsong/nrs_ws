@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
-project(nrs_mcp)
+project(nrs_mcp2)
+
+cmake_policy(SET CMP0074 NEW)
 
 # 컴파일러 설정 (C++17 필수)
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -90,12 +92,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # target_link_libraries(pcd_publisher ${PCL_LIBRARIES})
 
 # --- 3.4 Clicked Points Logger ---
-# add_executable(clicked_points_logger src/clicked_points_logger.cpp)
-# ament_target_dependencies(clicked_points_logger
-#   rclcpp
-#   visualization_msgs
-#   geometry_msgs
-# )
+add_executable(clicked_points_logger src/clicked_points_logger.cpp)
+ament_target_dependencies(clicked_points_logger
+  rclcpp
+  visualization_msgs
+  geometry_msgs
+)
 
 # --- 3.5 Central Supervisor (앞서 변환한 파일) ---
 add_executable(central_supervisor_node src/central_supervisor.cpp)
@@ -115,7 +117,7 @@ install(TARGETS
   # moveit_go_to_pose_server
   # get_tcp_pose_server
   # pcd_publisher
-  # clicked_points_logger
+  clicked_points_logger
   central_supervisor_node
   DESTINATION lib/${PROJECT_NAME}
 )

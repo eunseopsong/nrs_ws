@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>nrs_mcp</name>
+  <name>nrs_mcp2</name>
   <version>0.0.1</version>
   <description>ROS 2 MCP bridge for UR10: GoToPose GetTcpPose</description>
 
