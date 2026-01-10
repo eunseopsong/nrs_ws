@@ -423,7 +423,8 @@ public:
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/compound_surface/_comp_flat_0_75_v0_42.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/compound_surface/_comp_convex_0_75_v0_42.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/compound_surface/_comp_concave_0_75_v0_42.stl");
-    mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
+    // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/flat_surface_5.stl");
+    mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/_concave_surface_0.75.stl");
     // mesh_file_path_     = this->declare_parameter<std::string>("mesh_file_path", "/home/eunseop/nrs_ws/src/nrs_path2/mesh/complex_surface_1.stl");
 
     plane_path_file_path_ = this->declare_parameter<std::string>("plane_path_file_path",
