@@ -1,0 +1,7 @@
+vr_demo_recorder:
+  ros__parameters:
+    save_dir: "/home/eunseop/nrs_lab2/datasets/VR_DEMO_TEST"
+    file_name: "demo_episode.txt"
+
+    start_force_th: 10.0
+    end_force_th: 10.0

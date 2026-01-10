@@ -31,6 +31,7 @@ setup(
         'console_scripts': [
             'act_policy_infer = nrs_imitation.act_policy_infer:main',
             'vr_demo_recorder = nrs_imitation.vr_demo_recorder:main',
+            'vr_demo_txt_recorder = nrs_imitation.vr_demo_txt_recorder:main',
         ],
     },
 )
