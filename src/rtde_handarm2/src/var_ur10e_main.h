@@ -24,7 +24,7 @@
 #include "Yoon_force_control.h"
 #include "Yoon_filters.h"
 #include "ur10e_mode_cmd.h"
-#include "nrs_msgmonitoring2/msg_monitoring.hpp"
+// #include "nrs_msgmonitoring2/msg_monitoring.hpp"
 
 /* Custom Package headers */
 #include "nrs_forcecon2/nrs_3step_faac.h"
@@ -82,7 +82,7 @@
 //// using namespace ur_rtde;
 using namespace std::chrono;
 using namespace std;
-using nrs_msgmonitoring2::MsgMonitoring; // Add on 2025.06.10 17:23
+// using nrs_msgmonitoring2::MsgMonitoring; // Add on 2025.06.10 17:23
 
 extern AKfun AKin;
 extern CArm RArm;
