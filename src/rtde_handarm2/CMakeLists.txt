@@ -53,7 +53,7 @@ find_package(tf2_ros REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(nrs_forcecon2 REQUIRED)
-find_package(nrs_msgmonitoring2 REQUIRED)
+# find_package(nrs_msgmonitoring2 REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 find_package(OpenCV REQUIRED)
@@ -92,7 +92,7 @@ set(COMMON_DEPENDENCIES
   tf2
   tf2_ros
   nrs_forcecon2
-  nrs_msgmonitoring2
+  # nrs_msgmonitoring2
 )
 
 # 1. 모든 cpp 파일 GLOB
