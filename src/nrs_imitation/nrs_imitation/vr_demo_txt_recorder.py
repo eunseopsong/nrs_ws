@@ -3,7 +3,8 @@
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseStamped, Wrench
+from std_msgs.msg import Float64MultiArray
+from geometry_msgs.msg import Wrench
 
 import numpy as np
 import os
@@ -18,7 +19,7 @@ class VRDemoTXTRecorder(Node):
         # Parameters (YAML)
         # =========================
         self.declare_parameter('save_dir', '/tmp')
-        self.declare_parameter('file_name', 'demo.txt')
+        self.declare_parameter('file_name', 'demo_episode.txt')
         self.declare_parameter('start_force_th', 10.0)
         self.declare_parameter('end_force_th', 10.0)
 
@@ -36,22 +37,23 @@ class VRDemoTXTRecorder(Node):
         # State
         # =========================
         self.lock = threading.Lock()
+
         self.recording = False
         self.episode_done = False
 
-        self.latest_pose = None   # (6,)
-        self.latest_ft = None     # (3,)
+        self.latest_pose = None   # (6,) -> x y z r p yw
+        self.latest_ft = None     # (3,) -> fx fy fz
 
         self.pose_received = False
         self.ft_received = False
 
-        self.buffer = []  # list of (9,)
+        self.buffer = []          # list of (9,)
 
         # =========================
         # Subscribers
         # =========================
         self.create_subscription(
-            PoseStamped,
+            Float64MultiArray,
             '/calibrated_pose',
             self.pose_callback,
             10
@@ -72,25 +74,19 @@ class VRDemoTXTRecorder(Node):
     # ======================================================
     # Callbacks
     # ======================================================
-    def pose_callback(self, msg: PoseStamped):
+    def pose_callback(self, msg: Float64MultiArray):
+        if len(msg.data) < 6:
+            self.get_logger().warn("calibrated_pose length < 6, ignored")
+            return
+
         with self.lock:
-            p = msg.pose.position
-            q = msg.pose.orientation
+            # 이미 mm / rad 단위라고 가정
+            x, y, z, r, p, yw = msg.data[:6]
 
-            roll, pitch, yaw = self.quaternion_to_rpy(
-                q.x, q.y, q.z, q.w
+            self.latest_pose = np.array(
+                [x, y, z, r, p, yw],
+                dtype=np.float64
             )
-
-            # meter → mm
-            self.latest_pose = np.array([
-                p.x * 1000.0,
-                p.y * 1000.0,
-                p.z * 1000.0,
-                roll,
-                pitch,
-                yaw
-            ], dtype=np.float64)
-
             self.pose_received = True
 
     def ft_callback(self, msg: Wrench):
@@ -102,17 +98,17 @@ class VRDemoTXTRecorder(Node):
             self.latest_ft = np.array([fx, fy, fz], dtype=np.float64)
             self.ft_received = True
 
-        # =========================
-        # Episode logic
-        # =========================
         if self.episode_done:
             return
 
-        # Start
+        # =========================
+        # Episode logic
+        # =========================
+        # Start condition
         if abs(fx) >= self.start_force_th and not self.recording:
             self.start_episode()
 
-        # End
+        # End condition
         if abs(fy) >= self.end_force_th and self.recording:
             self.end_episode()
 
@@ -147,7 +143,7 @@ class VRDemoTXTRecorder(Node):
 
         self.get_logger().info("=== EPISODE ENDED (|fy| >= threshold) ===")
         self.save_txt()
-        self.get_logger().info("Node will shutdown after 1 episode.")
+        self.get_logger().info("Recorder finished. Shutting down.")
         rclpy.shutdown()
 
     # ======================================================
@@ -169,27 +165,6 @@ class VRDemoTXTRecorder(Node):
         self.get_logger().info(
             f"Saved TXT episode: {data.shape[0]} steps"
         )
-
-    # ======================================================
-    # Utils
-    # ======================================================
-    @staticmethod
-    def quaternion_to_rpy(x, y, z, w):
-        sinr_cosp = 2.0 * (w * x + y * z)
-        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-        roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-        sinp = 2.0 * (w * y - z * x)
-        if abs(sinp) >= 1:
-            pitch = np.sign(sinp) * np.pi / 2.0
-        else:
-            pitch = np.arcsin(sinp)
-
-        siny_cosp = 2.0 * (w * z + x * y)
-        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        yaw = np.arctan2(siny_cosp, cosy_cosp)
-
-        return roll, pitch, yaw
 
 
 def main(args=None):
