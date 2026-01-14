@@ -20,7 +20,7 @@ public:
   : Node("forward_kinematics_node")
   {
     sub_ = create_subscription<Float64MultiArray>(
-      "joint_commands", 10,
+      "isaac_joint_commands", 10,
       std::bind(&ForwardKinematicsNode::fk_callback, this, _1));
 
     RCLCPP_INFO(get_logger(), "ForwardKinematicsNode is running.");
