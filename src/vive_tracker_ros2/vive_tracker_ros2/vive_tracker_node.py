@@ -10,7 +10,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose, Twist, TransformStamped
+from geometry_msgs.msg import Pose, Twist, TransformStamped, PoseStamped  # ✅ [CHANGED] PoseStamped 추가
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
@@ -87,13 +87,19 @@ class ViveTracker(Node):
     # ROS init
     # ------------------------------------------------------------------
     def _init_ros(self):
-        # 원래 있던 것들
+        # 원래 있던 것들 (Odometry)
         self.raw_pose_pub = self.create_publisher(
             Odometry, "vive_tracker_ros/raw_pose", 10
         )
         self.calibrated_pose_pub_odom = self.create_publisher(
             Odometry, "vive_tracker_ros/calibrated_pose", 10
         )
+
+        # ✅ [CHANGED] PoseStamped 전용 raw pose 토픽 추가 (x,y,z + quaternion만)
+        self.raw_pose_pub_pose = self.create_publisher(
+            PoseStamped, "/raw_pose", 10
+        )
+
         # 여기만 변경: rpy 토픽을 /calibrated_pose 로 통합
         self.calibrated_pose_pub = self.create_publisher(
             Float64MultiArray, "/calibrated_pose", 10
@@ -343,6 +349,14 @@ class ViveTracker(Node):
         msg.twist.twist = twist
         return msg
 
+    # ✅ [CHANGED] PoseStamped 생성 함수 (covariance 없는 raw pose)
+    def create_pose_stamped(self, pose: Pose, frame_id="world") -> PoseStamped:
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = frame_id
+        msg.pose = pose
+        return msg
+
     def cb_vive_timer(self):
         now = self.get_clock().now()
         dt = (now - self.prev_time).nanoseconds / 1e9
@@ -414,11 +428,19 @@ class ViveTracker(Node):
         # 호환용 퍼블리시 (첫 트래커)
         first_id = current_ids[0]
         first = self.trackers[first_id]
+
         raw_pose = matrix_to_pose(first["raw_pose_matrix"])
-        cal_pose = matrix_to_pose(first["prev_calibrated_matrix"])
         raw_twist = matrix_to_twist(first["raw_pose_matrix"], first["prev_raw_matrix"], dt)
-        cal_twist = matrix_to_twist(first["prev_calibrated_matrix"], first["prev_calibrated_matrix"], dt)
+
+        # ✅ [CHANGED] /raw_pose (PoseStamped) publish: x,y,z + quaternion only
+        self.raw_pose_pub_pose.publish(self.create_pose_stamped(raw_pose, frame_id="world"))
+
+        # 기존 Odometry 호환 publish 유지
         self.raw_pose_pub.publish(self.create_vive_msg(raw_pose, raw_twist))
+
+        # calibrated odom 호환 publish 유지
+        cal_pose = matrix_to_pose(first["prev_calibrated_matrix"])
+        cal_twist = matrix_to_twist(first["prev_calibrated_matrix"], first["prev_calibrated_matrix"], dt)
         self.calibrated_pose_pub_odom.publish(self.create_vive_msg(cal_pose, cal_twist))
 
         self.prev_time = now
