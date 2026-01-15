@@ -115,8 +115,7 @@ def rotmat_to_rotvec(R: np.ndarray) -> np.ndarray:
     return scale * v
 
 
-# ✅ 네가 준 측정치로 계산된 “기본” spatial-angle 프레임 보정 (T_SA)
-# (YAML에 T_SA가 있으면 그걸 우선 사용하고, 없으면 이 값 사용)
+# ✅ 네가 준 측정치 기반 "기본" 보정 (YAML에 T_SA 있으면 그걸 우선)
 DEFAULT_T_SA = np.array(
     [
         [-0.999987700,  0.000392998,  0.004944318,  0.0],
@@ -158,7 +157,7 @@ class ViveTracker(Node):
             PoseStamped, "/raw_pose", 10
         )
 
-        # /calibrated_pose : [x y z wx wy wz] (m, rad)
+        # ✅ /calibrated_pose : [x y z wx wy wz] (m, rad)
         self.calibrated_pose_pub = self.create_publisher(
             Float64MultiArray, "/calibrated_pose", 10
         )
@@ -171,12 +170,22 @@ class ViveTracker(Node):
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("child_frame", "vive_tracker")
 
+        # ✅ T_SA 적용 방식 선택 (기본: 좌곱)
+        # - left:  M_cal = T_SA @ M_cal  (프레임 자체를 맞추는 용도에 보통 더 자연스러움)
+        # - right: M_cal = M_cal @ T_SA  (센서 바디 축 오프셋 같은 "로컬" 보정에 가까움)
+        self.declare_parameter("apply_T_SA", True)
+        self.declare_parameter("T_SA_side", "left")  # "left" or "right"
+        self.declare_parameter("debug_print_T_SA", False)
+
         self.publish_tf = self.get_parameter("publish_tf").value
         self.base_frame = self.get_parameter("base_frame").value
         self.child_frame = self.get_parameter("child_frame").value
 
-        self.tf_broadcaster = TransformBroadcaster(self)
+        self.apply_T_SA = bool(self.get_parameter("apply_T_SA").value)
+        self.T_SA_side = str(self.get_parameter("T_SA_side").value).lower()
+        self.debug_print_T_SA = bool(self.get_parameter("debug_print_T_SA").value)
 
+        self.tf_broadcaster = TransformBroadcaster(self)
         self.timer = self.create_timer(0.01, self.cb_vive_timer)
 
     # ------------------------------------------------------------------
@@ -223,8 +232,8 @@ class ViveTracker(Node):
     # helpers
     # ------------------------------------------------------------------
     @staticmethod
-    def _to_T44(mat_like) -> np.ndarray:
-        """Accept 4x4 or 3x3 (list/np). Convert to 4x4 homogeneous."""
+    def _to_T44(mat_like):
+        """Accept 4x4 or 3x3. Convert to 4x4 homogeneous. Return None if invalid."""
         if mat_like is None:
             return None
         M = np.array(mat_like, dtype=np.float64)
@@ -235,6 +244,17 @@ class ViveTracker(Node):
             T[:3, :3] = M
             return T
         return None
+
+    @staticmethod
+    def _is_valid_T(T: np.ndarray) -> bool:
+        if T is None or T.shape != (4, 4):
+            return False
+        if not np.all(np.isfinite(T)):
+            return False
+        # 마지막 행은 [0 0 0 1] 근처인지 체크(너무 엄격하게 하진 않음)
+        if np.linalg.norm(T[3, :] - np.array([0, 0, 0, 1], dtype=np.float64)) > 1e-3:
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # ros1-style yaml calib
@@ -261,18 +281,23 @@ class ViveTracker(Node):
         self.T_CE = np.array(data.get("T_CE", np.eye(4)), dtype=np.float64)
         self.R_Adj = np.array(data.get("R_Adj", np.eye(3)), dtype=np.float64)
 
+        # ROS1 순서: T_Adj = R_Adj.T
         self.T_Adj = np.eye(4, dtype=np.float64)
         R_adj_full = rot_z(0.0) @ rot_x(0.0) @ self.R_Adj.T
         self.T_Adj[:3, :3] = R_adj_full
 
-        # ✅ 추가: spatial angle frame 맞춤용 보정 (오른쪽으로 곱해짐)
+        # ✅ T_SA: YAML에 있으면 우선, 없으면 DEFAULT
         T_SA_loaded = self._to_T44(data.get("T_SA", None))
-        if T_SA_loaded is None:
-            self.T_SA = DEFAULT_T_SA.copy()
-            self.get_logger().warn("[vive_tracker_node] T_SA not found in yaml. Using DEFAULT_T_SA (from your measured offset).")
-        else:
+        if self._is_valid_T(T_SA_loaded):
             self.T_SA = T_SA_loaded
             self.get_logger().info("[vive_tracker_node] T_SA loaded from yaml.")
+        else:
+            self.T_SA = DEFAULT_T_SA.copy()
+            self.get_logger().warn("[vive_tracker_node] T_SA not found/invalid in yaml. Using DEFAULT_T_SA.")
+
+        if self.debug_print_T_SA:
+            self.get_logger().info(f"T_SA_side={self.T_SA_side}, apply_T_SA={self.apply_T_SA}")
+            self.get_logger().info("T_SA=\n" + np.array2string(self.T_SA, precision=6, suppress_small=True))
 
     # ------------------------------------------------------------------
     # service
@@ -376,6 +401,18 @@ class ViveTracker(Node):
         msg.pose = pose
         return msg
 
+    def _apply_T_SA_to_M_cal(self, M_cal: np.ndarray) -> np.ndarray:
+        if not self.apply_T_SA:
+            return M_cal
+
+        if self.T_SA_side == "right":
+            # 로컬(바디) 축 오프셋 느낌
+            return M_cal @ self.T_SA
+
+        # 기본: left
+        # 프레임 align 목적(네가 말한 "spatial angle frame 맞추기")에는 보통 이게 더 자연스러움
+        return self.T_SA @ M_cal
+
     def cb_vive_timer(self):
         now = self.get_clock().now()
         dt = (now - self.prev_time).nanoseconds / 1e9
@@ -389,12 +426,12 @@ class ViveTracker(Node):
             tdata = self.trackers[serial]
             raw_M = tdata["raw_pose_matrix"]
 
-            # base chain
+            # base chain (ROS1 순서)
             M_adj = self.T_Adj @ raw_M
             M_cal = self.T_AD @ M_adj @ self.T_CE
 
-            # ✅ 추가 보정: spatial angle frame alignment (오른쪽 곱)
-            M_cal = M_cal @ self.T_SA
+            # ✅ spatial-angle alignment
+            M_cal = self._apply_T_SA_to_M_cal(M_cal)
 
             # pose로
             raw_pose = matrix_to_pose(raw_M)
