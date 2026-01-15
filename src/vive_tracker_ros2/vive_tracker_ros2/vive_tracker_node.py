@@ -10,7 +10,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose, Twist, TransformStamped, PoseStamped  # ✅ [CHANGED] PoseStamped 추가
+from geometry_msgs.msg import Pose, Twist, TransformStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
@@ -65,16 +65,75 @@ def openvr_pose_to_np44(pose) -> np.ndarray:
     return M
 
 
+def rotmat_to_rotvec(R: np.ndarray) -> np.ndarray:
+    """
+    Rotation matrix (3x3) -> rotation vector w (3,)
+    w = axis * angle  (angle in [0, pi], rad)
+    """
+    tr = float(np.trace(R))
+    cos_th = (tr - 1.0) * 0.5
+    cos_th = max(-1.0, min(1.0, cos_th))
+    th = math.acos(cos_th)
+
+    if th < 1e-12:
+        return np.zeros(3, dtype=np.float64)
+
+    # near pi: sin(th) is small -> use special handling
+    if abs(math.pi - th) < 1e-5:
+        axis = np.zeros(3, dtype=np.float64)
+        axis[0] = math.sqrt(max(0.0, (R[0, 0] + 1.0) * 0.5))
+        axis[1] = math.sqrt(max(0.0, (R[1, 1] + 1.0) * 0.5))
+        axis[2] = math.sqrt(max(0.0, (R[2, 2] + 1.0) * 0.5))
+
+        if R[0, 1] < 0.0:
+            axis[1] = -axis[1]
+        if R[0, 2] < 0.0:
+            axis[2] = -axis[2]
+
+        n = float(np.linalg.norm(axis))
+        if n < 1e-10:
+            v = np.array([R[2, 1] - R[1, 2],
+                          R[0, 2] - R[2, 0],
+                          R[1, 0] - R[0, 1]], dtype=np.float64)
+            nv = float(np.linalg.norm(v))
+            if nv < 1e-12:
+                return np.zeros(3, dtype=np.float64)
+            axis = v / nv
+        else:
+            axis = axis / n
+
+        return axis * th
+
+    v = np.array([
+        R[2, 1] - R[1, 2],
+        R[0, 2] - R[2, 0],
+        R[1, 0] - R[0, 1],
+    ], dtype=np.float64)
+
+    s = math.sin(th)
+    scale = th / (2.0 * s)
+    return scale * v
+
+
+# ✅ 네가 준 측정치로 계산된 “기본” spatial-angle 프레임 보정 (T_SA)
+# (YAML에 T_SA가 있으면 그걸 우선 사용하고, 없으면 이 값 사용)
+DEFAULT_T_SA = np.array(
+    [
+        [-0.999987700,  0.000392998,  0.004944318,  0.0],
+        [ 0.000416257,  0.999988849,  0.004704043,  0.0],
+        [-0.004942414,  0.004706043, -0.999976713,  0.0],
+        [ 0.0,          0.0,          0.0,          1.0],
+    ],
+    dtype=np.float64,
+)
+
+
 class ViveTracker(Node):
     def __init__(self):
         super().__init__("vive_tracker")
 
         self.vr_system = None
         self.trackers = {}
-
-        # rpy 연속성용
-        self.r2e_init_flag = False
-        self.r2e_pre_rpy = np.zeros(3, dtype=float)
 
         self._init_ros()
         self._init_vr()
@@ -87,7 +146,6 @@ class ViveTracker(Node):
     # ROS init
     # ------------------------------------------------------------------
     def _init_ros(self):
-        # 원래 있던 것들 (Odometry)
         self.raw_pose_pub = self.create_publisher(
             Odometry, "vive_tracker_ros/raw_pose", 10
         )
@@ -95,12 +153,12 @@ class ViveTracker(Node):
             Odometry, "vive_tracker_ros/calibrated_pose", 10
         )
 
-        # ✅ [CHANGED] PoseStamped 전용 raw pose 토픽 추가 (x,y,z + quaternion만)
+        # PoseStamped raw (/raw_pose)
         self.raw_pose_pub_pose = self.create_publisher(
             PoseStamped, "/raw_pose", 10
         )
 
-        # 여기만 변경: rpy 토픽을 /calibrated_pose 로 통합
+        # /calibrated_pose : [x y z wx wy wz] (m, rad)
         self.calibrated_pose_pub = self.create_publisher(
             Float64MultiArray, "/calibrated_pose", 10
         )
@@ -162,6 +220,23 @@ class ViveTracker(Node):
             self.T_trans_opt = np.eye(4, dtype=np.float64)
 
     # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _to_T44(mat_like) -> np.ndarray:
+        """Accept 4x4 or 3x3 (list/np). Convert to 4x4 homogeneous."""
+        if mat_like is None:
+            return None
+        M = np.array(mat_like, dtype=np.float64)
+        if M.shape == (4, 4):
+            return M
+        if M.shape == (3, 3):
+            T = np.eye(4, dtype=np.float64)
+            T[:3, :3] = M
+            return T
+        return None
+
+    # ------------------------------------------------------------------
     # ros1-style yaml calib
     # ------------------------------------------------------------------
     def _init_yaml_calib(self):
@@ -178,7 +253,6 @@ class ViveTracker(Node):
         self.get_logger().info(f"[vive_tracker_node] load yaml: {yaml_path}")
 
         import yaml
-
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
 
@@ -190,6 +264,15 @@ class ViveTracker(Node):
         self.T_Adj = np.eye(4, dtype=np.float64)
         R_adj_full = rot_z(0.0) @ rot_x(0.0) @ self.R_Adj.T
         self.T_Adj[:3, :3] = R_adj_full
+
+        # ✅ 추가: spatial angle frame 맞춤용 보정 (오른쪽으로 곱해짐)
+        T_SA_loaded = self._to_T44(data.get("T_SA", None))
+        if T_SA_loaded is None:
+            self.T_SA = DEFAULT_T_SA.copy()
+            self.get_logger().warn("[vive_tracker_node] T_SA not found in yaml. Using DEFAULT_T_SA (from your measured offset).")
+        else:
+            self.T_SA = T_SA_loaded
+            self.get_logger().info("[vive_tracker_node] T_SA loaded from yaml.")
 
     # ------------------------------------------------------------------
     # service
@@ -276,69 +359,6 @@ class ViveTracker(Node):
         return current_ids
 
     # ------------------------------------------------------------------
-    # quaternion -> rot
-    # ------------------------------------------------------------------
-    @staticmethod
-    def quat_to_rot(w, x, y, z):
-        Rm = np.zeros((3, 3), dtype=float)
-        Rm[0, 0] = 1 - 2*y*y - 2*z*z
-        Rm[0, 1] = 2*x*y - 2*z*w
-        Rm[0, 2] = 2*x*z + 2*y*w
-
-        Rm[1, 0] = 2*x*y + 2*z*w
-        Rm[1, 1] = 1 - 2*x*x - 2*z*z
-        Rm[1, 2] = 2*y*z - 2*x*w
-
-        Rm[2, 0] = 2*x*z - 2*y*w
-        Rm[2, 1] = 2*y*z + 2*x*w
-        Rm[2, 2] = 1 - 2*x*x - 2*y*y
-        return Rm
-
-    def rot_to_rpy_ros1(self, Rm: np.ndarray) -> np.ndarray:
-        rpy = np.zeros(3, dtype=float)
-
-        if Rm[2, 0] > 0.998:   # north pole
-            rpy[0] = math.atan2(Rm[0, 1], Rm[1, 1])
-            rpy[1] = math.pi / 2.0
-            rpy[2] = 0.0
-        elif Rm[2, 0] < -0.998:  # south pole
-            rpy[0] = math.atan2(Rm[0, 1], Rm[1, 1])
-            rpy[1] = -math.pi / 2.0
-            rpy[2] = 0.0
-        else:
-            rpy[0] = math.atan2(-Rm[1, 0], Rm[0, 0])
-            rpy[1] = math.asin(Rm[2, 0])
-            rpy[2] = math.atan2(-Rm[2, 1], Rm[2, 2])
-
-        if rpy[0] < 0:
-            rpy[0] += 2 * math.pi
-
-        if not self.r2e_init_flag:
-            self.r2e_pre_rpy = rpy.copy()
-            self.r2e_init_flag = True
-            return rpy
-
-        out = np.zeros(3, dtype=float)
-        for i in range(3):
-            orig = abs(rpy[i] - self.r2e_pre_rpy[i])
-            orig_pl = abs(rpy[i] + 2 * math.pi - self.r2e_pre_rpy[i])
-            orig_mi = abs(rpy[i] - 2 * math.pi - self.r2e_pre_rpy[i])
-
-            if orig <= orig_pl and orig <= orig_mi:
-                out[i] = rpy[i]
-            elif orig_pl <= orig and orig_pl <= orig_mi:
-                out[i] = rpy[i] + 2 * math.pi
-            else:
-                out[i] = rpy[i] - 2 * math.pi
-
-        self.r2e_pre_rpy = out.copy()
-        return out
-
-    @staticmethod
-    def wrap_pi(a: float) -> float:
-        return (a + math.pi) % (2 * math.pi) - math.pi
-
-    # ------------------------------------------------------------------
     # timer
     # ------------------------------------------------------------------
     def create_vive_msg(self, pose: Pose, twist: Twist, frame_id="world"):
@@ -349,7 +369,6 @@ class ViveTracker(Node):
         msg.twist.twist = twist
         return msg
 
-    # ✅ [CHANGED] PoseStamped 생성 함수 (covariance 없는 raw pose)
     def create_pose_stamped(self, pose: Pose, frame_id="world") -> PoseStamped:
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -370,9 +389,12 @@ class ViveTracker(Node):
             tdata = self.trackers[serial]
             raw_M = tdata["raw_pose_matrix"]
 
-            # ROS1 순서
+            # base chain
             M_adj = self.T_Adj @ raw_M
             M_cal = self.T_AD @ M_adj @ self.T_CE
+
+            # ✅ 추가 보정: spatial angle frame alignment (오른쪽 곱)
+            M_cal = M_cal @ self.T_SA
 
             # pose로
             raw_pose = matrix_to_pose(raw_M)
@@ -385,29 +407,16 @@ class ViveTracker(Node):
             tdata["publisher_raw"].publish(self.create_vive_msg(raw_pose, raw_twist))
             tdata["publisher_calibrated"].publish(self.create_vive_msg(cal_pose, cal_twist))
 
-            # 여기서 rpy로도 publish → 통합 토픽 /calibrated_pose
+            # /calibrated_pose publish: [x y z wx wy wz]
             px = float(M_cal[0, 3])
             py = float(M_cal[1, 3])
             pz = float(M_cal[2, 3])
 
             Rm = M_cal[:3, :3]
-            rpy_ros1 = self.rot_to_rpy_ros1(Rm)
-
-            # 네가 쓰던 스왑/부호 그대로
-            roll_raw = rpy_ros1[2]   # 원래 yaw
-            pitch_raw = rpy_ros1[1]
-            yaw_raw = rpy_ros1[0]    # 원래 roll
-
-            roll_raw *= -1.0
-            pitch_raw *= -1.0
-            yaw_raw *= -1.0
-
-            roll = self.wrap_pi(roll_raw)
-            pitch = self.wrap_pi(pitch_raw)
-            yaw = self.wrap_pi(yaw_raw)
+            wvec = rotmat_to_rotvec(Rm)  # (rad) rotation vector
 
             arr = Float64MultiArray()
-            arr.data = [px, py, pz, roll, pitch, yaw]
+            arr.data = [px, py, pz, float(wvec[0]), float(wvec[1]), float(wvec[2])]
             self.calibrated_pose_pub.publish(arr)
 
             # TF
@@ -432,7 +441,7 @@ class ViveTracker(Node):
         raw_pose = matrix_to_pose(first["raw_pose_matrix"])
         raw_twist = matrix_to_twist(first["raw_pose_matrix"], first["prev_raw_matrix"], dt)
 
-        # ✅ [CHANGED] /raw_pose (PoseStamped) publish: x,y,z + quaternion only
+        # /raw_pose (PoseStamped)
         self.raw_pose_pub_pose.publish(self.create_pose_stamped(raw_pose, frame_id="world"))
 
         # 기존 Odometry 호환 publish 유지
