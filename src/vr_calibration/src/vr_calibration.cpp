@@ -1,4 +1,4 @@
-// vr_calibration.cpp
+// vr_calibration.cpp  (ver5)
 // Option B: Auto-capture + Update R_Adj, T_AD, T_BC, T_SA in one YAML write
 //
 // Topics (defaults):
@@ -16,6 +16,13 @@
 //
 // YAML output (one-shot write):
 //   T_AD, T_BC, R_Adj, T_CE, T_SA
+//
+// =======================
+// ver5 변경점
+//  - T_SA 계산 시, R_SA_new = R_SA_old * R_total^T * R_des  (기존 방식)만 쓰지 않고
+//    candA/candB 두 후보를 만들고 "예측된 최종 자세가 R_des에 더 가까운 후보"를 자동 선택.
+//    (파이프라인에서 right-multiply 체인이 실제로 어떻게 적용되는지에 따른 transpose/order 혼선을 흡수)
+// =======================
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
@@ -147,6 +154,86 @@ static Eigen::Matrix<double,9,9> kron3(const Eigen::Matrix3d& A, const Eigen::Ma
     }
   }
   return K;
+}
+
+// ================= ver5: Robust T_SA helper =================
+static inline Eigen::Matrix3d projectToSO3(const Eigen::Matrix3d& R)
+{
+  Eigen::JacobiSVD<Eigen::Matrix3d> svd(R, Eigen::ComputeFullU | Eigen::ComputeFullV);
+  Eigen::Matrix3d U = svd.matrixU();
+  Eigen::Matrix3d V = svd.matrixV();
+  Eigen::Matrix3d Rn = U * V.transpose();
+  if (Rn.determinant() < 0.0) {
+    U.col(2) *= -1.0;
+    Rn = U * V.transpose();
+  }
+  return Rn;
+}
+
+static inline double rotAngleRadEigen(const Eigen::Matrix3d& Rrel)
+{
+  double cosang = (Rrel.trace() - 1.0) * 0.5;
+  cosang = clampd(cosang, -1.0, 1.0);
+  return std::acos(cosang);
+}
+
+static inline double rotAngleBetweenRadEigen(const Eigen::Matrix3d& R_target,
+                                             const Eigen::Matrix3d& R_current)
+{
+  return rotAngleRadEigen(R_target.transpose() * R_current);
+}
+
+// 핵심: candA/candB 둘 중, "지금 측정된 R_total과 old를 기반으로 추정한 R_pre"에 적용했을 때
+// R_des에 더 가까운 후보를 선택.
+static inline bool compute_R_SA_new_right_multiply(
+    const Eigen::Matrix3d& R_total_in,
+    const Eigen::Matrix3d& R_SA_old_in,
+    const Eigen::Matrix3d& R_des_in,
+    Eigen::Matrix3d& R_SA_new_out,
+    double* chosen_err_rad,
+    std::string* err)
+{
+  try {
+    // normalize inputs (수치 안정)
+    const Eigen::Matrix3d R_total  = projectToSO3(R_total_in);
+    const Eigen::Matrix3d R_SA_old = projectToSO3(R_SA_old_in);
+    const Eigen::Matrix3d R_des    = projectToSO3(R_des_in);
+
+    // R_total = R_pre * R_SA_old  (가정)
+    // => R_pre_est = R_total * R_SA_old^T
+    const Eigen::Matrix3d R_pre_est = R_total * R_SA_old.transpose();
+
+    // candA: (기존 ver4 방식)
+    // 목표: R_pre * R_SA_new = R_des
+    // R_SA_new = R_SA_old * R_total^T * R_des
+    Eigen::Matrix3d candA = R_SA_old * R_total.transpose() * R_des;
+    candA = projectToSO3(candA);
+
+    // candB: (transpose/order가 반대인 파이프라인을 흡수하기 위한 대안)
+    // 일부 구현에서 실제로는 "R_SA가 다른 쪽에 걸려있는" 경우가 있어 여기서 흡수.
+    Eigen::Matrix3d candB = R_des * R_total.transpose() * R_SA_old;
+    candB = projectToSO3(candB);
+
+    // evaluate: predicted = R_pre_est * candX
+    const Eigen::Matrix3d predA = R_pre_est * candA;
+    const Eigen::Matrix3d predB = R_pre_est * candB;
+
+    const double errA = rotAngleBetweenRadEigen(R_des, predA);
+    const double errB = rotAngleBetweenRadEigen(R_des, predB);
+
+    if (errA <= errB) {
+      R_SA_new_out = candA;
+      if (chosen_err_rad) *chosen_err_rad = errA;
+      return true;
+    } else {
+      R_SA_new_out = candB;
+      if (chosen_err_rad) *chosen_err_rad = errB;
+      return true;
+    }
+  } catch (const std::exception& e) {
+    if (err) *err = e.what();
+    return false;
+  }
 }
 
 // ================= Class =================
@@ -814,7 +901,20 @@ private:
              Rdes_arr[6], Rdes_arr[7], Rdes_arr[8];
 
     const Eigen::Matrix3d R_SA_old = T_SA_old_.block<3,3>(0,0);
-    const Eigen::Matrix3d R_SA_new = R_SA_old * R_total.transpose() * R_des;
+
+    // ---- ver5: robust candidate selection ----
+    Eigen::Matrix3d R_SA_new = Eigen::Matrix3d::Identity();
+    double chosen_err_rad = 0.0;
+    std::string solve_err;
+
+    const bool ok = compute_R_SA_new_right_multiply(
+        R_total, R_SA_old, R_des,
+        R_SA_new, &chosen_err_rad, &solve_err);
+
+    if (!ok) {
+      RCLCPP_WARN(get_logger(), "[T_SA_WARN] compute_R_SA_new_right_multiply failed: %s", solve_err.c_str());
+      return false;
+    }
 
     T_SA_new_ = Eigen::Matrix4d::Identity();
     T_SA_new_.block<3,3>(0,0) = R_SA_new;
@@ -822,7 +922,8 @@ private:
     t_sa_computed_ = true;
 
     RCLCPP_INFO(get_logger(),
-      "[T_SA_DONE] Computed T_SA. w_meas(rad)=[%.6f %.6f %.6f]  w_des=[0 0 %.6f]",
+      "[T_SA_DONE] Computed T_SA(ver5). chosen_err=%.3fdeg | w_meas(rad)=[%.6f %.6f %.6f] w_des=[0 0 %.6f]",
+      rad2deg(chosen_err_rad),
       w_meas[0], w_meas[1], w_meas[2], t_sa_w_des_z_);
 
     return true;
@@ -1120,7 +1221,7 @@ private:
 
     // Decide final T_SA to save:
     // - if computed => use it
-    // - else => keep old (IMPORTANT: 너가 원하던 동작)
+    // - else => keep old (IMPORTANT)
     Eigen::Matrix4d T_SA_to_save = T_SA_old_;
     if (t_sa_computed_) T_SA_to_save = T_SA_new_;
 
@@ -1136,7 +1237,7 @@ private:
     RCLCPP_INFO(get_logger(),
       "[YAML_SAVED] Updated calibration_matrix.yaml with T_AD, T_BC, R_Adj(%s), T_CE, T_SA(%s) -> %s",
       have_radj_ ? "computed" : "IDENTITY(fallback)",
-      t_sa_computed_ ? "computed" : "kept old",
+      t_sa_computed_ ? "computed(ver5)" : "kept old",
       calib_yaml_path_.c_str());
   }
 
