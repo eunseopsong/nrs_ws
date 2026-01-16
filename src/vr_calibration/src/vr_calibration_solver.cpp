@@ -1,36 +1,79 @@
-#include "vr_calibration_solver.hpp"
+// vr_calibration_solver.cpp
+// Offline solver: read ur10_ee.txt + ur10_vr.txt, compute T_BC / T_AD / R_Adj and write calibration_matrix.yaml
+// Key change vs legacy: NO manual sign flipping for x or wz.
+// Additionally: auto-detect whether VR pose in file is (world<-tracker) or (tracker<-world) by minimizing residual.
+
+#include <rclcpp/rclcpp.hpp>
 #include <yaml-cpp/yaml.h>
 
+#include <Eigen/Dense>
+#include <Eigen/Geometry>
+
 #include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
 #include <iomanip>
+#include <cstdlib>
 #include <stdexcept>
 #include <algorithm>
+#include <limits>
 
-VrCalibrationSolver::VrCalibrationSolver() {}
+// -------------------- small helpers --------------------
+static constexpr double kPi = 3.14159265358979323846;
 
-void VrCalibrationSolver::setYamlPath(const std::string& path)
-{
-  calib_yaml_path_ = path;
+static inline double clampd(double x, double lo, double hi) {
+  if (x < lo) return lo;
+  if (x > hi) return hi;
+  return x;
 }
 
-void VrCalibrationSolver::setTSADesiredZ(double w_des_z)
-{
-  t_sa_w_des_z_ = w_des_z;
+static Eigen::Matrix4d makeT(const Eigen::Matrix3d& R, const Eigen::Vector3d& p) {
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  T.block<3,3>(0,0) = R;
+  T.block<3,1>(0,3) = p;
+  return T;
 }
 
-void VrCalibrationSolver::setTSASide(const std::string& side)
-{
-  t_sa_side_ = side;
-  std::string s = t_sa_side_;
-  std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-  if (s != "left" && s != "right") {
-    throw std::runtime_error("t_sa_side must be 'left' or 'right'");
+static Eigen::Matrix4d invT(const Eigen::Matrix4d& T) {
+  Eigen::Matrix4d Ti = Eigen::Matrix4d::Identity();
+  const Eigen::Matrix3d R = T.block<3,3>(0,0);
+  const Eigen::Vector3d p = T.block<3,1>(0,3);
+  Ti.block<3,3>(0,0) = R.transpose();
+  Ti.block<3,1>(0,3) = -R.transpose() * p;
+  return Ti;
+}
+
+static Eigen::Matrix3d orthonormalizeR(const Eigen::Matrix3d& R) {
+  Eigen::JacobiSVD<Eigen::Matrix3d> svd(R, Eigen::ComputeFullU | Eigen::ComputeFullV);
+  Eigen::Matrix3d U = svd.matrixU();
+  Eigen::Matrix3d V = svd.matrixV();
+  Eigen::Matrix3d Rn = U * V.transpose();
+  if (Rn.determinant() < 0) {
+    U.col(2) *= -1.0;
+    Rn = U * V.transpose();
   }
-  t_sa_side_ = s;
+  return Rn;
 }
 
-static bool readMat4Node(const YAML::Node& n, Eigen::Matrix4d& T)
-{
+static double rotAngleRad(const Eigen::Matrix3d& R) {
+  double cosang = (R.trace() - 1.0) * 0.5;
+  cosang = clampd(cosang, -1.0, 1.0);
+  return std::acos(cosang);
+}
+
+static Eigen::Matrix<double,9,9> kron3(const Eigen::Matrix3d& A, const Eigen::Matrix3d& B) {
+  Eigen::Matrix<double,9,9> K;
+  for (int i=0;i<3;i++){
+    for (int j=0;j<3;j++){
+      K.block<3,3>(3*i,3*j) = A(i,j) * B;
+    }
+  }
+  return K;
+}
+
+// -------------------- YAML helpers --------------------
+static bool readMat4(const YAML::Node& n, Eigen::Matrix4d& T) {
   if (!n || !n.IsSequence() || n.size() != 4) return false;
   for (int r=0;r<4;r++){
     if (!n[r].IsSequence() || n[r].size() != 4) return false;
@@ -41,297 +84,407 @@ static bool readMat4Node(const YAML::Node& n, Eigen::Matrix4d& T)
   return true;
 }
 
-void VrCalibrationSolver::loadExistingYamlConstants()
-{
-  // defaults
-  T_CE_ = Eigen::Matrix4d::Identity();
-  T_CE_(2,3) = 0.222;
-  T_SA_old_ = Eigen::Matrix4d::Identity();
-
-  try {
-    YAML::Node existing = YAML::LoadFile(calib_yaml_path_);
-
-    if (existing["T_CE"]) {
-      Eigen::Matrix4d tmp = Eigen::Matrix4d::Identity();
-      if (readMat4Node(existing["T_CE"], tmp)) T_CE_ = tmp;
+static void writeMat4(std::ofstream& ofs, const std::string& key, const Eigen::Matrix4d& T, int prec=12) {
+  ofs << key << ":\n";
+  ofs << std::fixed << std::setprecision(prec);
+  for (int r=0;r<4;r++){
+    ofs << "  - [";
+    for (int c=0;c<4;c++){
+      ofs << T(r,c);
+      if (c<3) ofs << ", ";
     }
-    if (existing["T_SA"]) {
-      Eigen::Matrix4d tmp = Eigen::Matrix4d::Identity();
-      if (readMat4Node(existing["T_SA"], tmp)) T_SA_old_ = tmp;
+    ofs << "]\n";
+  }
+  ofs << "\n";
+}
+
+static void writeMat3(std::ofstream& ofs, const std::string& key, const Eigen::Matrix3d& R, int prec=12) {
+  ofs << key << ":\n";
+  ofs << std::fixed << std::setprecision(prec);
+  for (int r=0;r<3;r++){
+    ofs << "  - [";
+    for (int c=0;c<3;c++){
+      ofs << R(r,c);
+      if (c<2) ofs << ", ";
     }
-  } catch (...) {
-    // keep defaults
+    ofs << "]\n";
   }
+  ofs << "\n";
 }
 
-void VrCalibrationSolver::resetSamples()
-{
-  T_AB_all_.clear();
-  T_DC_all_.clear();
-  vr_quats_.clear();
-}
+// -------------------- core solve --------------------
+struct SolveResult {
+  Eigen::Matrix4d T_BC = Eigen::Matrix4d::Identity(); // (B<-C) : EE <- Tracker
+  Eigen::Matrix4d T_AD = Eigen::Matrix4d::Identity(); // (A<-D) : RobotBase <- VRWorld
+  Eigen::Matrix3d R_Adj = Eigen::Matrix3d::Identity();
+  double mean_pos_err_m = std::numeric_limits<double>::infinity();
+  double mean_ang_err_deg = std::numeric_limits<double>::infinity();
+  bool ok = false;
+};
 
-void VrCalibrationSolver::resetRAdj()
+static void computeRAdjFromFirstTwo(const std::vector<Eigen::Matrix4d>& T_DC,
+                                   Eigen::Matrix3d& R_adj_out)
 {
-  have_radj_ = false;
-  R_adj_.setIdentity();
-}
-
-void VrCalibrationSolver::pushSample(const Eigen::Matrix4d& T_AB, const Eigen::Matrix4d& T_DC)
-{
-  T_AB_all_.push_back(T_AB);
-  T_DC_all_.push_back(T_DC);
-}
-
-void VrCalibrationSolver::feedVRQuaternionForRAdj(const Eigen::Quaterniond& q_vr)
-{
-  Eigen::Quaterniond q = q_vr;
-  q.normalize();
-  vr_quats_.push_back(q);
-}
-
-bool VrCalibrationSolver::haveRAdj() const { return have_radj_; }
-
-Eigen::Matrix4d VrCalibrationSolver::invT(const Eigen::Matrix4d& T) const
-{
-  Eigen::Matrix4d Ti = Eigen::Matrix4d::Identity();
-  const Eigen::Matrix3d R = T.block<3,3>(0,0);
-  const Eigen::Vector3d p = T.block<3,1>(0,3);
-  Ti.block<3,3>(0,0) = R.transpose();
-  Ti.block<3,1>(0,3) = -R.transpose()*p;
-  return Ti;
-}
-
-Eigen::Matrix<double,9,9> VrCalibrationSolver::kron3(const Eigen::Matrix3d& A,
-                                                     const Eigen::Matrix3d& B) const
-{
-  Eigen::Matrix<double,9,9> K;
-  for (int i=0;i<3;i++){
-    for (int j=0;j<3;j++){
-      K.block<3,3>(3*i,3*j) = A(i,j) * B;
-    }
+  // Same as your capture code: R_Adj = R1^T * R2 (right-multiply adjustment style)
+  // NOTE: This does NOT apply any sign flips.
+  if (T_DC.size() < 2) {
+    R_adj_out = Eigen::Matrix3d::Identity();
+    return;
   }
-  return K;
+  const Eigen::Matrix3d R1 = T_DC[0].block<3,3>(0,0);
+  const Eigen::Matrix3d R2 = T_DC[1].block<3,3>(0,0);
+  R_adj_out = R1.transpose() * R2;
+  R_adj_out = orthonormalizeR(R_adj_out);
 }
 
-// =====================================================
-// T_SA computation rule (axis correction is ONLY here)
-// Input: R_total from calibrated_pose rotvec (rad)
-// Output: T_SA (4x4) used as right-multiply in vive_tracker: M_cal = ... @ T_SA
-//
-// We want: R_total * R_SA has desired w_z alignment behavior.
-// Here we implement your "side" convention to avoid mirrored axes.
-// - keep it contained: changing alignment -> only edit this function.
-// =====================================================
-Eigen::Matrix4d VrCalibrationSolver::computeTSAFromCalibratedPoseRotation(const Eigen::Matrix3d& R_total) const
+static SolveResult solveHandEye_AndEvaluate(const std::vector<Eigen::Matrix4d>& T_AB_all,
+                                           const std::vector<Eigen::Matrix4d>& T_DC_all)
 {
-  // We align the "spatial-angle frame" so that the resulting yaw-like component matches desired sign.
-  // Practical: build a rotation around Z by +/- t_sa_w_des_z_ then apply sign depending on side.
-
-  const double sgn = (t_sa_side_ == "left") ? +1.0 : -1.0;
-  const double ang = sgn * t_sa_w_des_z_;
-
-  Eigen::Matrix3d R_SA = Eigen::AngleAxisd(ang, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-
-  // Because vive_tracker right-multiplies, we store pure R_SA here.
-  // If you ever want to incorporate R_total-dependent logic, do it here (and only here).
-  (void)R_total;
-
-  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-  T.block<3,3>(0,0) = R_SA;
-  return T;
-}
-
-void VrCalibrationSolver::finalizeAndSave(bool t_sa_computed, const Eigen::Matrix4d& T_SA_new)
-{
-  const size_t N = T_AB_all_.size();
-  if (N < 2 || T_DC_all_.size() != N) {
-    throw std::runtime_error("Not enough samples (need >= 2).");
-  }
+  SolveResult res;
+  const size_t N = T_AB_all.size();
+  if (N < 2 || T_DC_all.size() != N) return res;
 
   const size_t K = N - 1;
-
-  Eigen::MatrixXd M(9*K, 9);
-  Eigen::MatrixXd K1(3*K, 3);
-  Eigen::VectorXd K2(3*K);
-
   const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
 
-  std::vector<Eigen::Vector3d> O_B0B1_list;
-  std::vector<Eigen::Vector3d> O_C0C1_list;
+  Eigen::MatrixXd M(9 * K, 9);
+  Eigen::MatrixXd K1(3 * K, 3);
+  Eigen::VectorXd K2(3 * K);
+
+  std::vector<Eigen::Vector3d> tA_list;
+  std::vector<Eigen::Vector3d> tB_list;
   std::vector<Eigen::Matrix4d> T_AB0_list;
   std::vector<Eigen::Matrix4d> T_DC0_list;
+  tA_list.reserve(K);
+  tB_list.reserve(K);
+  T_AB0_list.reserve(K);
+  T_DC0_list.reserve(K);
 
   for (size_t i=0;i<K;i++){
-    const Eigen::Matrix4d& T_AB0 = T_AB_all_[i];
-    const Eigen::Matrix4d& T_AB1 = T_AB_all_[i+1];
-    const Eigen::Matrix4d& T_DC0 = T_DC_all_[i];
-    const Eigen::Matrix4d& T_DC1 = T_DC_all_[i+1];
+    const Eigen::Matrix4d& T_AB0 = T_AB_all[i];
+    const Eigen::Matrix4d& T_AB1 = T_AB_all[i+1];
+    const Eigen::Matrix4d& T_DC0 = T_DC_all[i];
+    const Eigen::Matrix4d& T_DC1 = T_DC_all[i+1];
 
     const Eigen::Matrix4d T_B0B1 = invT(T_AB0) * T_AB1;
     const Eigen::Matrix4d T_C0C1 = invT(T_DC0) * T_DC1;
 
-    const Eigen::Matrix3d R_B0B1 = T_B0B1.block<3,3>(0,0);
-    const Eigen::Vector3d O_B0B1 = T_B0B1.block<3,1>(0,3);
+    const Eigen::Matrix3d R_A = T_B0B1.block<3,3>(0,0);
+    const Eigen::Matrix3d R_B = T_C0C1.block<3,3>(0,0);
+    const Eigen::Vector3d t_A = T_B0B1.block<3,1>(0,3);
+    const Eigen::Vector3d t_B = T_C0C1.block<3,1>(0,3);
 
-    const Eigen::Matrix3d R_C0C1 = T_C0C1.block<3,3>(0,0);
-    const Eigen::Vector3d O_C0C1 = T_C0C1.block<3,1>(0,3);
+    // (I ⊗ R_A - R_B^T ⊗ I) vec(R_X) = 0
+    Eigen::Matrix<double,9,9> m = kron3(I, R_A) - kron3(R_B.transpose(), I);
+    M.block(9*i, 0, 9, 9) = m;
 
-    M.block(9*i,0,9,9) = kron3(I, R_B0B1) - kron3(R_C0C1.transpose(), I);
-    K1.block(3*i,0,3,3) = (I - R_B0B1);
+    // (I - R_A) t_X = t_A - R_X t_B
+    K1.block(3*i, 0, 3, 3) = (I - R_A);
 
-    O_B0B1_list.push_back(O_B0B1);
-    O_C0C1_list.push_back(O_C0C1);
+    tA_list.push_back(t_A);
+    tB_list.push_back(t_B);
     T_AB0_list.push_back(T_AB0);
     T_DC0_list.push_back(T_DC0);
   }
 
-  // solve rotation (null space of M)
+  // rotation solve by smallest eigenvector of M^T M
   Eigen::MatrixXd X = M.transpose() * M;
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(X);
-  if (es.info() != Eigen::Success) throw std::runtime_error("EigenSolver failed");
+  if (es.info() != Eigen::Success) return res;
 
-  Eigen::VectorXd v = es.eigenvectors().col(0);
-  Eigen::Map<const Eigen::Matrix<double,3,3,Eigen::ColMajor>> R_BC_raw(v.data());
+  Eigen::VectorXd v = es.eigenvectors().col(0); // smallest
+  Eigen::Map<const Eigen::Matrix<double,3,3,Eigen::ColMajor>> R_raw(v.data());
+  Eigen::Matrix3d R_BC = orthonormalizeR(R_raw);
 
-  Eigen::JacobiSVD<Eigen::Matrix3d> svd(R_BC_raw, Eigen::ComputeFullU | Eigen::ComputeFullV);
-  Eigen::Matrix3d U = svd.matrixU();
-  Eigen::Matrix3d V = svd.matrixV();
-  Eigen::Matrix3d R_BC = U * V.transpose();
-  if (R_BC.determinant() < 0) {
-    U.col(2) *= -1.0;
-    R_BC = U * V.transpose();
-  }
-
-  // solve translation
+  // translation solve
   for (size_t i=0;i<K;i++){
-    K2.segment<3>(3*i) = O_B0B1_list[i] - R_BC * O_C0C1_list[i];
+    K2.segment<3>(3*i) = tA_list[i] - R_BC * tB_list[i];
   }
-  Eigen::Vector3d O_BC = K1.colPivHouseholderQr().solve(K2);
+  Eigen::Vector3d t_BC = K1.colPivHouseholderQr().solve(K2);
+  Eigen::Matrix4d T_BC = makeT(R_BC, t_BC);
 
-  Eigen::Matrix4d T_BC = Eigen::Matrix4d::Identity();
-  T_BC.block<3,3>(0,0) = R_BC;
-  T_BC.block<3,1>(0,3) = O_BC;
-
-  // average T_AD
+  // compute T_AD_i = T_AB0_i * T_BC * inv(T_DC0_i), average over i
   std::vector<Eigen::Quaterniond> quats;
   quats.reserve(K);
-  Eigen::Vector3d t_sum = Eigen::Vector3d::Zero();
+  Eigen::Vector3d tsum = Eigen::Vector3d::Zero();
 
   for (size_t i=0;i<K;i++){
-    Eigen::Matrix4d T_AD = T_AB0_list[i] * T_BC * invT(T_DC0_list[i]);
-    Eigen::Matrix3d R = T_AD.block<3,3>(0,0);
-    Eigen::Vector3d t = T_AD.block<3,1>(0,3);
+    Eigen::Matrix4d T_AD_i = T_AB0_list[i] * T_BC * invT(T_DC0_list[i]);
+    Eigen::Matrix3d Ri = orthonormalizeR(T_AD_i.block<3,3>(0,0));
+    Eigen::Vector3d ti = T_AD_i.block<3,1>(0,3);
 
-    Eigen::Quaterniond q(R);
+    Eigen::Quaterniond q(Ri);
     q.normalize();
     quats.push_back(q);
-    t_sum += t;
+    tsum += ti;
   }
 
-  Eigen::Quaterniond q_ref = quats.front();
-  Eigen::Vector4d q_sum = Eigen::Vector4d::Zero();
-  for (auto& q : quats) {
-    if (q_ref.coeffs().dot(q.coeffs()) < 0) q.coeffs() *= -1.0;
-    q_sum += q.coeffs();
+  // average quaternion (sign-aligned)
+  Eigen::Quaterniond qref = quats.front();
+  Eigen::Vector4d qsum = Eigen::Vector4d::Zero(); // coeffs() = (x,y,z,w)
+  for (auto q : quats){
+    if (qref.coeffs().dot(q.coeffs()) < 0) q.coeffs() *= -1.0;
+    qsum += q.coeffs();
   }
-  q_sum /= static_cast<double>(quats.size());
-  Eigen::Quaterniond q_mean;
-  q_mean.coeffs() = q_sum;
-  q_mean.normalize();
+  qsum /= static_cast<double>(K);
+  Eigen::Quaterniond qmean;
+  qmean.coeffs() = qsum;
+  qmean.normalize();
 
-  Eigen::Vector3d t_mean = t_sum / static_cast<double>(K);
+  Eigen::Vector3d tmean = tsum / static_cast<double>(K);
+  Eigen::Matrix4d T_AD = makeT(qmean.toRotationMatrix(), tmean);
 
-  Eigen::Matrix4d T_AD_avg = Eigen::Matrix4d::Identity();
-  T_AD_avg.block<3,3>(0,0) = q_mean.toRotationMatrix();
-  T_AD_avg.block<3,1>(0,3) = t_mean;
+  // compute R_Adj from first two VR poses (optional but kept)
+  Eigen::Matrix3d R_Adj;
+  computeRAdjFromFirstTwo(T_DC_all, R_Adj);
 
-  // R_Adj (keep as existing style: optional; here we compute a simple quaternion mean about VR)
-  // If you already have a specific original R_Adj method, put it here; VrCalibration never changes.
-  if (vr_quats_.size() >= 2) {
-    Eigen::Quaterniond q0 = vr_quats_.front();
-    Eigen::Vector4d qs = Eigen::Vector4d::Zero();
-    for (auto q : vr_quats_) {
-      if (q0.coeffs().dot(q.coeffs()) < 0) q.coeffs() *= -1.0;
-      qs += q.coeffs();
-    }
-    qs /= static_cast<double>(vr_quats_.size());
-    Eigen::Quaterniond qmean;
-    qmean.coeffs() = qs;
-    qmean.normalize();
-    R_adj_ = qmean.toRotationMatrix();
-    have_radj_ = true;
-  } else {
-    have_radj_ = false;
-    R_adj_.setIdentity();
+  // evaluate consistency:
+  // predicted robot EE pose: T_AB_pred_i = T_AD * T_DC_i * inv(T_BC)
+  double pos_sum = 0.0;
+  double ang_sum = 0.0;
+  for (size_t i=0;i<N;i++){
+    Eigen::Matrix4d T_AB_pred = T_AD * T_DC_all[i] * invT(T_BC);
+    const Eigen::Vector3d t_meas = T_AB_all[i].block<3,1>(0,3);
+    const Eigen::Vector3d t_pred = T_AB_pred.block<3,1>(0,3);
+    pos_sum += (t_pred - t_meas).norm();
+
+    Eigen::Matrix3d R_meas = T_AB_all[i].block<3,3>(0,0);
+    Eigen::Matrix3d R_pred = T_AB_pred.block<3,3>(0,0);
+    Eigen::Matrix3d R_err = R_meas.transpose() * R_pred;
+    double ang = rotAngleRad(R_err);
+    ang_sum += ang * 180.0 / kPi;
   }
 
-  const Eigen::Matrix4d T_SA_to_save = t_sa_computed ? T_SA_new : T_SA_old_;
-
-  writeCalibrationYamlAll(
-    T_AD_avg,
-    T_BC,
-    have_radj_ ? R_adj_ : Eigen::Matrix3d::Identity(),
-    T_CE_,
-    T_SA_to_save
-  );
+  res.T_BC = T_BC;
+  res.T_AD = T_AD;
+  res.R_Adj = R_Adj;
+  res.mean_pos_err_m = pos_sum / static_cast<double>(N);
+  res.mean_ang_err_deg = ang_sum / static_cast<double>(N);
+  res.ok = true;
+  return res;
 }
 
-void VrCalibrationSolver::writeCalibrationYamlAll(const Eigen::Matrix4d& T_AD,
-                                                  const Eigen::Matrix4d& T_BC,
-                                                  const Eigen::Matrix3d& R_Adj,
-                                                  const Eigen::Matrix4d& T_CE,
-                                                  const Eigen::Matrix4d& T_SA)
+// -------------------- file IO --------------------
+static void loadEEFile(const std::string& ee_path, std::vector<Eigen::Matrix4d>& T_AB_all)
 {
-  std::ofstream ofs(calib_yaml_path_, std::ios::out | std::ios::trunc);
-  if (!ofs.is_open()) throw std::runtime_error("Failed to open yaml: " + calib_yaml_path_);
+  std::ifstream ifs(ee_path);
+  if (!ifs.is_open()) throw std::runtime_error("Failed to open EE file: " + ee_path);
 
-  const int prec = 12;
+  T_AB_all.clear();
+  std::string line;
+  while (std::getline(ifs, line)) {
+    if (line.empty()) continue;
 
-  ofs << "# VR calibration matrix setting\n";
-  ofs << "# Auto-capture + One-shot YAML update (R_Adj, T_AD, T_BC, T_SA)\n\n";
-  ofs << "meta:\n";
-  ofs << "  t_sa_w_des_z: " << std::fixed << std::setprecision(prec) << t_sa_w_des_z_ << "\n";
-  ofs << "  t_sa_side: \"" << t_sa_side_ << "\"\n";
-  ofs << "  note: \"T_SA is right-multiplied in vive_tracker (M_cal = ... @ T_SA)\"\n\n";
-
-  auto writeMat4 = [&](const std::string& key, const Eigen::Matrix4d& T){
-    ofs << key << ":\n";
-    ofs << std::fixed << std::setprecision(prec);
-    for (int r=0;r<4;r++){
-      ofs << "  - [";
-      for (int c=0;c<4;c++){
-        ofs << T(r,c);
-        if (c<3) ofs << ", ";
-      }
-      ofs << "]\n";
+    std::istringstream ss(line);
+    double r00,r01,r02,px;
+    double r10,r11,r12,py;
+    double r20,r21,r22,pz;
+    if (!(ss >> r00 >> r01 >> r02 >> px
+             >> r10 >> r11 >> r12 >> py
+             >> r20 >> r21 >> r22 >> pz)) {
+      continue;
     }
-    ofs << "\n";
-  };
+    Eigen::Matrix3d R;
+    R << r00,r01,r02,
+         r10,r11,r12,
+         r20,r21,r22;
+    R = orthonormalizeR(R);
+    Eigen::Vector3d p(px,py,pz); // already meters in your writer
+    T_AB_all.push_back(makeT(R,p));
+  }
 
-  auto writeMat3 = [&](const std::string& key, const Eigen::Matrix3d& R){
-    ofs << key << ":\n";
-    ofs << std::fixed << std::setprecision(prec);
-    for (int r=0;r<3;r++){
-      ofs << "  - [";
-      for (int c=0;c<3;c++){
-        ofs << R(r,c);
-        if (c<2) ofs << ", ";
+  if (T_AB_all.size() < 2) {
+    throw std::runtime_error("EE file has <2 valid lines. Need at least 2 samples.");
+  }
+}
+
+static void loadVRFile_AsPose(const std::string& vr_path,
+                             std::vector<Eigen::Matrix4d>& T_DC_all_as_is)
+{
+  std::ifstream ifs(vr_path);
+  if (!ifs.is_open()) throw std::runtime_error("Failed to open VR file: " + vr_path);
+
+  T_DC_all_as_is.clear();
+  std::string line;
+  while (std::getline(ifs, line)) {
+    if (line.empty()) continue;
+    std::istringstream ss(line);
+
+    double x,y,z,qx,qy,qz,qw;
+    if (!(ss >> x >> y >> z >> qx >> qy >> qz >> qw)) continue;
+
+    // IMPORTANT: no sign flip here.
+    Eigen::Quaterniond q(qw,qx,qy,qz);
+    q.normalize();
+    Eigen::Matrix3d R = orthonormalizeR(q.toRotationMatrix());
+    Eigen::Vector3d p(x,y,z); // already meters in your writer
+    T_DC_all_as_is.push_back(makeT(R,p));
+  }
+
+  if (T_DC_all_as_is.size() < 2) {
+    throw std::runtime_error("VR file has <2 valid lines. Need at least 2 samples.");
+  }
+}
+
+// -------------------- node --------------------
+class VrCalibrationSolverNode : public rclcpp::Node
+{
+public:
+  VrCalibrationSolverNode()
+  : Node("vr_calibration_solver")
+  {
+    // defaults (match your environment)
+    const char* home = std::getenv("HOME");
+    if (!home) throw std::runtime_error("HOME env not set");
+
+    this->declare_parameter<std::string>("ee_path",
+      "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/vr_calibration/ur10_ee.txt");
+    this->declare_parameter<std::string>("vr_path",
+      "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/vr_calibration/ur10_vr.txt");
+    this->declare_parameter<std::string>("yaml_path",
+      std::string(home) + "/nrs_ws/src/vive_tracker_ros2/yaml/calibration_matrix.yaml");
+
+    // VR pose convention in file:
+    //   "auto" (default): try both (world<-tracker) and (tracker<-world) and pick smaller residual
+    //   "world_from_tracker": treat file pose as (world<-tracker)
+    //   "tracker_from_world": treat file pose as (tracker<-world) and invert to get (world<-tracker)
+    this->declare_parameter<std::string>("vr_pose_convention", "auto");
+
+    // keep T_CE / T_SA if present
+    this->declare_parameter<bool>("keep_existing_T_CE", true);
+    this->declare_parameter<bool>("keep_existing_T_SA", true);
+
+    // optional: write R_Adj computed from first two VR poses
+    this->declare_parameter<bool>("write_R_Adj", true);
+
+    ee_path_ = this->get_parameter("ee_path").as_string();
+    vr_path_ = this->get_parameter("vr_path").as_string();
+    yaml_path_ = this->get_parameter("yaml_path").as_string();
+    vr_pose_convention_ = this->get_parameter("vr_pose_convention").as_string();
+    keep_T_CE_ = this->get_parameter("keep_existing_T_CE").as_bool();
+    keep_T_SA_ = this->get_parameter("keep_existing_T_SA").as_bool();
+    write_R_Adj_ = this->get_parameter("write_R_Adj").as_bool();
+  }
+
+  void run()
+  {
+    // load inputs
+    std::vector<Eigen::Matrix4d> T_AB_all;
+    std::vector<Eigen::Matrix4d> T_DC_as_is;
+    loadEEFile(ee_path_, T_AB_all);
+    loadVRFile_AsPose(vr_path_, T_DC_as_is);
+
+    // load existing yaml constants (optional)
+    Eigen::Matrix4d T_CE = Eigen::Matrix4d::Identity();
+    T_CE(2,3) = 0.222; // fallback default you used
+    Eigen::Matrix4d T_SA = Eigen::Matrix4d::Identity();
+
+    try {
+      YAML::Node existing = YAML::LoadFile(yaml_path_);
+      if (keep_T_CE_ && existing["T_CE"]) {
+        Eigen::Matrix4d tmp;
+        if (readMat4(existing["T_CE"], tmp)) T_CE = tmp;
       }
-      ofs << "]\n";
+      if (keep_T_SA_ && existing["T_SA"]) {
+        Eigen::Matrix4d tmp;
+        if (readMat4(existing["T_SA"], tmp)) T_SA = tmp;
+      }
+    } catch (...) {
+      RCLCPP_WARN(get_logger(), "Cannot load existing yaml (will create new). path=%s", yaml_path_.c_str());
     }
-    ofs << "\n";
-  };
 
-  writeMat4("T_AD", T_AD);
-  writeMat4("T_BC", T_BC);
-  writeMat3("R_Adj", R_Adj);
+    // build two candidates for T_DC:
+    //   cand0: as-is (assume world<-tracker)
+    //   cand1: inverted (assume tracker<-world in file, invert to world<-tracker)
+    std::vector<Eigen::Matrix4d> T_DC_cand0 = T_DC_as_is;
+    std::vector<Eigen::Matrix4d> T_DC_cand1;
+    T_DC_cand1.reserve(T_DC_as_is.size());
+    for (const auto& T : T_DC_as_is) T_DC_cand1.push_back(invT(T));
 
-  ofs << "# constant offset: tune here if needed\n";
-  writeMat4("T_CE", T_CE);
+    auto solveWithConvention = [&](const std::string& mode)->SolveResult {
+      if (mode == "world_from_tracker") {
+        return solveHandEye_AndEvaluate(T_AB_all, T_DC_cand0);
+      } else if (mode == "tracker_from_world") {
+        return solveHandEye_AndEvaluate(T_AB_all, T_DC_cand1);
+      } else {
+        // auto
+        SolveResult r0 = solveHandEye_AndEvaluate(T_AB_all, T_DC_cand0);
+        SolveResult r1 = solveHandEye_AndEvaluate(T_AB_all, T_DC_cand1);
+        if (!r0.ok) return r1;
+        if (!r1.ok) return r0;
+        // choose smaller combined metric
+        const double s0 = r0.mean_pos_err_m + 0.01 * (r0.mean_ang_err_deg); // 1deg ~ 1cm scale
+        const double s1 = r1.mean_pos_err_m + 0.01 * (r1.mean_ang_err_deg);
+        return (s0 <= s1) ? r0 : r1;
+      }
+    };
 
-  ofs << "# spatial-angle frame alignment (right-multiply)\n";
-  writeMat4("T_SA", T_SA);
+    SolveResult best = solveWithConvention(vr_pose_convention_);
+    if (!best.ok) throw std::runtime_error("Solve failed (not enough data or eigen failure).");
 
-  ofs.flush();
+    // If user requested explicit mode, print which was used; if auto, infer by recomputing both scores
+    std::string chosen = vr_pose_convention_;
+    if (vr_pose_convention_ == "auto") {
+      SolveResult r0 = solveHandEye_AndEvaluate(T_AB_all, T_DC_cand0);
+      SolveResult r1 = solveHandEye_AndEvaluate(T_AB_all, T_DC_cand1);
+      const double s0 = r0.mean_pos_err_m + 0.01 * (r0.mean_ang_err_deg);
+      const double s1 = r1.mean_pos_err_m + 0.01 * (r1.mean_ang_err_deg);
+      chosen = (s0 <= s1) ? "world_from_tracker" : "tracker_from_world";
+    }
+
+    RCLCPP_INFO(get_logger(),
+      "Solve done. chosen_vr_pose_convention=%s | mean_pos_err=%.6fm | mean_ang_err=%.4fdeg",
+      chosen.c_str(), best.mean_pos_err_m, best.mean_ang_err_deg);
+
+    // write yaml
+    std::ofstream ofs(yaml_path_, std::ios::out | std::ios::trunc);
+    if (!ofs.is_open()) throw std::runtime_error("Failed to open yaml for write: " + yaml_path_);
+
+    const int prec = 12;
+    ofs << "# VR calibration matrix setting\n";
+    ofs << "# Offline solver output (NO manual sign flip for x/wz)\n";
+    ofs << "meta:\n";
+    ofs << "  vr_pose_convention_chosen: \"" << chosen << "\"\n";
+    ofs << "  mean_pos_err_m: " << std::fixed << std::setprecision(prec) << best.mean_pos_err_m << "\n";
+    ofs << "  mean_ang_err_deg: " << std::fixed << std::setprecision(prec) << best.mean_ang_err_deg << "\n\n";
+
+    writeMat4(ofs, "T_AD", best.T_AD, prec);
+    writeMat4(ofs, "T_BC", best.T_BC, prec);
+
+    if (write_R_Adj_) writeMat3(ofs, "R_Adj", best.R_Adj, prec);
+    else             writeMat3(ofs, "R_Adj", Eigen::Matrix3d::Identity(), prec);
+
+    ofs << "# constant offset: keep existing if available\n";
+    writeMat4(ofs, "T_CE", T_CE, prec);
+
+    ofs << "# spatial-angle frame alignment: keep existing if available\n";
+    writeMat4(ofs, "T_SA", T_SA, prec);
+
+    ofs.flush();
+
+    RCLCPP_INFO(get_logger(), "YAML written: %s", yaml_path_.c_str());
+  }
+
+private:
+  std::string ee_path_;
+  std::string vr_path_;
+  std::string yaml_path_;
+  std::string vr_pose_convention_;
+  bool keep_T_CE_{true};
+  bool keep_T_SA_{true};
+  bool write_R_Adj_{true};
+};
+
+// -------------------- main --------------------
+int main(int argc, char** argv)
+{
+  rclcpp::init(argc, argv);
+  try {
+    auto node = std::make_shared<VrCalibrationSolverNode>();
+    node->run();
+  } catch (const std::exception& e) {
+    std::cerr << "vr_calibration_solver exception: " << e.what() << std::endl;
+  }
+  rclcpp::shutdown();
+  return 0;
 }
