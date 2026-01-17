@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 import os
 import json
 import re
 import math
+from typing import Optional, Dict, List
 
-import openvr
 import numpy as np
+import openvr
 
 import rclpy
 from rclpy.node import Node
@@ -27,30 +29,31 @@ from vive_tracker_ros2.utils import (
 import ament_index_python.packages
 
 
+# -------------------------
+# Basic rotations
+# -------------------------
 def rot_x(th_rad: float) -> np.ndarray:
     c = np.cos(th_rad)
     s = np.sin(th_rad)
-    return np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, c, -s],
-            [0.0, s, c],
-        ],
-        dtype=np.float64,
-    )
+    return np.array([[1.0, 0.0, 0.0],
+                     [0.0, c, -s],
+                     [0.0, s, c]], dtype=np.float64)
+
+
+def rot_y(th_rad: float) -> np.ndarray:
+    c = np.cos(th_rad)
+    s = np.sin(th_rad)
+    return np.array([[c, 0.0, s],
+                     [0.0, 1.0, 0.0],
+                     [-s, 0.0, c]], dtype=np.float64)
 
 
 def rot_z(th_rad: float) -> np.ndarray:
     c = np.cos(th_rad)
     s = np.sin(th_rad)
-    return np.array(
-        [
-            [c, -s, 0.0],
-            [s, c, 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float64,
-    )
+    return np.array([[c, -s, 0.0],
+                     [s, c, 0.0],
+                     [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
 def openvr_pose_to_np44(pose) -> np.ndarray:
@@ -65,63 +68,91 @@ def openvr_pose_to_np44(pose) -> np.ndarray:
     return M
 
 
-def rotmat_to_rotvec(R: np.ndarray) -> np.ndarray:
+# -------------------------
+# Rotvec (continuous) utilities
+# -------------------------
+def rotmat_to_quat(R: np.ndarray) -> np.ndarray:
     """
-    Rotation matrix (3x3) -> rotation vector w (3,)
-    w = axis * angle  (angle in [0, pi], rad)
+    Return quaternion as [w, x, y, z] from 3x3 rotation matrix.
     """
     tr = float(np.trace(R))
-    cos_th = (tr - 1.0) * 0.5
-    cos_th = max(-1.0, min(1.0, cos_th))
-    th = math.acos(cos_th)
+    if tr > 0.0:
+        S = math.sqrt(tr + 1.0) * 2.0
+        w = 0.25 * S
+        x = (R[2, 1] - R[1, 2]) / S
+        y = (R[0, 2] - R[2, 0]) / S
+        z = (R[1, 0] - R[0, 1]) / S
+    else:
+        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            S = math.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+            w = (R[2, 1] - R[1, 2]) / S
+            x = 0.25 * S
+            y = (R[0, 1] + R[1, 0]) / S
+            z = (R[0, 2] + R[2, 0]) / S
+        elif R[1, 1] > R[2, 2]:
+            S = math.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+            w = (R[0, 2] - R[2, 0]) / S
+            x = (R[0, 1] + R[1, 0]) / S
+            y = 0.25 * S
+            z = (R[1, 2] + R[2, 1]) / S
+        else:
+            S = math.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+            w = (R[1, 0] - R[0, 1]) / S
+            x = (R[0, 2] + R[2, 0]) / S
+            y = (R[1, 2] + R[2, 1]) / S
+            z = 0.25 * S
 
-    if th < 1e-12:
+    q = np.array([w, x, y, z], dtype=np.float64)
+    n = float(np.linalg.norm(q))
+    if n < 1e-12:
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    return q / n
+
+
+def quat_to_rotvec_cont(q_wxyz: np.ndarray, prev_w: Optional[np.ndarray]) -> np.ndarray:
+    """
+    Quaternion [w,x,y,z] -> rotation vector w (rad), with continuity.
+    Uses two equivalent candidates: axis*angle and axis*(angle-2π) (same rotation).
+    Chooses closer one to prev_w if prev provided.
+    """
+    w, x, y, z = [float(v) for v in q_wxyz]
+
+    # angle in [0, π]
+    vnorm = math.sqrt(x*x + y*y + z*z)
+    if vnorm < 1e-12:
         return np.zeros(3, dtype=np.float64)
 
-    # near pi: sin(th) is small -> use special handling
-    if abs(math.pi - th) < 1e-5:
-        axis = np.zeros(3, dtype=np.float64)
-        axis[0] = math.sqrt(max(0.0, (R[0, 0] + 1.0) * 0.5))
-        axis[1] = math.sqrt(max(0.0, (R[1, 1] + 1.0) * 0.5))
-        axis[2] = math.sqrt(max(0.0, (R[2, 2] + 1.0) * 0.5))
+    angle = 2.0 * math.atan2(vnorm, w)
+    # map to [0, π]
+    if angle > math.pi:
+        angle = 2.0 * math.pi - angle
+        x, y, z = -x, -y, -z
+        vnorm = math.sqrt(x*x + y*y + z*z)
+        if vnorm < 1e-12:
+            return np.zeros(3, dtype=np.float64)
 
-        if R[0, 1] < 0.0:
-            axis[1] = -axis[1]
-        if R[0, 2] < 0.0:
-            axis[2] = -axis[2]
+    axis = np.array([x, y, z], dtype=np.float64) / vnorm
 
-        n = float(np.linalg.norm(axis))
-        if n < 1e-10:
-            v = np.array([R[2, 1] - R[1, 2],
-                          R[0, 2] - R[2, 0],
-                          R[1, 0] - R[0, 1]], dtype=np.float64)
-            nv = float(np.linalg.norm(v))
-            if nv < 1e-12:
-                return np.zeros(3, dtype=np.float64)
-            axis = v / nv
-        else:
-            axis = axis / n
+    cand1 = axis * angle
+    cand2 = axis * (angle - 2.0 * math.pi)  # same rotation (2π 주기)
 
-        return axis * th
+    if prev_w is None:
+        return cand1
 
-    v = np.array([
-        R[2, 1] - R[1, 2],
-        R[0, 2] - R[2, 0],
-        R[1, 0] - R[0, 1],
-    ], dtype=np.float64)
-
-    s = math.sin(th)
-    scale = th / (2.0 * s)
-    return scale * v
+    if float(np.linalg.norm(cand2 - prev_w)) < float(np.linalg.norm(cand1 - prev_w)):
+        return cand2
+    return cand1
 
 
-# ✅ 네가 준 측정치 기반 "기본" 보정 (YAML에 T_SA 있으면 그걸 우선)
+# -------------------------
+# DEFAULT_T_SA fallback
+# -------------------------
 DEFAULT_T_SA = np.array(
     [
-        [-0.999987700,  0.000392998,  0.004944318,  0.0],
-        [ 0.000416257,  0.999988849,  0.004704043,  0.0],
-        [-0.004942414,  0.004706043, -0.999976713,  0.0],
-        [ 0.0,          0.0,          0.0,          1.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
     ],
     dtype=np.float64,
 )
@@ -132,58 +163,62 @@ class ViveTracker(Node):
         super().__init__("vive_tracker")
 
         self.vr_system = None
-        self.trackers = {}
+        self.trackers: Dict[str, dict] = {}
+
+        self.prev_time = self.get_clock().now()
 
         self._init_ros()
         self._init_vr()
         self._init_json_calib()
         self._init_yaml_calib()
 
-        self.prev_time = self.get_clock().now()
-
     # ------------------------------------------------------------------
     # ROS init
     # ------------------------------------------------------------------
     def _init_ros(self):
-        self.raw_pose_pub = self.create_publisher(
-            Odometry, "vive_tracker_ros/raw_pose", 10
-        )
-        self.calibrated_pose_pub_odom = self.create_publisher(
-            Odometry, "vive_tracker_ros/calibrated_pose", 10
-        )
+        self.raw_pose_pub = self.create_publisher(Odometry, "vive_tracker_ros/raw_pose", 10)
+        self.calibrated_pose_pub_odom = self.create_publisher(Odometry, "vive_tracker_ros/calibrated_pose", 10)
 
-        # PoseStamped raw (/raw_pose)
-        self.raw_pose_pub_pose = self.create_publisher(
-            PoseStamped, "/raw_pose", 10
-        )
+        # /raw_pose PoseStamped
+        self.raw_pose_pub_pose = self.create_publisher(PoseStamped, "/raw_pose", 10)
 
-        # ✅ /calibrated_pose : [x y z wx wy wz] (m, rad)
-        self.calibrated_pose_pub = self.create_publisher(
-            Float64MultiArray, "/calibrated_pose", 10
-        )
+        # /calibrated_pose: [x y z wx wy wz] (m, rad)
+        self.calibrated_pose_pub = self.create_publisher(Float64MultiArray, "/calibrated_pose", 10)
 
-        self.calibrate_srv = self.create_service(
-            ViveCalibration, "vive_tracker_ros/calibrate", self.cb_calibrate
-        )
+        self.calibrate_srv = self.create_service(ViveCalibration, "vive_tracker_ros/calibrate", self.cb_calibrate)
 
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("child_frame", "vive_tracker")
 
-        # ✅ T_SA 적용 방식 선택 (기본: 좌곱)
-        # - left:  M_cal = T_SA @ M_cal  (프레임 자체를 맞추는 용도에 보통 더 자연스러움)
-        # - right: M_cal = M_cal @ T_SA  (센서 바디 축 오프셋 같은 "로컬" 보정에 가까움)
+        # --- T_SA 적용: ver5(vr_calibration) 전제는 "right-multiply"
         self.declare_parameter("apply_T_SA", True)
-        self.declare_parameter("T_SA_side", "left")  # "left" or "right"
+        self.declare_parameter("T_SA_side", "right")  # ✅ default RIGHT (ver5와 맞춤)
         self.declare_parameter("debug_print_T_SA", False)
 
-        self.publish_tf = self.get_parameter("publish_tf").value
-        self.base_frame = self.get_parameter("base_frame").value
-        self.child_frame = self.get_parameter("child_frame").value
+        # --- rotvec 연속화 (π 근처 튐 완화)
+        self.declare_parameter("rotvec_continuous", True)
+
+        # --- 출력 좌표계/부호 보정 (물리적으로 가능한 보정만 제공)
+        # none
+        # rot_y_pi_left : world에서 y축으로 180도 회전(= x,z 부호가 뒤집힌 것처럼 보이는 케이스에 대응)
+        # rot_x_pi_left, rot_z_pi_left 도 필요하면 사용
+        # ✅ 네가 쓰던 flip_x_wx_wz 는 alias로 rot_y_pi_left 처리
+        self.declare_parameter("out_fix_mode", "none")
+
+        self.publish_tf = bool(self.get_parameter("publish_tf").value)
+        self.base_frame = str(self.get_parameter("base_frame").value)
+        self.child_frame = str(self.get_parameter("child_frame").value)
 
         self.apply_T_SA = bool(self.get_parameter("apply_T_SA").value)
         self.T_SA_side = str(self.get_parameter("T_SA_side").value).lower()
         self.debug_print_T_SA = bool(self.get_parameter("debug_print_T_SA").value)
+
+        self.rotvec_continuous = bool(self.get_parameter("rotvec_continuous").value)
+
+        self.out_fix_mode = str(self.get_parameter("out_fix_mode").value).lower()
+        if self.out_fix_mode == "flip_x_wx_wz":
+            self.out_fix_mode = "rot_y_pi_left"
 
         self.tf_broadcaster = TransformBroadcaster(self)
         self.timer = self.create_timer(0.01, self.cb_vive_timer)
@@ -196,15 +231,16 @@ class ViveTracker(Node):
             self.get_logger().info("Initializing VR system...")
             self.vr_system = openvr.init(openvr.VRApplication_Other)
             self.get_logger().info("VR system initialized successfully!")
+
             poses = self.vr_system.getDeviceToAbsoluteTrackingPose(
-                openvr.TrackingUniverseStanding,
-                0,
-                openvr.k_unMaxTrackedDeviceCount,
+                openvr.TrackingUniverseStanding, 0, openvr.k_unMaxTrackedDeviceCount
             )
+            _ = poses  # just to trigger
             for i in range(openvr.k_unMaxTrackedDeviceCount):
                 device_class = self.vr_system.getTrackedDeviceClass(i)
                 if device_class != openvr.TrackedDeviceClass_Invalid:
                     self.get_logger().info(f"[vive_tracker_node] Found VR device: (index {i})")
+
         except Exception as e:
             self.get_logger().error(f"Failed to initialize VR system: {e}")
             self.vr_system = None
@@ -213,17 +249,15 @@ class ViveTracker(Node):
     # json calib (service 결과)
     # ------------------------------------------------------------------
     def _init_json_calib(self):
-        share_dir = ament_index_python.packages.get_package_share_directory(
-            "vive_tracker_ros2"
-        )
+        share_dir = ament_index_python.packages.get_package_share_directory("vive_tracker_ros2")
         self.config_dir_install = os.path.join(share_dir, "config")
 
         json_path = os.path.join(self.config_dir_install, "calibration_matrix.json")
         if os.path.exists(json_path):
             with open(json_path, "r") as f:
                 data = json.load(f)
-            self.T_tool_opt = np.array(data["T_tool_opt"], dtype=np.float64)
-            self.T_trans_opt = np.array(data["T_trans_opt"], dtype=np.float64)
+            self.T_tool_opt = np.array(data.get("T_tool_opt", np.eye(4)), dtype=np.float64)
+            self.T_trans_opt = np.array(data.get("T_trans_opt", np.eye(4)), dtype=np.float64)
         else:
             self.T_tool_opt = np.eye(4, dtype=np.float64)
             self.T_trans_opt = np.eye(4, dtype=np.float64)
@@ -233,7 +267,6 @@ class ViveTracker(Node):
     # ------------------------------------------------------------------
     @staticmethod
     def _to_T44(mat_like):
-        """Accept 4x4 or 3x3. Convert to 4x4 homogeneous. Return None if invalid."""
         if mat_like is None:
             return None
         M = np.array(mat_like, dtype=np.float64)
@@ -246,27 +279,45 @@ class ViveTracker(Node):
         return None
 
     @staticmethod
-    def _is_valid_T(T: np.ndarray) -> bool:
+    def _is_valid_T(T: Optional[np.ndarray]) -> bool:
         if T is None or T.shape != (4, 4):
             return False
         if not np.all(np.isfinite(T)):
             return False
-        # 마지막 행은 [0 0 0 1] 근처인지 체크(너무 엄격하게 하진 않음)
         if np.linalg.norm(T[3, :] - np.array([0, 0, 0, 1], dtype=np.float64)) > 1e-3:
             return False
         return True
 
+    def _fix_left_matrix(self) -> np.ndarray:
+        """
+        out_fix_mode에 따라 M_cal에 '좌곱'으로 들어가는 보정행렬 반환.
+        (물리적으로 가능한 회전만 제공)
+        """
+        if self.out_fix_mode in ["none", "", "off"]:
+            return np.eye(4, dtype=np.float64)
+
+        R = np.eye(3, dtype=np.float64)
+        if self.out_fix_mode == "rot_y_pi_left":
+            R = rot_y(math.pi)
+        elif self.out_fix_mode == "rot_x_pi_left":
+            R = rot_x(math.pi)
+        elif self.out_fix_mode == "rot_z_pi_left":
+            R = rot_z(math.pi)
+        else:
+            self.get_logger().warn(f"[out_fix_mode] unknown '{self.out_fix_mode}', using none")
+            R = np.eye(3, dtype=np.float64)
+
+        F = np.eye(4, dtype=np.float64)
+        F[:3, :3] = R
+        return F
+
     # ------------------------------------------------------------------
-    # ros1-style yaml calib
+    # yaml calib
     # ------------------------------------------------------------------
     def _init_yaml_calib(self):
-        src_yaml = os.path.join(
-            os.path.expanduser("~/nrs_ws/src/vive_tracker_ros2/yaml"),
-            "calibration_matrix.yaml",
-        )
-        share_dir = ament_index_python.packages.get_package_share_directory(
-            "vive_tracker_ros2"
-        )
+        src_yaml = os.path.join(os.path.expanduser("~/nrs_ws/src/vive_tracker_ros2/yaml"),
+                                "calibration_matrix.yaml")
+        share_dir = ament_index_python.packages.get_package_share_directory("vive_tracker_ros2")
         install_yaml = os.path.join(share_dir, "yaml", "calibration_matrix.yaml")
 
         yaml_path = src_yaml if os.path.exists(src_yaml) else install_yaml
@@ -274,37 +325,43 @@ class ViveTracker(Node):
 
         import yaml
         with open(yaml_path, "r") as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
 
         self.T_AD = np.array(data.get("T_AD", np.eye(4)), dtype=np.float64)
         self.T_BC = np.array(data.get("T_BC", np.eye(4)), dtype=np.float64)
         self.T_CE = np.array(data.get("T_CE", np.eye(4)), dtype=np.float64)
         self.R_Adj = np.array(data.get("R_Adj", np.eye(3)), dtype=np.float64)
 
-        # ROS1 순서: T_Adj = R_Adj.T
+        # ROS1 순서 호환: T_Adj = R_Adj.T
         self.T_Adj = np.eye(4, dtype=np.float64)
-        R_adj_full = rot_z(0.0) @ rot_x(0.0) @ self.R_Adj.T
-        self.T_Adj[:3, :3] = R_adj_full
+        self.T_Adj[:3, :3] = self.R_Adj.T
 
-        # ✅ T_SA: YAML에 있으면 우선, 없으면 DEFAULT
+        # T_SA: YAML 우선, 없으면 DEFAULT
         T_SA_loaded = self._to_T44(data.get("T_SA", None))
         if self._is_valid_T(T_SA_loaded):
             self.T_SA = T_SA_loaded
             self.get_logger().info("[vive_tracker_node] T_SA loaded from yaml.")
         else:
             self.T_SA = DEFAULT_T_SA.copy()
-            self.get_logger().warn("[vive_tracker_node] T_SA not found/invalid in yaml. Using DEFAULT_T_SA.")
+            self.get_logger().warn("[vive_tracker_node] T_SA not found/invalid in yaml. Using Identity.")
 
+        # out_fix 좌곱 행렬
+        self.T_FIX_LEFT = self._fix_left_matrix()
+
+        self.get_logger().info(
+            f"[vive_tracker_node] apply_T_SA={self.apply_T_SA}, T_SA_side={self.T_SA_side}, "
+            f"rotvec_continuous={self.rotvec_continuous}, out_fix_mode={self.out_fix_mode}"
+        )
         if self.debug_print_T_SA:
-            self.get_logger().info(f"T_SA_side={self.T_SA_side}, apply_T_SA={self.apply_T_SA}")
             self.get_logger().info("T_SA=\n" + np.array2string(self.T_SA, precision=6, suppress_small=True))
+            self.get_logger().info("T_FIX_LEFT=\n" + np.array2string(self.T_FIX_LEFT, precision=6, suppress_small=True))
 
     # ------------------------------------------------------------------
     # service
     # ------------------------------------------------------------------
     def cb_calibrate(self, request, response):
-        robot_matrices = [pose_to_matrix(pose) for pose in request.robot_poses]
-        tracker_matrices = [pose_to_matrix(pose) for pose in request.tracker_poses]
+        robot_matrices = [pose_to_matrix(p) for p in request.robot_poses]
+        tracker_matrices = [pose_to_matrix(p) for p in request.tracker_poses]
 
         if len(robot_matrices) != len(tracker_matrices):
             self.get_logger().error("robot pose count != tracker pose count")
@@ -312,9 +369,7 @@ class ViveTracker(Node):
             return response
 
         try:
-            self.T_tool_opt, self.T_trans_opt = calculate_calibration_matrix(
-                robot_matrices, tracker_matrices
-            )
+            self.T_tool_opt, self.T_trans_opt = calculate_calibration_matrix(robot_matrices, tracker_matrices)
         except Exception as e:
             self.get_logger().error(f"calibration failed: {e}")
             response.success = False
@@ -322,71 +377,67 @@ class ViveTracker(Node):
 
         os.makedirs(self.config_dir_install, exist_ok=True)
         with open(os.path.join(self.config_dir_install, "calibration_matrix.json"), "w") as f:
-            json.dump(
-                {
-                    "T_tool_opt": self.T_tool_opt.tolist(),
-                    "T_trans_opt": self.T_trans_opt.tolist(),
-                },
-                f,
-                indent=4,
-            )
+            json.dump({"T_tool_opt": self.T_tool_opt.tolist(),
+                       "T_trans_opt": self.T_trans_opt.tolist()}, f, indent=4)
 
         response.success = True
         return response
 
     # ------------------------------------------------------------------
-    # tracker pose update
+    # trackers update
     # ------------------------------------------------------------------
-    def _update_trackers_from_vr(self):
+    def _update_trackers_from_vr(self) -> List[str]:
         if self.vr_system is None:
             return []
 
         poses = self.vr_system.getDeviceToAbsoluteTrackingPose(
-            openvr.TrackingUniverseStanding,
-            0,
-            openvr.k_unMaxTrackedDeviceCount,
+            openvr.TrackingUniverseStanding, 0, openvr.k_unMaxTrackedDeviceCount
         )
-        current_ids = []
 
+        current_ids: List[str] = []
         for i in range(openvr.k_unMaxTrackedDeviceCount):
             device_class = self.vr_system.getTrackedDeviceClass(i)
-            if device_class == openvr.TrackedDeviceClass_GenericTracker:
-                pose = poses[i]
-                if not (pose.bDeviceIsConnected and pose.bPoseIsValid):
-                    continue
-                try:
-                    serial = self.vr_system.getStringTrackedDeviceProperty(
-                        i, openvr.Prop_SerialNumber_String
-                    )
-                except Exception:
-                    serial = f"tracker_{i}"
+            if device_class != openvr.TrackedDeviceClass_GenericTracker:
+                continue
 
-                safe_serial = re.sub(r"[^a-zA-Z0-9_]", "_", serial)
+            pose = poses[i]
+            if not (pose.bDeviceIsConnected and pose.bPoseIsValid):
+                continue
 
-                if serial not in self.trackers:
-                    raw_topic = f"vive_tracker_ros/{safe_serial}/raw_pose"
-                    cali_topic = f"vive_tracker_ros/{safe_serial}/calibrated_pose"
-                    child_frame = f"{self.child_frame}_{safe_serial}"
-                    self.trackers[serial] = {
-                        "device_index": i,
-                        "child_frame": child_frame,
-                        "publisher_raw": self.create_publisher(Odometry, raw_topic, 10),
-                        "publisher_calibrated": self.create_publisher(Odometry, cali_topic, 10),
-                        "prev_raw_matrix": np.eye(4, dtype=np.float64),
-                        "prev_calibrated_matrix": np.eye(4, dtype=np.float64),
-                    }
-                    self.get_logger().info(f"새 트래커 발견: {serial}")
+            try:
+                serial = self.vr_system.getStringTrackedDeviceProperty(i, openvr.Prop_SerialNumber_String)
+            except Exception:
+                serial = f"tracker_{i}"
 
-                raw_pose_matrix = openvr_pose_to_np44(pose)
-                self.trackers[serial]["raw_pose_matrix"] = raw_pose_matrix
-                current_ids.append(serial)
+            safe_serial = re.sub(r"[^a-zA-Z0-9_]", "_", serial)
+
+            if serial not in self.trackers:
+                raw_topic = f"vive_tracker_ros/{safe_serial}/raw_pose"
+                cali_topic = f"vive_tracker_ros/{safe_serial}/calibrated_pose"
+                child_frame = f"{self.child_frame}_{safe_serial}"
+
+                self.trackers[serial] = {
+                    "device_index": i,
+                    "child_frame": child_frame,
+                    "publisher_raw": self.create_publisher(Odometry, raw_topic, 10),
+                    "publisher_calibrated": self.create_publisher(Odometry, cali_topic, 10),
+                    "prev_raw_matrix": np.eye(4, dtype=np.float64),
+                    "prev_calibrated_matrix": np.eye(4, dtype=np.float64),
+                    "prev_rotvec": None,     # 연속 rotvec용
+                    "prev_quat_wxyz": None,  # 연속 quat sign용
+                }
+                self.get_logger().info(f"새 트래커 발견: {serial}")
+
+            raw_pose_matrix = openvr_pose_to_np44(pose)
+            self.trackers[serial]["raw_pose_matrix"] = raw_pose_matrix
+            current_ids.append(serial)
 
         return current_ids
 
     # ------------------------------------------------------------------
-    # timer
+    # message helpers
     # ------------------------------------------------------------------
-    def create_vive_msg(self, pose: Pose, twist: Twist, frame_id="world"):
+    def create_vive_msg(self, pose: Pose, twist: Twist, frame_id="world") -> Odometry:
         msg = Odometry()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = frame_id
@@ -405,17 +456,19 @@ class ViveTracker(Node):
         if not self.apply_T_SA:
             return M_cal
 
-        if self.T_SA_side == "right":
-            # 로컬(바디) 축 오프셋 느낌
-            return M_cal @ self.T_SA
+        # ✅ ver5(vr_calibration) 전제 = right-multiply
+        if self.T_SA_side == "left":
+            return self.T_SA @ M_cal
+        return M_cal @ self.T_SA
 
-        # 기본: left
-        # 프레임 align 목적(네가 말한 "spatial angle frame 맞추기")에는 보통 이게 더 자연스러움
-        return self.T_SA @ M_cal
-
+    # ------------------------------------------------------------------
+    # main timer
+    # ------------------------------------------------------------------
     def cb_vive_timer(self):
         now = self.get_clock().now()
         dt = (now - self.prev_time).nanoseconds / 1e9
+        if dt <= 1e-6:
+            dt = 1e-3
 
         current_ids = self._update_trackers_from_vr()
         if not current_ids:
@@ -426,9 +479,12 @@ class ViveTracker(Node):
             tdata = self.trackers[serial]
             raw_M = tdata["raw_pose_matrix"]
 
-            # base chain (ROS1 순서)
+            # base chain (ROS1 순서 유지)
             M_adj = self.T_Adj @ raw_M
             M_cal = self.T_AD @ M_adj @ self.T_CE
+
+            # ✅ out_fix: 좌곱(월드 프레임에서 180도 회전 등)
+            M_cal = self.T_FIX_LEFT @ M_cal
 
             # ✅ spatial-angle alignment
             M_cal = self._apply_T_SA_to_M_cal(M_cal)
@@ -440,7 +496,7 @@ class ViveTracker(Node):
             raw_twist = matrix_to_twist(raw_M, tdata["prev_raw_matrix"], dt)
             cal_twist = matrix_to_twist(M_cal, tdata["prev_calibrated_matrix"], dt)
 
-            # Odometry publish (tracker별)
+            # tracker별 odom publish
             tdata["publisher_raw"].publish(self.create_vive_msg(raw_pose, raw_twist))
             tdata["publisher_calibrated"].publish(self.create_vive_msg(cal_pose, cal_twist))
 
@@ -450,7 +506,21 @@ class ViveTracker(Node):
             pz = float(M_cal[2, 3])
 
             Rm = M_cal[:3, :3]
-            wvec = rotmat_to_rotvec(Rm)  # (rad) rotation vector
+
+            # --- rotvec (연속 옵션) ---
+            if self.rotvec_continuous:
+                q = rotmat_to_quat(Rm)  # [w,x,y,z]
+                q_prev = tdata["prev_quat_wxyz"]
+                if q_prev is not None and float(np.dot(q_prev, q)) < 0.0:
+                    q = -q  # quaternion sign continuity
+                w_prev = tdata["prev_rotvec"]
+                wvec = quat_to_rotvec_cont(q, w_prev)
+                tdata["prev_quat_wxyz"] = q
+                tdata["prev_rotvec"] = wvec
+            else:
+                # fallback: 비연속(권장X)
+                q = rotmat_to_quat(Rm)
+                wvec = quat_to_rotvec_cont(q, None)
 
             arr = Float64MultiArray()
             arr.data = [px, py, pz, float(wvec[0]), float(wvec[1]), float(wvec[2])]
@@ -478,13 +548,9 @@ class ViveTracker(Node):
         raw_pose = matrix_to_pose(first["raw_pose_matrix"])
         raw_twist = matrix_to_twist(first["raw_pose_matrix"], first["prev_raw_matrix"], dt)
 
-        # /raw_pose (PoseStamped)
         self.raw_pose_pub_pose.publish(self.create_pose_stamped(raw_pose, frame_id="world"))
-
-        # 기존 Odometry 호환 publish 유지
         self.raw_pose_pub.publish(self.create_vive_msg(raw_pose, raw_twist))
 
-        # calibrated odom 호환 publish 유지
         cal_pose = matrix_to_pose(first["prev_calibrated_matrix"])
         cal_twist = matrix_to_twist(first["prev_calibrated_matrix"], first["prev_calibrated_matrix"], dt)
         self.calibrated_pose_pub_odom.publish(self.create_vive_msg(cal_pose, cal_twist))
