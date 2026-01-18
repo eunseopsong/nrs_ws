@@ -32,6 +32,8 @@ setup(
             'act_policy_infer = nrs_imitation.act_policy_infer:main',
             'vr_demo_recorder = nrs_imitation.vr_demo_recorder:main',
             'vr_demo_txt_recorder = nrs_imitation.vr_demo_txt_recorder:main',
+            'vr_demo_hdf5_recorder= nrs_imitation.vr_demo_hdf5_recorder:main',
+            'vr_demo_hdf5_episode_pusher = nrs_imitation.vr_demo_hdf5_episode_pusher:main',
         ],
     },
 )
