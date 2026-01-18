@@ -2,6 +2,23 @@
 #include <cmath>
 #include <iostream>
 
+// [ADDED]
+#include <thread>
+#include <mutex>
+#include <atomic>
+
+namespace
+{
+// FT 데이터 공유 보호용 (단일 노드 전제)
+std::mutex g_ft_mtx;
+
+// 안전 가드
+inline double clamp_positive(double v, double fallback)
+{
+  return (std::isfinite(v) && v > 1e-9) ? v : fallback;
+}
+} // namespace
+
 FT_processing::FT_processing(std::shared_ptr<rclcpp::Node> node,
                              double Ts,
                              unsigned char& HandleID_,
@@ -287,7 +304,12 @@ bool FT_processing::SRV5_Handle(
   const std::shared_ptr<std_srvs::srv::Empty::Request> /*req*/,
   const std::shared_ptr<std_srvs::srv::Empty::Response> /*res*/)
 {
-  sensor_init_counter = 0;
+  // [CHANGED] 수신 스레드와 경쟁 방지
+  {
+    std::lock_guard<std::mutex> lk(g_ft_mtx);
+    sensor_init_counter = 0;
+  }
+
   aidinGui_stateMsg.data = "Sensor was initialized";
   aidinGui_statePub->publish(aidinGui_stateMsg);
   return true;
@@ -295,36 +317,166 @@ bool FT_processing::SRV5_Handle(
 
 void FT_processing::FT_run()
 {
-  double init_sec = 5;
-  FT_init((int)(init_sec / Ts_));
+  // ------------------------------------------------------------
+  // 목표:
+  //  - 센서 수신/필터링: 1/Ts_  (Ts_=0.002면 500Hz)
+  //  - publish 루프:     1/Publish_sampling (기본 0.008 -> 125Hz)
+  //
+  // 사용법(YAML):
+  //  - Sensor_sampling: 0.002    # 센서/필터 dt (500Hz)
+  //  - Publish_sampling: 0.008   # publish 주기 (125Hz)
+  // ------------------------------------------------------------
+
+  // 센서 수신 주기(필터 dt): Ts_
+  const double Ts_sensor = clamp_positive(Ts_, 0.002);
+
+  // publish 주기: 별도 파라미터로 분리
+  double Ts_pub = 0.008; // default 125Hz
+  (void)node_->get_parameter("Publish_sampling", Ts_pub);
+  Ts_pub = clamp_positive(Ts_pub, 0.008);
+
+  RCLCPP_INFO(node_->get_logger(),
+              "[FT_run] sensor dt=%.6f (%.1f Hz), publish dt=%.6f (%.1f Hz)",
+              Ts_sensor, 1.0 / Ts_sensor, Ts_pub, 1.0 / Ts_pub);
+
+  double init_sec = 5.0;
+  FT_init(static_cast<int>(init_sec / Ts_sensor));
   std::cout << "Sensor was initialized" << std::endl;
 
-  rclcpp::WallRate loop_rate(1.0 / Ts_);
+  std::atomic<bool> stop_rx(false);
+
+  // -----------------------------
+  // (1) RX thread @ sensor rate
+  // -----------------------------
+  std::thread rx_thread([&]() {
+    rclcpp::WallRate rx_rate(1.0 / Ts_sensor);
+
+    while (rclcpp::ok() && !stop_rx.load())
+    {
+      // TCP_start()가 블로킹이어도, publish 루프는 영향 안 받게 분리함.
+      if (TCP_start() != 0)
+      {
+        std::lock_guard<std::mutex> lk(g_ft_mtx);
+
+        // 새 프레임 들어왔을 때만 init/filter 진행
+        if (Sensor_value_init())
+        {
+          FT_filtering();
+        }
+      }
+
+      // 수신 시도 주기 유지 (논블로킹이면 500Hz로 polling)
+      rx_rate.sleep();
+    }
+  });
+
+  // -----------------------------
+  // (2) Publish loop @ 125Hz
+  // -----------------------------
+  rclcpp::WallRate pub_rate(1.0 / Ts_pub);
 
   while (rclcpp::ok())
   {
-    bool got_new_frame = false;
+    // 스냅샷 복사 (락을 짧게)
+    bool init_done = false;
 
-    // 1) 소켓에서 데이터가 오면 그때만 값을 갱신
-    if (TCP_start() != 0)
+    double F[3], M[3], CF[3], CM[3];
+    double CPosAcc[3], CAngAcc[3], CAngVel[3];
+
     {
-      got_new_frame = true;
-      if (Sensor_value_init())
+      std::lock_guard<std::mutex> lk(g_ft_mtx);
+
+      // 초기화 완료 판단: sensor_init_counter가 init_average_num 이상이면 완료로 간주
+      init_done = (sensor_init_counter >= init_average_num);
+
+      if (init_done)
       {
-        FT_filtering();
+        for (int i = 0; i < 3; i++)
+        {
+          F[i]  = Force_val[i];
+          M[i]  = Moment_val[i];
+          CF[i] = Contact_Force_val[i];
+          CM[i] = Contact_Moment_val[i];
+
+          CPosAcc[i] = CPos_acc_val[i];
+          CAngAcc[i] = CAng_acc_val[i];
+          CAngVel[i] = CAng_vel_val[i];
+        }
       }
     }
 
-    // 2) 데이터가 안 와도 publish/print는 매 주기마다 한다
-    //    (단, 초기화가 끝난 상태일 때만)
-    if (Sensor_value_init())
+    // 초기화 완료 이후에만 publish/print/record
+    if (init_done)
     {
-      FT_publish();
-      FT_print();
-      FT_record();
+      // --- publish (snapshot 사용) ---
+      geometry_msgs::msg::Wrench hw, cw;
+      hw.force.x  = F[0];  hw.force.y  = F[1];  hw.force.z  = F[2];
+      hw.torque.x = M[0];  hw.torque.y = M[1];  hw.torque.z = M[2];
+      ftsensor_pub_->publish(hw);
+
+      cw.force.x  = CF[0]; cw.force.y  = CF[1]; cw.force.z  = CF[2];
+      cw.torque.x = CM[0]; cw.torque.y = CM[1]; cw.torque.z = CM[2];
+      Cftsensor_pub_->publish(cw);
+
+      geometry_msgs::msg::Vector3 force_msg;
+      force_msg.x = CF[0];
+      force_msg.y = CF[1];
+      force_msg.z = CF[2];
+      vive_force_pub_->publish(force_msg);
+
+      geometry_msgs::msg::Vector3 moment_msg;
+      moment_msg.x = CM[0];
+      moment_msg.y = CM[1];
+      moment_msg.z = CM[2];
+      vive_moment_pub_->publish(moment_msg);
+
+      std_msgs::msg::Float64MultiArray acc_msg;
+      acc_msg.data.reserve(9);
+      acc_msg.data.push_back(CPosAcc[0]);
+      acc_msg.data.push_back(CPosAcc[1]);
+      acc_msg.data.push_back(CPosAcc[2]);
+      acc_msg.data.push_back(CAngAcc[0]);
+      acc_msg.data.push_back(CAngAcc[1]);
+      acc_msg.data.push_back(CAngAcc[2]);
+      acc_msg.data.push_back(CAngVel[0]);
+      acc_msg.data.push_back(CAngVel[1]);
+      acc_msg.data.push_back(CAngVel[2]);
+      vive_acc_pub_->publish(acc_msg);
+
+      // --- print (snapshot 사용) ---
+      if (YamlPrint_switch == 1)
+      {
+        printf("Fx:%10f, Fy:%10f, Fz:%10f \n", F[0], F[1], F[2]);
+        printf("Mx:%10f, My:%10f, Mz:%10f \n", M[0], M[1], M[2]);
+        printf("CFx:%10f, CFy:%10f, CFz:%10f \n", CF[0], CF[1], CF[2]);
+        printf("CMx:%10f, CMy:%10f, CMz:%10f \n", CM[0], CM[1], CM[2]);
+        printf("--------------------------------------------------\n");
+      }
+
+      // --- record (snapshot 사용) ---
+      if (YamlData1_switch == 1)
+      {
+        if (Data1_txt != NULL)
+        {
+          fprintf(Data1_txt, "%10f %10f %10f %10f %10f %10f\n",
+                  F[0], F[1], F[2],
+                  M[0], M[1], M[2]);
+        }
+        else
+        {
+          RCLCPP_ERROR(node_->get_logger(), "Data1 does not open : warning !!");
+        }
+      }
     }
 
     rclcpp::spin_some(node_);
-    loop_rate.sleep();
+    pub_rate.sleep();
+  }
+
+  // 종료 처리
+  stop_rx.store(true);
+  if (rx_thread.joinable())
+  {
+    rx_thread.join();
   }
 }
