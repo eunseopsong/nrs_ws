@@ -4,12 +4,18 @@
 #
 # - A PC에서 실행 (데이터 수집, 필터링, 로컬 저장)
 # - 저장 완료 후 B PC(제어용)로 파일 자동 전송 (SCP)
+#
+# Requested changes:
+# 1) Force filtering: keep as-is (Whittaker + EMA + window + clamp ...)
+# 2) Pose(x y z wx wy wz): use moving average (window=50),
+#    but keep start/end exactly same as before filtering.
+# 3) Increase number of rows by 4x (via linear upsampling).
 # ============================================================
 
 import os
 import threading
 import numpy as np
-import subprocess  # <--- [추가됨] 파일 전송을 위해 필요
+import subprocess
 
 import rclpy
 from rclpy.node import Node
@@ -18,7 +24,7 @@ from geometry_msgs.msg import Wrench
 
 
 # ---------------------------
-# Smooth utilities (fast, no scipy)
+# Smooth utilities (fast, no scipy)  [FOR FORCE: keep as-is]
 # ---------------------------
 def _apply_DTD(x: np.ndarray) -> np.ndarray:
     n = x.shape[0]
@@ -68,8 +74,10 @@ def whittaker_smooth_1d(y: np.ndarray, lam: float, cg_tol=1e-10, cg_max_iter=200
     n = y.shape[0]
     if n < 3 or lam <= 0.0:
         return y.copy()
+
     def apply_A(x):
         return x + lam * _apply_DTD(x)
+
     x0 = y.copy()
     x = _cg_solve(apply_A, y, x0=x0, tol=cg_tol, max_iter=cg_max_iter)
     return x
@@ -81,20 +89,17 @@ def ema_filtfilt_1d(y: np.ndarray, alpha: float) -> np.ndarray:
     if n == 0 or alpha >= 1.0:
         return y.copy()
     alpha = float(np.clip(alpha, 1e-6, 1.0))
+
     out = np.empty_like(y)
     out[0] = y[0]
     for i in range(1, n):
         out[i] = alpha * y[i] + (1.0 - alpha) * out[i - 1]
+
     out2 = np.empty_like(y)
     out2[-1] = out[-1]
     for i in range(n - 2, -1, -1):
         out2[i] = alpha * out[i] + (1.0 - alpha) * out2[i + 1]
     return out2
-
-
-def smoothstep01(t: np.ndarray) -> np.ndarray:
-    t = np.clip(t, 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
 
 
 def unwrap_angle_series(a: np.ndarray, discont=np.pi) -> np.ndarray:
@@ -114,6 +119,11 @@ def upsample_linear(data: np.ndarray, factor: int) -> np.ndarray:
     for j in range(d):
         out[:, j] = np.interp(t_new, t, data[:, j])
     return out
+
+
+def smoothstep01(t: np.ndarray) -> np.ndarray:
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
 
 
 def end_ramp_match(x: np.ndarray, target_end: float) -> np.ndarray:
@@ -155,6 +165,48 @@ def apply_edge_force_window(force: np.ndarray, playback_hz: float, edge_zero_sec
 
 
 # ---------------------------
+# Pose filter utilities (NEW)
+# ---------------------------
+def moving_average_1d_edge_preserve(y: np.ndarray, win: int) -> np.ndarray:
+    """
+    Centered moving average with edge padding ('edge'),
+    then explicitly enforce y[0], y[-1] to original values.
+    """
+    y = y.astype(np.float64, copy=False)
+    n = y.shape[0]
+    if n == 0:
+        return y.copy()
+    if win <= 1 or n < 3:
+        out = y.copy()
+        out[0] = y[0]
+        out[-1] = y[-1]
+        return out
+
+    win = int(win)
+    if win % 2 == 0:
+        # make it odd to be symmetric
+        win += 1
+
+    half = win // 2
+    # pad with edge values
+    ypad = np.pad(y, (half, half), mode='edge')
+    kernel = np.ones(win, dtype=np.float64) / float(win)
+    out = np.convolve(ypad, kernel, mode='valid')
+
+    # preserve endpoints exactly
+    out[0] = y[0]
+    out[-1] = y[-1]
+    return out
+
+
+def moving_average_pose_edge_preserve(pose: np.ndarray, win: int) -> np.ndarray:
+    out = pose.copy().astype(np.float64)
+    for j in range(out.shape[1]):
+        out[:, j] = moving_average_1d_edge_preserve(out[:, j], win)
+    return out
+
+
+# ---------------------------
 # ROS2 Node
 # ---------------------------
 class VRDemoTXTRecorder(Node):
@@ -162,7 +214,6 @@ class VRDemoTXTRecorder(Node):
         super().__init__('vr_demo_txt_recorder')
 
         # ===== parameters =====
-        # A PC의 로컬 저장 경로 (여기서 먼저 저장됨)
         self.declare_parameter('save_dir', '/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd')
         self.declare_parameter('file_name', 'cmd_continue9D.txt')
 
@@ -175,18 +226,16 @@ class VRDemoTXTRecorder(Node):
         self.declare_parameter('start_force_th', 10.0)
         self.declare_parameter('end_force_th', 10.0)
 
-        self.declare_parameter('upsample_factor', 8)
+        # ===== requested behavior =====
+        self.declare_parameter('pose_ma_window', 50)     # moving average window for pose
+        self.declare_parameter('pose_upsample_factor', 4)  # increase rows by 4x
+
+        # ===== existing params (FOR FORCE keep as-is) =====
         self.declare_parameter('omega_unwrap', True)
 
-        self.declare_parameter('lam_pose', 3000.0)
-        self.declare_parameter('lam_omega', 8000.0)
         self.declare_parameter('lam_force', 3000.0)
-
         self.declare_parameter('cg_tol', 1e-10)
         self.declare_parameter('cg_max_iter', 250)
-
-        self.declare_parameter('ema_alpha_pose', 0.12)
-        self.declare_parameter('ema_alpha_omega', 0.10)
         self.declare_parameter('ema_alpha_force', 0.18)
 
         self.declare_parameter('force_xy_zero', True)
@@ -210,21 +259,23 @@ class VRDemoTXTRecorder(Node):
         self.playback_hz = float(self.get_parameter('playback_hz').value)
         self.start_force_th = float(self.get_parameter('start_force_th').value)
         self.end_force_th = float(self.get_parameter('end_force_th').value)
-        self.upsample_factor = int(self.get_parameter('upsample_factor').value)
+
+        self.pose_ma_window = int(self.get_parameter('pose_ma_window').value)
+        self.pose_upsample_factor = int(self.get_parameter('pose_upsample_factor').value)
+
         self.omega_unwrap = bool(self.get_parameter('omega_unwrap').value)
-        self.lam_pose = float(self.get_parameter('lam_pose').value)
-        self.lam_omega = float(self.get_parameter('lam_omega').value)
+
         self.lam_force = float(self.get_parameter('lam_force').value)
         self.cg_tol = float(self.get_parameter('cg_tol').value)
         self.cg_max_iter = int(self.get_parameter('cg_max_iter').value)
-        self.ema_alpha_pose = float(self.get_parameter('ema_alpha_pose').value)
-        self.ema_alpha_omega = float(self.get_parameter('ema_alpha_omega').value)
         self.ema_alpha_force = float(self.get_parameter('ema_alpha_force').value)
+
         self.force_xy_zero = bool(self.get_parameter('force_xy_zero').value)
         self.fz_min = float(self.get_parameter('fz_min').value)
         self.fz_max = float(self.get_parameter('fz_max').value)
         self.edge_force_zero_sec = float(self.get_parameter('edge_force_zero_sec').value)
         self.edge_force_fade_sec = float(self.get_parameter('edge_force_fade_sec').value)
+
         self.plot_enable = bool(self.get_parameter('plot_enable').value)
         self.plot_show = bool(self.get_parameter('plot_show').value)
         self.plot_prefix = str(self.get_parameter('plot_prefix').value)
@@ -237,6 +288,7 @@ class VRDemoTXTRecorder(Node):
             base = os.path.splitext(self.file_name)[0]
             self.plot_prefix = base
 
+        # buffers
         self.lock = threading.Lock()
         self.recording = False
         self.episode_done = False
@@ -246,6 +298,7 @@ class VRDemoTXTRecorder(Node):
         self.ft_received = False
         self.buffer = []
 
+        # subs
         self.create_subscription(Float64MultiArray, self.pose_topic, self.pose_callback, 10)
         self.create_subscription(Wrench, self.ft_topic, self.ft_callback, 10)
 
@@ -254,6 +307,9 @@ class VRDemoTXTRecorder(Node):
         self.timer = self.create_timer(1.0 / self.record_hz, self.main_loop)
 
         self.get_logger().info(f"Initialized. Local save path: {self.file_path}")
+        self.get_logger().info(
+            f"Pose filter: moving-average window={self.pose_ma_window}, upsample x{self.pose_upsample_factor}"
+        )
 
     # ---------------------------
     # callbacks
@@ -263,6 +319,7 @@ class VRDemoTXTRecorder(Node):
             return
         with self.lock:
             x_m, y_m, z_m, wx, wy, wz = msg.data[:6]
+            # meters -> mm
             x = float(x_m) * 1000.0
             y = float(y_m) * 1000.0
             z = float(z_m) * 1000.0
@@ -276,7 +333,7 @@ class VRDemoTXTRecorder(Node):
         with self.lock:
             self.latest_ft = np.array([fx, fy, fz], dtype=np.float64)
             self.ft_received = True
-        
+
         if self.episode_done:
             return
 
@@ -312,57 +369,60 @@ class VRDemoTXTRecorder(Node):
             self.episode_done = True
         self.get_logger().info("=== EPISODE ENDED ===")
         try:
-            self.save_txt_filtered_super_smooth()
+            self.save_txt_filtered()
         except Exception as e:
             self.get_logger().error(f"save failed: {e}")
-        
+
         self.get_logger().info("Shutting down.")
         rclpy.shutdown()
 
     # ---------------------------
-    # filtering / saving / SENDING
+    # filtering / saving / sending
     # ---------------------------
-    def save_txt_filtered_super_smooth(self):
+    def save_txt_filtered(self):
         if len(self.buffer) == 0:
             self.get_logger().warn("No data to save.")
             return
 
         raw = np.vstack(self.buffer).astype(np.float64)
-        n_raw = raw.shape[0]
-
         pose_raw = raw[:, 0:6].copy()
         force_raw = raw[:, 6:9].copy()
 
+        # unwrap omega BEFORE any interpolation/filtering (same idea as before)
         if self.omega_unwrap:
             for k in range(3, 6):
                 pose_raw[:, k] = unwrap_angle_series(pose_raw[:, k], discont=np.pi)
 
-        factor = max(1, int(self.upsample_factor))
-        pose_up = upsample_linear(pose_raw, factor)
-        force_up = upsample_linear(force_raw, factor)
-        n_out = pose_up.shape[0]
+        # -------------------------
+        # (A) Pose: upsample x4 then moving average window=50
+        #     and preserve endpoints (start/end exactly match original)
+        # -------------------------
+        pose_factor = max(1, int(self.pose_upsample_factor))
+        pose_up = upsample_linear(pose_raw, pose_factor)
 
-        pose_f = pose_up.copy()
+        # moving average on upsampled pose
+        win = max(1, int(self.pose_ma_window))
+        pose_f = moving_average_pose_edge_preserve(pose_up, win)
+
+        # enforce endpoints exactly to ORIGINAL raw endpoints (important!)
+        pose_f[0, :] = pose_raw[0, :]
+        pose_f[-1, :] = pose_raw[-1, :]
+
+        # -------------------------
+        # (B) Force: keep filtering as-is
+        #     BUT we need same length as pose_f (after upsample)
+        #     -> upsample force with same factor
+        # -------------------------
+        force_up = upsample_linear(force_raw, pose_factor)
         force_f = force_up.copy()
 
-        for j in range(3):
-            pose_f[:, j] = whittaker_smooth_1d(pose_f[:, j], self.lam_pose, self.cg_tol, self.cg_max_iter)
-        for j in range(3, 6):
-            pose_f[:, j] = whittaker_smooth_1d(pose_f[:, j], self.lam_omega, self.cg_tol, self.cg_max_iter)
+        # Whittaker + EMA for force (same as before)
         for j in range(3):
             force_f[:, j] = whittaker_smooth_1d(force_f[:, j], self.lam_force, self.cg_tol, self.cg_max_iter)
-
-        for j in range(3):
-            pose_f[:, j] = ema_filtfilt_1d(pose_f[:, j], self.ema_alpha_pose)
-        for j in range(3, 6):
-            pose_f[:, j] = ema_filtfilt_1d(pose_f[:, j], self.ema_alpha_omega)
         for j in range(3):
             force_f[:, j] = ema_filtfilt_1d(force_f[:, j], self.ema_alpha_force)
 
-        for j in range(6):
-            pose_f[:, j] = end_ramp_match(pose_f[:, j], pose_raw[-1, j])
-            pose_f[0, j] = pose_raw[0, j]
-
+        # force_xy_zero, fz clamp, edge window (same as before)
         if self.force_xy_zero:
             force_f[:, 0] = 0.0
             force_f[:, 1] = 0.0
@@ -370,34 +430,31 @@ class VRDemoTXTRecorder(Node):
         force_f[:, 2] = np.clip(force_f[:, 2], self.fz_min, self.fz_max)
 
         force_f = apply_edge_force_window(
-            force_f, playback_hz=self.playback_hz,
+            force_f,
+            playback_hz=self.playback_hz,
             edge_zero_sec=self.edge_force_zero_sec,
             fade_sec=self.edge_force_fade_sec
         )
         force_f[:, 2] = np.clip(force_f[:, 2], self.fz_min, self.fz_max)
 
+        # final
         out = np.hstack([pose_f, force_f]).astype(np.float64)
 
-        # 1. 로컬 저장 (A PC)
+        # 1) local save
         np.savetxt(self.file_path, out, fmt="%.10f")
-        self.get_logger().info(f"Saved local file: {self.file_path}")
+        self.get_logger().info(f"Saved local file: {self.file_path}  (raw={raw.shape[0]} -> out={out.shape[0]})")
 
-        # 2. 그래프 저장
+        # 2) plots
         if self.plot_enable:
             self.save_plots_filtered_only(out)
 
-        # =========================================================
-        # 3. B PC (제어용)로 파일 자동 전송 (SCP)
-        # =========================================================
+        # 3) send to B PC (same as before)
         try:
             target_user = "nrs_forcecon"
             target_ip = "192.168.0.151"
-            # B PC의 저장 경로 (확실하게 존재하는지 확인 필요)
             target_dir = "/home/nrs_forcecon/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd/"
 
             self.get_logger().info(f"Sending file to Control PC ({target_ip})...")
-            
-            # scp 명령어 실행
             cmd = ["scp", self.file_path, f"{target_user}@{target_ip}:{target_dir}"]
             result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -407,7 +464,6 @@ class VRDemoTXTRecorder(Node):
                 self.get_logger().error(f"SCP FAILED:\n{result.stderr}")
         except Exception as e:
             self.get_logger().error(f"File transfer exception: {e}")
-        # =========================================================
 
     def save_plots_filtered_only(self, out: np.ndarray):
         import matplotlib
@@ -424,7 +480,7 @@ class VRDemoTXTRecorder(Node):
         prefix = os.path.join(self.save_dir, self.plot_prefix)
 
         plt.figure()
-        plt.title("XYZ (filtered)")
+        plt.title("XYZ (pose MA filtered, upsampled)")
         plt.plot(t, x, label="x")
         plt.plot(t, y, label="y")
         plt.plot(t, z, label="z")
@@ -436,7 +492,7 @@ class VRDemoTXTRecorder(Node):
         plt.close()
 
         plt.figure()
-        plt.title("Omega (filtered)")
+        plt.title("Omega (pose MA filtered, upsampled)")
         plt.plot(t, wx, label="wx")
         plt.plot(t, wy, label="wy")
         plt.plot(t, wz, label="wz")
@@ -448,7 +504,7 @@ class VRDemoTXTRecorder(Node):
         plt.close()
 
         plt.figure()
-        plt.title("Force (filtered)")
+        plt.title("Force (original pipeline)")
         plt.plot(t, fx, label="fx")
         plt.plot(t, fy, label="fy")
         plt.plot(t, fz, label="fz")
@@ -458,7 +514,7 @@ class VRDemoTXTRecorder(Node):
         plt.legend()
         plt.savefig(f"{prefix}_plot_force.png", dpi=150, bbox_inches="tight")
         plt.close()
-        
+
         if self.plot_show:
             import matplotlib.pyplot as plt_show
             plt_show.show()
