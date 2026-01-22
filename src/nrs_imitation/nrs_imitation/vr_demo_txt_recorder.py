@@ -2,21 +2,22 @@
 # ============================================================
 # vr_demo_txt_recorder.py
 #
-# Goal (this revision):
-# - Keep raw row count N (125 Hz) as much as possible
-# - Reduce IK-QP blow-ups by making pose command "QP-friendly"
-#   WITHOUT retiming / upsampling.
-#
-# Key change:
-# - Remove spike-patch (it can create discontinuities when most samples are "bad")
-# - Use continuous velocity+acceleration limiter on pose (XYZ + omega)
+# Goals (this version):
+# - Keep N raw (125 Hz 그대로, 행 개수 유지)
+# - Pre-contact force gating: filtered fz로 contact 감지 전까지 fx,fy,fz=0
+# - Force filtering pipeline 유지 (Whittaker + EMA + clamp + edge window ...)
+# - Pose smoothing to reduce QP blow-up:
+#     (1) Hampel outlier removal (per channel)
+#     (2) Whittaker smoothing (2nd-derivative penalty, per channel)
+#     (3) Auto-increase smoothing strength until max(v/a/w/alpha) under limits*safety
+# - Print QP-proxy evaluation metrics + TOP violation indices (p2p vs vr 비교용)
+# - Save txt and SCP to control PC
 # ============================================================
 
 import os
 import threading
 import numpy as np
 import subprocess
-from datetime import datetime
 
 import rclpy
 from rclpy.node import Node
@@ -25,7 +26,7 @@ from geometry_msgs.msg import Wrench
 
 
 # ---------------------------
-# Smooth utilities (fast, no scipy)  [FOR FORCE: keep as-is]
+# Smooth utilities (fast, no scipy)
 # ---------------------------
 def _apply_DTD(x: np.ndarray) -> np.ndarray:
     n = x.shape[0]
@@ -140,19 +141,180 @@ def apply_edge_force_window(force: np.ndarray, playback_hz: float, edge_zero_sec
 
 
 # ---------------------------
-# Contact gating (force)  [same as your last]
+# Robust outlier removal (Hampel filter)
 # ---------------------------
-def find_contact_index_fz(
-    fz: np.ndarray,
-    th_on: float,
-    th_off: float,
-    consecutive_on: int,
-    consecutive_off: int,
-) -> int:
+def hampel_filter_1d(x: np.ndarray, win: int, n_sigmas: float = 3.0) -> np.ndarray:
+    """
+    Hampel filter: replace outliers with local median.
+    - win: half-window size (radius). actual window size = 2*win+1
+    """
+    x = x.astype(np.float64, copy=False)
+    n = x.shape[0]
+    if n < 5 or win <= 0:
+        return x.copy()
+
+    win = int(win)
+    out = x.copy()
+    k = 1.4826  # scale factor for MAD
+    for i in range(n):
+        s = max(0, i - win)
+        e = min(n, i + win + 1)
+        w = x[s:e]
+        med = np.median(w)
+        mad = np.median(np.abs(w - med)) + 1e-12
+        sigma = k * mad
+        if np.abs(x[i] - med) > n_sigmas * sigma:
+            out[i] = med
+    return out
+
+
+def hampel_pose(pose: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
+    out = pose.copy().astype(np.float64)
+    for j in range(out.shape[1]):
+        out[:, j] = hampel_filter_1d(out[:, j], win=win, n_sigmas=n_sigmas)
+    return out
+
+
+# ---------------------------
+# QP-proxy evaluation
+# ---------------------------
+def _grad1(y: np.ndarray, dt: float) -> np.ndarray:
+    # numpy gradient gives same length, stable edges
+    return np.gradient(y, dt, axis=0)
+
+
+def qp_proxy_metrics(pose: np.ndarray, dt: float):
+    """
+    pose: (N,6) [x y z mm, wx wy wz rad]
+    returns dict with v/a/w/alpha etc.
+    """
+    pos = pose[:, 0:3]
+    ang = pose[:, 3:6]
+
+    v = _grad1(pos, dt)
+    a = _grad1(v, dt)
+    w = _grad1(ang, dt)
+    alpha = _grad1(w, dt)
+
+    speed = np.linalg.norm(v, axis=1)
+    acc = np.linalg.norm(a, axis=1)
+    wmag = np.linalg.norm(w, axis=1)
+    alphamag = np.linalg.norm(alpha, axis=1)
+
+    # "reference jerk" (for comparing roughness)
+    jerk = _grad1(a, dt)
+    jpos = np.linalg.norm(jerk, axis=1)
+    jalpha = _grad1(alpha, dt)
+    jang = np.linalg.norm(jalpha, axis=1)
+
+    def stats(x):
+        return {
+            "max": float(np.max(x)),
+            "p95": float(np.percentile(x, 95.0)),
+            "mean": float(np.mean(x)),
+        }
+
+    return {
+        "N": int(pose.shape[0]),
+        "dt": float(dt),
+        "T": float((pose.shape[0]-1) * dt),
+        "speed": speed,
+        "acc": acc,
+        "wmag": wmag,
+        "alphamag": alphamag,
+        "jpos": jpos,
+        "jang": jang,
+        "speed_stats": stats(speed),
+        "acc_stats": stats(acc),
+        "w_stats": stats(wmag),
+        "alpha_stats": stats(alphamag),
+        "jpos_max": float(np.max(jpos)),
+        "jang_max": float(np.max(jang)),
+    }
+
+
+def violation_indices(x: np.ndarray, lim: float):
+    return np.where(x > lim)[0]
+
+
+def topk_indices(x: np.ndarray, k: int = 8):
+    if x.size == 0:
+        return np.array([], dtype=int)
+    k = int(max(1, k))
+    idx = np.argpartition(-x, min(k, x.size-1))[:k]
+    idx = idx[np.argsort(-x[idx])]
+    return idx
+
+
+def format_eval_block(m, lims, safety, title: str):
+    """
+    lims: dict {pos_vmax,pos_amax,ang_vmax,ang_amax}
+    """
+    N = m["N"]
+    dt = m["dt"]
+    T = m["T"]
+
+    pv = m["speed_stats"]
+    pa = m["acc_stats"]
+    av = m["w_stats"]
+    aa = m["alpha_stats"]
+
+    vpos_lim = lims["pos_vmax"] * safety
+    apos_lim = lims["pos_amax"] * safety
+    vang_lim = lims["ang_vmax"] * safety
+    aang_lim = lims["ang_amax"] * safety
+
+    vpos_vrate = 100.0 * float(np.mean(m["speed"] > vpos_lim))
+    apos_vrate = 100.0 * float(np.mean(m["acc"] > apos_lim))
+    vang_vrate = 100.0 * float(np.mean(m["wmag"] > vang_lim))
+    aang_vrate = 100.0 * float(np.mean(m["alphamag"] > aang_lim))
+
+    s = []
+    s.append(f"[QP-EVAL] ===== {title} =====")
+    s.append(f"  N={N}  dt={dt:.6f}s  T={T:.3f}s")
+    s.append(f"  pos |v|: max={pv['max']:.3f} (lim {lims['pos_vmax']:.3f}, {pv['max']/max(lims['pos_vmax'],1e-9):.3f}x), p95={pv['p95']:.3f}, mean={pv['mean']:.3f}  [mm/s]")
+    s.append(f"  pos |a|: max={pa['max']:.3f} (lim {lims['pos_amax']:.3f}, {pa['max']/max(lims['pos_amax'],1e-9):.3f}x), p95={pa['p95']:.3f}, mean={pa['mean']:.3f}  [mm/s^2]")
+    s.append(f"  ang |w|: max={av['max']:.3f} (lim {lims['ang_vmax']:.3f}, {av['max']/max(lims['ang_vmax'],1e-9):.3f}x), p95={av['p95']:.3f}, mean={av['mean']:.3f}  [rad/s]")
+    s.append(f"  ang |alpha|: max={aa['max']:.3f} (lim {lims['ang_amax']:.3f}, {aa['max']/max(lims['ang_amax'],1e-9):.3f}x), p95={aa['p95']:.3f}, mean={aa['mean']:.3f}  [rad/s^2]")
+    s.append(f"  jerk(ref): pos max={m['jpos_max']:.3f} [mm/s^3], ang max={m['jang_max']:.3f} [rad/s^3]")
+    s.append(f"  violation_rate(safety={safety:.3f}): vpos={vpos_vrate:.3f}%, apos={apos_vrate:.3f}%, vang={vang_vrate:.3f}%, aang={aang_vrate:.3f}%")
+    return "\n".join(s)
+
+
+def log_top_violations(node_logger, m, lims, safety, topk=6):
+    dt = m["dt"]
+    vpos_lim = lims["pos_vmax"] * safety
+    apos_lim = lims["pos_amax"] * safety
+    vang_lim = lims["ang_vmax"] * safety
+    aang_lim = lims["ang_amax"] * safety
+
+    def _log(name, arr, lim):
+        bad = violation_indices(arr, lim)
+        if bad.size == 0:
+            node_logger.info(f"[QP-EVAL] {name}: no violations over lim*safety ({lim:.3f}).")
+            return
+        # show worst K among violating
+        vals = arr[bad]
+        order = np.argsort(-vals)
+        pick = bad[order[:topk]]
+        msg = f"[QP-EVAL] {name} top{min(topk,pick.size)} violating indices:\n"
+        for idx in pick:
+            msg += f"    idx={int(idx):6d}, t={idx*dt:8.3f}s, value={float(arr[idx]):.6f}\n"
+        node_logger.info(msg.rstrip())
+
+    _log("pos|v|", m["speed"], vpos_lim)
+    _log("pos|a|", m["acc"], apos_lim)
+    _log("ang|w|", m["wmag"], vang_lim)
+    _log("ang|alpha|", m["alphamag"], aang_lim)
+
+
+# ---------------------------
+# Contact gating
+# ---------------------------
+def find_contact_index_fz(fz: np.ndarray, th_on: float, th_off: float, consecutive_on: int, consecutive_off: int) -> int:
     n = int(fz.shape[0])
     if n <= 0:
         return -1
-
     consec_on = max(1, int(consecutive_on))
     consec_off = max(1, int(consecutive_off))
     th_on = float(th_on)
@@ -165,7 +327,6 @@ def find_contact_index_fz(
 
     for i in range(n):
         v = float(fz[i])
-
         if not state_on:
             if v >= th_on:
                 if on_count == 0:
@@ -186,7 +347,6 @@ def find_contact_index_fz(
                     first_on_start = -1
             else:
                 off_count = 0
-
     return -1
 
 
@@ -199,179 +359,105 @@ def zero_force_before_contact(force: np.ndarray, contact_idx: int) -> np.ndarray
 
 
 # ---------------------------
-# QP-proxy evaluation (pose)
+# Pose smoothing (N 유지, max 기준으로 auto 강화)
 # ---------------------------
-def _diff1(x: np.ndarray, dt: float) -> np.ndarray:
-    # centered-ish via forward diff (simple + stable)
-    return np.diff(x, axis=0) / dt
-
-
-def qp_eval_pose(pose: np.ndarray, dt: float, pos_vmax: float, pos_amax: float, ang_vmax: float, ang_amax: float):
+def smooth_pose_auto(
+    pose_raw: np.ndarray,
+    dt: float,
+    lims: dict,
+    safety: float,
+    cg_tol: float,
+    cg_max_iter: int,
+    # Hampel
+    hampel_enable: bool,
+    hampel_win: int,
+    hampel_sigmas: float,
+    # Whittaker auto
+    wh_enable: bool,
+    lam_pos_init: float,
+    lam_ang_init: float,
+    lam_growth: float,
+    lam_pos_max: float,
+    lam_ang_max: float,
+    auto_iters: int,
+    # optional EMA on pose
+    pose_ema_enable: bool,
+    pose_ema_alpha: float,
+):
     """
-    pose: (N,6) [mm,mm,mm, rad,rad,rad]
-    dt: seconds
+    Returns pose_f, eval_before, eval_after, used_lams
     """
-    N = pose.shape[0]
-    T = (N - 1) * dt if N >= 2 else 0.0
-    pos = pose[:, 0:3]
-    ang = pose[:, 3:6]
+    pose0 = pose_raw.copy().astype(np.float64)
 
-    if N < 3:
-        return {
-            "N": N, "dt": dt, "T": T,
-            "vpos_max": 0.0, "apos_max": 0.0, "vang_max": 0.0, "aang_max": 0.0,
-        }
+    eval0 = qp_proxy_metrics(pose0, dt)
 
-    vpos = _diff1(pos, dt)           # (N-1,3)
-    vang = _diff1(ang, dt)           # (N-1,3)
-    apos = _diff1(vpos, dt)          # (N-2,3)
-    aang = _diff1(vang, dt)          # (N-2,3)
+    work = pose0.copy()
+    if hampel_enable:
+        work = hampel_pose(work, win=hampel_win, n_sigmas=hampel_sigmas)
+        # endpoints preserve
+        work[0, :] = pose0[0, :]
+        work[-1, :] = pose0[-1, :]
 
-    vpos_n = np.linalg.norm(vpos, axis=1)
-    vang_n = np.linalg.norm(vang, axis=1)
-    apos_n = np.linalg.norm(apos, axis=1)
-    aang_n = np.linalg.norm(aang, axis=1)
+    if not wh_enable:
+        eval1 = qp_proxy_metrics(work, dt)
+        return work, eval0, eval1, {"lam_pos": 0.0, "lam_ang": 0.0}
 
-    def p95(x): return float(np.percentile(x, 95.0)) if x.size else 0.0
-    def mean(x): return float(np.mean(x)) if x.size else 0.0
+    lam_pos = float(lam_pos_init)
+    lam_ang = float(lam_ang_init)
+    lam_growth = float(max(1.1, lam_growth))
 
-    out = {
-        "N": N, "dt": float(dt), "T": float(T),
-
-        "vpos_max": float(np.max(vpos_n)), "vpos_p95": p95(vpos_n), "vpos_mean": mean(vpos_n),
-        "apos_max": float(np.max(apos_n)), "apos_p95": p95(apos_n), "apos_mean": mean(apos_n),
-
-        "vang_max": float(np.max(vang_n)), "vang_p95": p95(vang_n), "vang_mean": mean(vang_n),
-        "aang_max": float(np.max(aang_n)), "aang_p95": p95(aang_n), "aang_mean": mean(aang_n),
-    }
-
-    # violation rates (proxy)
-    eps = 1e-12
-    out["vpos_viol_rate"] = float(np.mean(vpos_n > (pos_vmax + eps)) * 100.0) if pos_vmax > 0 else 0.0
-    out["apos_viol_rate"] = float(np.mean(apos_n > (pos_amax + eps)) * 100.0) if pos_amax > 0 else 0.0
-    out["vang_viol_rate"] = float(np.mean(vang_n > (ang_vmax + eps)) * 100.0) if ang_vmax > 0 else 0.0
-    out["aang_viol_rate"] = float(np.mean(aang_n > (ang_amax + eps)) * 100.0) if ang_amax > 0 else 0.0
-
-    # jerk reference (3rd diff magnitude proxy)
-    jpos = _diff1(apos, dt)  # (N-3,3)
-    jang = _diff1(aang, dt)
-    out["jpos_max"] = float(np.max(np.linalg.norm(jpos, axis=1))) if jpos.size else 0.0
-    out["jang_max"] = float(np.max(np.linalg.norm(jang, axis=1))) if jang.size else 0.0
-
-    return out
-
-
-def format_qp_eval(e, pos_vmax, pos_amax, ang_vmax, ang_amax) -> str:
-    return (
-        f"\n  N={e['N']}  dt={e['dt']:.6f}s  T={e['T']:.3f}s\n"
-        f"  pos |v|: max={e['vpos_max']:.3f} (lim {pos_vmax:.3f}, {e['vpos_max']/max(pos_vmax,1e-9):.3f}x), "
-        f"p95={e['vpos_p95']:.3f}, mean={e['vpos_mean']:.3f}  [mm/s]\n"
-        f"  pos |a|: max={e['apos_max']:.3f} (lim {pos_amax:.3f}, {e['apos_max']/max(pos_amax,1e-9):.3f}x), "
-        f"p95={e['apos_p95']:.3f}, mean={e['apos_mean']:.3f}  [mm/s^2]\n"
-        f"  ang |w|: max={e['vang_max']:.3f} (lim {ang_vmax:.3f}, {e['vang_max']/max(ang_vmax,1e-9):.3f}x), "
-        f"p95={e['vang_p95']:.3f}, mean={e['vang_mean']:.3f}  [rad/s]\n"
-        f"  ang |alpha|: max={e['aang_max']:.3f} (lim {ang_amax:.3f}, {e['aang_max']/max(ang_amax,1e-9):.3f}x), "
-        f"p95={e['aang_p95']:.3f}, mean={e['aang_mean']:.3f}  [rad/s^2]\n"
-        f"  jerk(ref): pos max={e['jpos_max']:.3f} [mm/s^3], ang max={e['jang_max']:.3f} [rad/s^3]\n"
-        f"  violation_rate: vpos={e['vpos_viol_rate']:.3f}%, apos={e['apos_viol_rate']:.3f}%, "
-        f"vang={e['vang_viol_rate']:.3f}%, aang={e['aang_viol_rate']:.3f}%"
+    best = work.copy()
+    best_eval = qp_proxy_metrics(best, dt)
+    best_score = max(
+        best_eval["speed_stats"]["max"] / max(lims["pos_vmax"], 1e-9),
+        best_eval["acc_stats"]["max"] / max(lims["pos_amax"], 1e-9),
+        best_eval["w_stats"]["max"] / max(lims["ang_vmax"], 1e-9),
+        best_eval["alpha_stats"]["max"] / max(lims["ang_amax"], 1e-9),
     )
 
+    for _ in range(int(max(1, auto_iters))):
+        cur = work.copy()
 
-# ---------------------------
-# QP-proxy limiter (pose)  [NEW]
-# ---------------------------
-def _clamp_norm(v: np.ndarray, vmax: float) -> np.ndarray:
-    n = float(np.linalg.norm(v))
-    if vmax <= 0.0 or n <= vmax or n < 1e-12:
-        return v
-    return v * (vmax / n)
+        # Whittaker per channel
+        for j in range(3):  # xyz
+            cur[:, j] = whittaker_smooth_1d(cur[:, j], lam_pos, cg_tol=cg_tol, cg_max_iter=cg_max_iter)
+        for j in range(3, 6):  # angles
+            cur[:, j] = whittaker_smooth_1d(cur[:, j], lam_ang, cg_tol=cg_tol, cg_max_iter=cg_max_iter)
 
+        if pose_ema_enable:
+            for j in range(6):
+                cur[:, j] = ema_filtfilt_1d(cur[:, j], pose_ema_alpha)
 
-def _limit_forward_to_target(target: np.ndarray, dt: float, vmax: float, amax: float, anchor0: np.ndarray) -> np.ndarray:
-    """
-    target: (N,D)
-    output y tracks target but respects |v|<=vmax and |dv/dt|<=amax in L2 norm.
-    """
-    N, D = target.shape
-    y = np.empty_like(target, dtype=np.float64)
-    y[0] = anchor0.astype(np.float64, copy=False)
-    v_prev = np.zeros(D, dtype=np.float64)
+        # endpoints exact preserve
+        cur[0, :] = pose0[0, :]
+        cur[-1, :] = pose0[-1, :]
 
-    for i in range(1, N):
-        v_des = (target[i] - y[i - 1]) / dt
-        v = _clamp_norm(v_des, vmax)
-        if amax > 0.0:
-            dv = v - v_prev
-            dv = _clamp_norm(dv, amax * dt)
-            v = v_prev + dv
-        y[i] = y[i - 1] + v * dt
-        v_prev = v
-    return y
+        ev = qp_proxy_metrics(cur, dt)
+        score = max(
+            ev["speed_stats"]["max"] / max(lims["pos_vmax"], 1e-9),
+            ev["acc_stats"]["max"] / max(lims["pos_amax"], 1e-9),
+            ev["w_stats"]["max"] / max(lims["ang_vmax"], 1e-9),
+            ev["alpha_stats"]["max"] / max(lims["ang_amax"], 1e-9),
+        )
 
+        if score < best_score:
+            best_score = score
+            best = cur
+            best_eval = ev
 
-def qp_proxy_limit_pose(
-    pose_target: np.ndarray,
-    dt: float,
-    pos_vmax: float,
-    pos_amax: float,
-    ang_vmax: float,
-    ang_amax: float,
-    safety: float = 1.05,
-    iters: int = 3
-) -> np.ndarray:
-    """
-    Keeps N the same. No retiming. Continuous limiter (no discontinuities).
-    safety>1 makes the effective limits tighter.
-    """
-    pose_target = pose_target.astype(np.float64, copy=False)
-    N = pose_target.shape[0]
-    if N < 2:
-        return pose_target.copy()
+        # stop if all max under lim*safety
+        if (ev["speed_stats"]["max"] <= lims["pos_vmax"] * safety and
+            ev["acc_stats"]["max"] <= lims["pos_amax"] * safety and
+            ev["w_stats"]["max"] <= lims["ang_vmax"] * safety and
+            ev["alpha_stats"]["max"] <= lims["ang_amax"] * safety):
+            return cur, eval0, ev, {"lam_pos": lam_pos, "lam_ang": lam_ang}
 
-    eff = max(1e-9, float(safety))
-    pv = float(pos_vmax) / eff
-    pa = float(pos_amax) / eff
-    av = float(ang_vmax) / eff
-    aa = float(ang_amax) / eff
+        # otherwise increase lambda (but cap)
+        lam_pos = min(lam_pos * lam_growth, lam_pos_max)
+        lam_ang = min(lam_ang * lam_growth, lam_ang_max)
 
-    out = pose_target.copy()
-
-    # Split
-    pos_t = pose_target[:, 0:3]
-    ang_t = pose_target[:, 3:6]
-
-    pos = out[:, 0:3]
-    ang = out[:, 3:6]
-
-    iters = max(1, int(iters))
-
-    for _ in range(iters):
-        # Forward (anchor start)
-        pos_f = _limit_forward_to_target(pos_t, dt, pv, pa, anchor0=pos_t[0])
-        ang_f = _limit_forward_to_target(ang_t, dt, av, aa, anchor0=ang_t[0])
-
-        # Backward (anchor end) via reversing target
-        pos_tr = pos_t[::-1].copy()
-        ang_tr = ang_t[::-1].copy()
-        pos_b_r = _limit_forward_to_target(pos_tr, dt, pv, pa, anchor0=pos_tr[0])  # anchored at original end
-        ang_b_r = _limit_forward_to_target(ang_tr, dt, av, aa, anchor0=ang_tr[0])
-        pos_b = pos_b_r[::-1]
-        ang_b = ang_b_r[::-1]
-
-        # Blend (still continuous)
-        pos = 0.5 * (pos_f + pos_b)
-        ang = 0.5 * (ang_f + ang_b)
-
-        # Re-impose exact endpoints to original targets
-        pos[0] = pos_t[0]
-        pos[-1] = pos_t[-1]
-        ang[0] = ang_t[0]
-        ang[-1] = ang_t[-1]
-
-    out[:, 0:3] = pos
-    out[:, 3:6] = ang
-    return out
+    # if not satisfied, return best (minimize worst ratio)
+    return best, eval0, best_eval, {"lam_pos": lam_pos, "lam_ang": lam_ang}
 
 
 # ---------------------------
@@ -384,7 +470,6 @@ class VRDemoTXTRecorder(Node):
         # ===== parameters =====
         self.declare_parameter('save_dir', '/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd')
         self.declare_parameter('file_name', 'cmd_continue9D.txt')
-
         self.declare_parameter('pose_topic', '/calibrated_pose')
         self.declare_parameter('ft_topic', '/ftsensor/measured_Cvalue')
 
@@ -394,35 +479,18 @@ class VRDemoTXTRecorder(Node):
         self.declare_parameter('start_force_th', 10.0)
         self.declare_parameter('end_force_th', 10.0)
 
-        # ===== pose pipeline =====
+        # ===== pose unwrap =====
         self.declare_parameter('omega_unwrap', True)
 
-        # QP-proxy limits (same knobs you already use for evaluation)
-        self.declare_parameter('pos_vmax', 30.0)     # [mm/s]   (proxy)
-        self.declare_parameter('pos_amax', 120.0)    # [mm/s^2] (proxy)
-        self.declare_parameter('ang_vmax', 0.6)      # [rad/s]
-        self.declare_parameter('ang_amax', 3.0)      # [rad/s^2]
-
-        # NEW: continuous limiter (keeps N)
-        self.declare_parameter('qp_limiter_enable', True)
-        self.declare_parameter('qp_limiter_safety', 1.05)  # >1 tighter than limits
-        self.declare_parameter('qp_limiter_iters', 3)
-
-        # Optional sanity hold (prevents a single corrupted sample from exploding diffs)
-        self.declare_parameter('pose_sanity_enable', True)
-        self.declare_parameter('pos_abs_max_mm', 5000.0)
-        self.declare_parameter('ang_abs_max_rad', 10.0)
-
-        # ===== force pipeline (keep as-is) =====
+        # ===== force filtering (keep) =====
         self.declare_parameter('lam_force', 3000.0)
         self.declare_parameter('cg_tol', 1e-10)
-        self.declare_parameter('cg_max_iter', 250)
+        self.declare_parameter('cg_max_iter', 200)
         self.declare_parameter('ema_alpha_force', 0.18)
 
         self.declare_parameter('force_xy_zero', True)
         self.declare_parameter('fz_min', 0.0)
         self.declare_parameter('fz_max', 20.0)
-
         self.declare_parameter('edge_force_zero_sec', 5.0)
         self.declare_parameter('edge_force_fade_sec', 0.6)
 
@@ -433,7 +501,31 @@ class VRDemoTXTRecorder(Node):
         self.declare_parameter('contact_consec_off', 10)
         self.declare_parameter('precontact_force_zero', True)
 
-        # ===== plots =====
+        # ===== QP-proxy limits =====
+        self.declare_parameter('qp_pos_vmax', 30.0)   # mm/s
+        self.declare_parameter('qp_pos_amax', 120.0)  # mm/s^2
+        self.declare_parameter('qp_ang_vmax', 0.6)    # rad/s
+        self.declare_parameter('qp_ang_amax', 3.0)    # rad/s^2
+        self.declare_parameter('qp_safety', 1.05)
+        self.declare_parameter('qp_topk', 6)
+
+        # ===== Pose smoothing (NEW) =====
+        self.declare_parameter('pose_hampel_enable', True)
+        self.declare_parameter('pose_hampel_win', 6)          # radius (2*win+1)
+        self.declare_parameter('pose_hampel_sigmas', 3.0)
+
+        self.declare_parameter('pose_whittaker_enable', True)
+        self.declare_parameter('pose_lam_pos_init', 8000.0)   # 시작값 (필요시 조정)
+        self.declare_parameter('pose_lam_ang_init', 200.0)
+        self.declare_parameter('pose_lam_growth', 2.5)        # auto 강화 비율
+        self.declare_parameter('pose_lam_pos_max', 5e7)
+        self.declare_parameter('pose_lam_ang_max', 5e6)
+        self.declare_parameter('pose_auto_iters', 6)
+
+        self.declare_parameter('pose_ema_enable', False)      # 필요시 True
+        self.declare_parameter('pose_ema_alpha', 0.20)
+
+        # ===== plot optional =====
         self.declare_parameter('plot_enable', True)
         self.declare_parameter('plot_show', False)
         self.declare_parameter('plot_prefix', '')
@@ -451,19 +543,6 @@ class VRDemoTXTRecorder(Node):
 
         self.omega_unwrap = bool(self.get_parameter('omega_unwrap').value)
 
-        self.pos_vmax = float(self.get_parameter('pos_vmax').value)
-        self.pos_amax = float(self.get_parameter('pos_amax').value)
-        self.ang_vmax = float(self.get_parameter('ang_vmax').value)
-        self.ang_amax = float(self.get_parameter('ang_amax').value)
-
-        self.qp_limiter_enable = bool(self.get_parameter('qp_limiter_enable').value)
-        self.qp_limiter_safety = float(self.get_parameter('qp_limiter_safety').value)
-        self.qp_limiter_iters = int(self.get_parameter('qp_limiter_iters').value)
-
-        self.pose_sanity_enable = bool(self.get_parameter('pose_sanity_enable').value)
-        self.pos_abs_max_mm = float(self.get_parameter('pos_abs_max_mm').value)
-        self.ang_abs_max_rad = float(self.get_parameter('ang_abs_max_rad').value)
-
         self.lam_force = float(self.get_parameter('lam_force').value)
         self.cg_tol = float(self.get_parameter('cg_tol').value)
         self.cg_max_iter = int(self.get_parameter('cg_max_iter').value)
@@ -480,6 +559,30 @@ class VRDemoTXTRecorder(Node):
         self.contact_consec_on = int(self.get_parameter('contact_consec_on').value)
         self.contact_consec_off = int(self.get_parameter('contact_consec_off').value)
         self.precontact_force_zero = bool(self.get_parameter('precontact_force_zero').value)
+
+        self.qp_lims = {
+            "pos_vmax": float(self.get_parameter('qp_pos_vmax').value),
+            "pos_amax": float(self.get_parameter('qp_pos_amax').value),
+            "ang_vmax": float(self.get_parameter('qp_ang_vmax').value),
+            "ang_amax": float(self.get_parameter('qp_ang_amax').value),
+        }
+        self.qp_safety = float(self.get_parameter('qp_safety').value)
+        self.qp_topk = int(self.get_parameter('qp_topk').value)
+
+        self.pose_hampel_enable = bool(self.get_parameter('pose_hampel_enable').value)
+        self.pose_hampel_win = int(self.get_parameter('pose_hampel_win').value)
+        self.pose_hampel_sigmas = float(self.get_parameter('pose_hampel_sigmas').value)
+
+        self.pose_wh_enable = bool(self.get_parameter('pose_whittaker_enable').value)
+        self.pose_lam_pos_init = float(self.get_parameter('pose_lam_pos_init').value)
+        self.pose_lam_ang_init = float(self.get_parameter('pose_lam_ang_init').value)
+        self.pose_lam_growth = float(self.get_parameter('pose_lam_growth').value)
+        self.pose_lam_pos_max = float(self.get_parameter('pose_lam_pos_max').value)
+        self.pose_lam_ang_max = float(self.get_parameter('pose_lam_ang_max').value)
+        self.pose_auto_iters = int(self.get_parameter('pose_auto_iters').value)
+
+        self.pose_ema_enable = bool(self.get_parameter('pose_ema_enable').value)
+        self.pose_ema_alpha = float(self.get_parameter('pose_ema_alpha').value)
 
         self.plot_enable = bool(self.get_parameter('plot_enable').value)
         self.plot_show = bool(self.get_parameter('plot_show').value)
@@ -502,10 +605,6 @@ class VRDemoTXTRecorder(Node):
         self.ft_received = False
         self.buffer = []
 
-        # sanity hold
-        self.last_good_pose = None
-        self.last_good_ft = None
-
         # subs
         self.create_subscription(Float64MultiArray, self.pose_topic, self.pose_callback, 10)
         self.create_subscription(Wrench, self.ft_topic, self.ft_callback, 10)
@@ -516,15 +615,17 @@ class VRDemoTXTRecorder(Node):
 
         self.get_logger().info(f"Initialized. Local save path: {self.file_path}")
         self.get_logger().info(
-            f"Pose: keep N raw. QP-limiter enable={self.qp_limiter_enable} "
-            f"(pos_vmax={self.pos_vmax} mm/s, pos_amax={self.pos_amax} mm/s^2, "
-            f"ang_vmax={self.ang_vmax} rad/s, ang_amax={self.ang_amax} rad/s^2, "
-            f"safety={self.qp_limiter_safety}, iters={self.qp_limiter_iters})"
+            f"Pose: keep N raw. Hampel={self.pose_hampel_enable}(win={self.pose_hampel_win}, sig={self.pose_hampel_sigmas}) "
+            f"+ WhittakerAuto={self.pose_wh_enable}(lam_pos_init={self.pose_lam_pos_init}, lam_ang_init={self.pose_lam_ang_init}, growth={self.pose_lam_growth}, iters={self.pose_auto_iters}) "
+            f"+ PoseEMA={self.pose_ema_enable}(alpha={self.pose_ema_alpha})"
         )
         self.get_logger().info(
             f"Pre-contact force gating: {self.precontact_force_zero}  "
-            f"(fz_on={self.contact_fz_on}, fz_off={self.contact_fz_off}, "
-            f"consec_on={self.contact_consec_on}, consec_off={self.contact_consec_off})"
+            f"(fz_on={self.contact_fz_on}, fz_off={self.contact_fz_off}, consec_on={self.contact_consec_on}, consec_off={self.contact_consec_off})"
+        )
+        self.get_logger().info(
+            f"QP-proxy limits: pos_vmax={self.qp_lims['pos_vmax']} mm/s, pos_amax={self.qp_lims['pos_amax']} mm/s^2, "
+            f"ang_vmax={self.qp_lims['ang_vmax']} rad/s, ang_amax={self.qp_lims['ang_amax']} rad/s^2, safety={self.qp_safety}"
         )
 
     # ---------------------------
@@ -553,7 +654,7 @@ class VRDemoTXTRecorder(Node):
         if self.episode_done:
             return
 
-        # keep your existing start/end triggers
+        # episode start/end trigger (유지)
         if (not self.recording) and (abs(fx) >= self.start_force_th):
             self.start_episode()
         if self.recording and (abs(fy) >= self.end_force_th):
@@ -562,51 +663,13 @@ class VRDemoTXTRecorder(Node):
     # ---------------------------
     # main loop
     # ---------------------------
-    def _sanity_pose(self, p: np.ndarray) -> bool:
-        if p is None or p.shape[0] != 6:
-            return False
-        if not np.isfinite(p).all():
-            return False
-        if np.any(np.abs(p[0:3]) > self.pos_abs_max_mm):
-            return False
-        if np.any(np.abs(p[3:6]) > self.ang_abs_max_rad):
-            return False
-        return True
-
-    def _sanity_ft(self, f: np.ndarray) -> bool:
-        if f is None or f.shape[0] != 3:
-            return False
-        if not np.isfinite(f).all():
-            return False
-        # no hard bounds; just finite
-        return True
-
     def main_loop(self):
         if (not self.recording) or self.episode_done:
             return
         with self.lock:
             if not (self.pose_received and self.ft_received):
                 return
-
-            pose = self.latest_pose.copy()
-            ft = self.latest_ft.copy()
-
-            if self.pose_sanity_enable:
-                if self._sanity_pose(pose):
-                    self.last_good_pose = pose
-                else:
-                    if self.last_good_pose is None:
-                        return
-                    pose = self.last_good_pose.copy()
-
-                if self._sanity_ft(ft):
-                    self.last_good_ft = ft
-                else:
-                    if self.last_good_ft is None:
-                        return
-                    ft = self.last_good_ft.copy()
-
-            row = np.hstack([pose, ft])
+            row = np.hstack([self.latest_pose, self.latest_ft])
             self.buffer.append(row)
 
     # ---------------------------
@@ -616,8 +679,6 @@ class VRDemoTXTRecorder(Node):
         with self.lock:
             self.recording = True
             self.buffer.clear()
-            self.last_good_pose = None
-            self.last_good_ft = None
         self.get_logger().info("=== EPISODE STARTED ===")
 
     def end_episode(self):
@@ -645,50 +706,64 @@ class VRDemoTXTRecorder(Node):
         pose_raw = raw[:, 0:6].copy()
         force_raw = raw[:, 6:9].copy()
 
-        dt = 1.0 / float(self.playback_hz if self.playback_hz > 0 else self.record_hz)
-
-        # unwrap omega before any pose limiting (prevents wrap-induced jumps)
+        # unwrap angles BEFORE any pose smoothing
         if self.omega_unwrap:
             for k in range(3, 6):
                 pose_raw[:, k] = unwrap_angle_series(pose_raw[:, k], discont=np.pi)
 
-        # ---- QP-EVAL BEFORE (pose only) ----
-        e0 = qp_eval_pose(pose_raw, dt, self.pos_vmax, self.pos_amax, self.ang_vmax, self.ang_amax)
-        self.get_logger().info("[QP-EVAL] ===== BEFORE pose limiter =====")
-        self.get_logger().info(format_qp_eval(e0, self.pos_vmax, self.pos_amax, self.ang_vmax, self.ang_amax))
+        dt = 1.0 / float(self.playback_hz if self.playback_hz > 1e-9 else 125.0)
 
-        # ---- Pose limiter (keeps N, continuous) ----
-        pose_f = pose_raw.copy()
-        if self.qp_limiter_enable and pose_raw.shape[0] >= 3:
-            pose_f = qp_proxy_limit_pose(
-                pose_target=pose_raw,
-                dt=dt,
-                pos_vmax=self.pos_vmax,
-                pos_amax=self.pos_amax,
-                ang_vmax=self.ang_vmax,
-                ang_amax=self.ang_amax,
-                safety=self.qp_limiter_safety,
-                iters=self.qp_limiter_iters
-            )
-
-        # ---- QP-EVAL AFTER ----
-        e1 = qp_eval_pose(pose_f, dt, self.pos_vmax, self.pos_amax, self.ang_vmax, self.ang_amax)
-        self.get_logger().info("[QP-EVAL] ===== AFTER pose limiter =====")
-        self.get_logger().info(format_qp_eval(e1, self.pos_vmax, self.pos_amax, self.ang_vmax, self.ang_amax))
-
-        # deviation stats (how much we changed the path)
-        dpos = np.linalg.norm(pose_f[:, 0:3] - pose_raw[:, 0:3], axis=1)
-        dang = np.linalg.norm(pose_f[:, 3:6] - pose_raw[:, 3:6], axis=1)
-        self.get_logger().info(
-            f"[POSE-DELTA] pos: rms={float(np.sqrt(np.mean(dpos*dpos))):.3f} mm, max={float(np.max(dpos)):.3f} mm | "
-            f"ang: rms={float(np.sqrt(np.mean(dang*dang))):.5f} rad, max={float(np.max(dang)):.5f} rad"
+        # -------------------------
+        # (A) Pose smoothing (N 유지)
+        # -------------------------
+        pose_f, ev_before, ev_after, used_lams = smooth_pose_auto(
+            pose_raw,
+            dt=dt,
+            lims=self.qp_lims,
+            safety=self.qp_safety,
+            cg_tol=self.cg_tol,
+            cg_max_iter=self.cg_max_iter,
+            hampel_enable=self.pose_hampel_enable,
+            hampel_win=self.pose_hampel_win,
+            hampel_sigmas=self.pose_hampel_sigmas,
+            wh_enable=self.pose_wh_enable,
+            lam_pos_init=self.pose_lam_pos_init,
+            lam_ang_init=self.pose_lam_ang_init,
+            lam_growth=self.pose_lam_growth,
+            lam_pos_max=self.pose_lam_pos_max,
+            lam_ang_max=self.pose_lam_ang_max,
+            auto_iters=self.pose_auto_iters,
+            pose_ema_enable=self.pose_ema_enable,
+            pose_ema_alpha=self.pose_ema_alpha,
         )
 
-        # ---- Force: keep your pipeline (no retiming) ----
+        self.get_logger().info(format_eval_block(ev_before, self.qp_lims, self.qp_safety, "BEFORE pose smoothing (RAW)"))
+        log_top_violations(self.get_logger(), ev_before, self.qp_lims, self.qp_safety, topk=self.qp_topk)
+
+        self.get_logger().info(format_eval_block(ev_after, self.qp_lims, self.qp_safety, "AFTER pose smoothing"))
+        self.get_logger().info(f"[POSE-SMOOTH] used_lams={used_lams}")
+        log_top_violations(self.get_logger(), ev_after, self.qp_lims, self.qp_safety, topk=self.qp_topk)
+
+        # pose delta info
+        pos_err = pose_f[:, 0:3] - pose_raw[:, 0:3]
+        ang_err = pose_f[:, 3:6] - pose_raw[:, 3:6]
+        self.get_logger().info(
+            "[POSE-DELTA] pos: rms=%.3f mm, max=%.3f mm | ang: rms=%.6f rad, max=%.6f rad" % (
+                float(np.sqrt(np.mean(np.sum(pos_err**2, axis=1)))),
+                float(np.max(np.linalg.norm(pos_err, axis=1))),
+                float(np.sqrt(np.mean(np.sum(ang_err**2, axis=1)))),
+                float(np.max(np.linalg.norm(ang_err, axis=1))),
+            )
+        )
+
+        # -------------------------
+        # (B) Force filtering (keep pipeline, length unchanged)
+        # -------------------------
         force_f = force_raw.copy()
 
+        # Whittaker + EMA for force
         for j in range(3):
-            force_f[:, j] = whittaker_smooth_1d(force_f[:, j], self.lam_force, self.cg_tol, self.cg_max_iter)
+            force_f[:, j] = whittaker_smooth_1d(force_f[:, j], self.lam_force, cg_tol=self.cg_tol, cg_max_iter=self.cg_max_iter)
         for j in range(3):
             force_f[:, j] = ema_filtfilt_1d(force_f[:, j], self.ema_alpha_force)
 
@@ -697,6 +772,7 @@ class VRDemoTXTRecorder(Node):
             force_f[:, 1] = 0.0
 
         force_f[:, 2] = np.clip(force_f[:, 2], self.fz_min, self.fz_max)
+
         force_f = apply_edge_force_window(
             force_f,
             playback_hz=self.playback_hz,
@@ -705,11 +781,14 @@ class VRDemoTXTRecorder(Node):
         )
         force_f[:, 2] = np.clip(force_f[:, 2], self.fz_min, self.fz_max)
 
-        # ---- Pre-contact force gating (on filtered fz) ----
+        # -------------------------
+        # (C) Pre-contact force gating
+        # -------------------------
         contact_idx = -1
-        if self.precontact_force_zero and force_f.shape[0] > 0:
+        if self.precontact_force_zero:
+            fz = force_f[:, 2]
             contact_idx = find_contact_index_fz(
-                fz=force_f[:, 2],
+                fz=fz,
                 th_on=self.contact_fz_on,
                 th_off=self.contact_fz_off,
                 consecutive_on=self.contact_consec_on,
@@ -722,30 +801,33 @@ class VRDemoTXTRecorder(Node):
                 force_f[:, :] = 0.0
             else:
                 self.get_logger().info(
-                    f"[CONTACT] Detected at idx={contact_idx}/{force_f.shape[0]} (t={contact_idx*dt:.3f}s) "
-                    f"-> Zeroing forces for [0:{contact_idx})"
+                    f"[CONTACT] Detected at idx={contact_idx}/{force_f.shape[0]} (t={contact_idx*dt:.3f}s) -> "
+                    f"Zeroing forces for [0:{contact_idx})"
                 )
                 force_f = zero_force_before_contact(force_f, contact_idx)
 
-        # final
+        # final (N unchanged)
         out = np.hstack([pose_f, force_f]).astype(np.float64)
 
-        # 1) local save
+        # save
         np.savetxt(self.file_path, out, fmt="%.10f")
-        self.get_logger().info(f"Saved local file: {self.file_path}  (raw rows={raw.shape[0]} -> out rows={out.shape[0]})")
+        self.get_logger().info(
+            f"Saved local file: {self.file_path}  (raw rows={raw.shape[0]} -> out rows={out.shape[0]})"
+        )
 
-        # 2) plots (optional)
         if self.plot_enable:
-            self.save_plots(out, dt=dt, contact_idx=contact_idx)
+            self.save_plots(out, dt, contact_idx=contact_idx)
 
-        # 3) send to B PC
+        # send to B PC
         try:
             target_user = "nrs_forcecon"
             target_ip = "192.168.0.151"
             target_dir = "/home/nrs_forcecon/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd/"
+
             self.get_logger().info(f"Sending file to Control PC ({target_ip})...")
             cmd = ["scp", self.file_path, f"{target_user}@{target_ip}:{target_dir}"]
             result = subprocess.run(cmd, capture_output=True, text=True)
+
             if result.returncode == 0:
                 self.get_logger().info(f"SUCCESS: File transferred to B PC ({target_dir})")
             else:
@@ -759,25 +841,15 @@ class VRDemoTXTRecorder(Node):
         import matplotlib.pyplot as plt
 
         t = np.arange(out.shape[0], dtype=np.float64) * dt
+
         x, y, z = out[:, 0], out[:, 1], out[:, 2]
         wx, wy, wz = out[:, 3], out[:, 4], out[:, 5]
         fx, fy, fz = out[:, 6], out[:, 7], out[:, 8]
 
         prefix = os.path.join(self.save_dir, self.plot_prefix)
 
-        def vnorm(sig3):
-            v = np.diff(sig3, axis=0) / dt
-            return np.linalg.norm(v, axis=1)
-
-        pos = out[:, 0:3]
-        ang = out[:, 3:6]
-        vpos_n = vnorm(pos)
-        vang_n = vnorm(ang)
-        apos_n = vnorm(np.diff(pos, axis=0) / dt)  # diff(v)/dt
-        aang_n = vnorm(np.diff(ang, axis=0) / dt)
-
         plt.figure()
-        plt.title("XYZ (final)")
+        plt.title("Pose XYZ")
         plt.plot(t, x, label="x")
         plt.plot(t, y, label="y")
         plt.plot(t, z, label="z")
@@ -787,11 +859,11 @@ class VRDemoTXTRecorder(Node):
         plt.ylabel("pos [mm]")
         plt.grid(True)
         plt.legend()
-        plt.savefig(f"{prefix}_plot_xyz.png", dpi=150, bbox_inches="tight")
+        plt.savefig(f"{prefix}_pose_xyz.png", dpi=150, bbox_inches="tight")
         plt.close()
 
         plt.figure()
-        plt.title("Omega (final)")
+        plt.title("Pose Omega (rad)")
         plt.plot(t, wx, label="wx")
         plt.plot(t, wy, label="wy")
         plt.plot(t, wz, label="wz")
@@ -801,11 +873,11 @@ class VRDemoTXTRecorder(Node):
         plt.ylabel("rad")
         plt.grid(True)
         plt.legend()
-        plt.savefig(f"{prefix}_plot_omega.png", dpi=150, bbox_inches="tight")
+        plt.savefig(f"{prefix}_pose_omega.png", dpi=150, bbox_inches="tight")
         plt.close()
 
         plt.figure()
-        plt.title("Force (final)")
+        plt.title("Force (filtered + precontact zero)")
         plt.plot(t, fx, label="fx")
         plt.plot(t, fy, label="fy")
         plt.plot(t, fz, label="fz")
@@ -816,47 +888,7 @@ class VRDemoTXTRecorder(Node):
         plt.ylabel("N")
         plt.grid(True)
         plt.legend()
-        plt.savefig(f"{prefix}_plot_force.png", dpi=150, bbox_inches="tight")
-        plt.close()
-
-        # speed/acc proxy plots
-        tt1 = t[1:]
-        tt2 = t[2:]
-
-        plt.figure()
-        plt.title("pos |v| (proxy)")
-        plt.plot(tt1, vpos_n, label="|v|")
-        plt.axhline(self.pos_vmax, linestyle="--", label="vmax")
-        plt.grid(True)
-        plt.legend()
-        plt.savefig(f"{prefix}_plot_pos_speed.png", dpi=150, bbox_inches="tight")
-        plt.close()
-
-        plt.figure()
-        plt.title("pos |a| (proxy)")
-        plt.plot(tt2, apos_n, label="|a|")
-        plt.axhline(self.pos_amax, linestyle="--", label="amax")
-        plt.grid(True)
-        plt.legend()
-        plt.savefig(f"{prefix}_plot_pos_acc.png", dpi=150, bbox_inches="tight")
-        plt.close()
-
-        plt.figure()
-        plt.title("ang |w| (proxy)")
-        plt.plot(tt1, vang_n, label="|w|")
-        plt.axhline(self.ang_vmax, linestyle="--", label="wmax")
-        plt.grid(True)
-        plt.legend()
-        plt.savefig(f"{prefix}_plot_ang_speed.png", dpi=150, bbox_inches="tight")
-        plt.close()
-
-        plt.figure()
-        plt.title("ang |alpha| (proxy)")
-        plt.plot(tt2, aang_n, label="|alpha|")
-        plt.axhline(self.ang_amax, linestyle="--", label="amax")
-        plt.grid(True)
-        plt.legend()
-        plt.savefig(f"{prefix}_plot_ang_acc.png", dpi=150, bbox_inches="tight")
+        plt.savefig(f"{prefix}_force.png", dpi=150, bbox_inches="tight")
         plt.close()
 
         if self.plot_show:
