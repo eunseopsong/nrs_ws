@@ -1,4 +1,5 @@
 // vr_calibration.cpp  (Option B: Auto-capture + Update R_Adj, T_AD, T_BC, T_SA in one YAML write)
+// v7: add saved_at timestamp comment + add t_sa_mode(keep/update) + add t_sa_max_delta_deg guard
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
@@ -21,10 +22,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <cstdlib>
-
-// ✅ saved_at 주석을 위한 추가 include
-#include <ctime>
-#include <cstdio>
+#include <ctime>   // for timestamp
 
 // ================= Constants =================
 static constexpr double kPi = 3.14159265358979323846;
@@ -37,6 +35,26 @@ static inline double clampd(double x, double lo, double hi)
   if (x < lo) return lo;
   if (x > hi) return hi;
   return x;
+}
+
+// local time string: "YYYY.MM.DD HH:MM"
+static std::string nowLocalString()
+{
+  std::time_t t = std::time(nullptr);
+  std::tm tm{};
+#ifdef _WIN32
+  localtime_s(&tm, &t);
+#else
+  localtime_r(&t, &tm);
+#endif
+  std::ostringstream oss;
+  oss << std::setfill('0')
+      << (tm.tm_year + 1900) << "."
+      << std::setw(2) << (tm.tm_mon + 1) << "."
+      << std::setw(2) << tm.tm_mday << " "
+      << std::setw(2) << tm.tm_hour << ":"
+      << std::setw(2) << tm.tm_min;
+  return oss.str();
 }
 
 // ================= Rodrigues (rotvec -> R) =================
@@ -136,6 +154,14 @@ static Eigen::Matrix<double,9,9> kron3(const Eigen::Matrix3d& A, const Eigen::Ma
   return K;
 }
 
+static double rotDiffAngleDeg(const Eigen::Matrix3d& R1, const Eigen::Matrix3d& R2)
+{
+  Eigen::Matrix3d Rrel = R1.transpose() * R2;
+  double cosang = (Rrel.trace() - 1.0) * 0.5;
+  cosang = clampd(cosang, -1.0, 1.0);
+  return rad2deg(std::acos(cosang));
+}
+
 // ================= Class =================
 class VrCalibration : public rclcpp::Node
 {
@@ -145,7 +171,7 @@ public:
     steady_clock_(RCL_STEADY_TIME)
   {
     // ----------------------------
-    // Files (keep your working defaults)
+    // Files
     // ----------------------------
     waypoint_file_ =
       "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/vr_calibration/for_vr_calibration_point.txt";
@@ -156,7 +182,7 @@ public:
       "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/vr_calibration/ur10_vr.txt";
 
     // ----------------------------
-    // Tunables (same as your working version)
+    // Tunables
     // ----------------------------
     pos_enter_mm_ = 20.0;
     pos_exit_mm_  = 60.0;
@@ -181,14 +207,24 @@ public:
     // T_SA params
     // ----------------------------
     this->declare_parameter<double>("t_sa_w_des_z", 1.5707963267948966); // rad (≈ pi/2)
-    this->declare_parameter<double>("t_sa_wait_timeout_s", 15.0);        // wait for /calibrated_pose + stop
-    this->declare_parameter<double>("t_sa_hold_s", 0.25);                // ensure stable
-    this->declare_parameter<double>("t_sa_fresh_s", 1.0);                // msg freshness
+    this->declare_parameter<double>("t_sa_wait_timeout_s", 15.0);
+    this->declare_parameter<double>("t_sa_hold_s", 0.25);
+    this->declare_parameter<double>("t_sa_fresh_s", 1.0);
+
+    // ✅ NEW: T_SA update mode
+    // - keep   : YAML의 기존 T_SA 유지(덮어쓰기 방지, 기본)
+    // - update : pre-phase에서 /calibrated_pose 기반으로 T_SA 재계산
+    this->declare_parameter<std::string>("t_sa_mode", "keep"); // "keep" or "update"
+    this->declare_parameter<double>("t_sa_max_delta_deg", 20.0); // update 시 old->new 변화량 제한
 
     t_sa_w_des_z_        = this->get_parameter("t_sa_w_des_z").as_double();
     t_sa_wait_timeout_s_ = this->get_parameter("t_sa_wait_timeout_s").as_double();
     t_sa_hold_s_         = this->get_parameter("t_sa_hold_s").as_double();
     t_sa_fresh_s_        = this->get_parameter("t_sa_fresh_s").as_double();
+
+    t_sa_mode_           = this->get_parameter("t_sa_mode").as_string();
+    std::transform(t_sa_mode_.begin(), t_sa_mode_.end(), t_sa_mode_.begin(), ::tolower);
+    t_sa_max_delta_deg_  = this->get_parameter("t_sa_max_delta_deg").as_double();
 
     // ----------------------------
     // Waypoints
@@ -204,7 +240,7 @@ public:
       throw std::runtime_error("Failed to open output files (truncate mode)");
 
     // ----------------------------
-    // subscriptions (keep working topics)
+    // subscriptions
     // ----------------------------
     sub_currentP_ =
       create_subscription<std_msgs::msg::Float64MultiArray>(
@@ -223,7 +259,7 @@ public:
         std::bind(&VrCalibration::cbCalibratedPose, this, std::placeholders::_1));
 
     // ----------------------------
-    // yaml path (same convention you used)
+    // yaml path
     // ----------------------------
     const char* home = std::getenv("HOME");
     if (!home) throw std::runtime_error("HOME env not set");
@@ -235,6 +271,10 @@ public:
     RCLCPP_INFO(get_logger(),
       "Loaded %zu waypoints (%zu target points, flag!=0). Auto-capture enabled.",
       waypoints_.size(), target_indices_.size());
+
+    RCLCPP_INFO(get_logger(),
+      "[T_SA_MODE] t_sa_mode=%s, t_sa_max_delta_deg=%.1f",
+      t_sa_mode_.c_str(), t_sa_max_delta_deg_);
   }
 
   void run()
@@ -249,11 +289,10 @@ public:
 
     // ==========================================================
     // (0) Pre-phase: compute T_SA once BEFORE capture starts
-    //     - requires /calibrated_pose (w_meas) + robot stop
     // ==========================================================
     computeTSAOnceBeforeCapture(exec);
 
-    // Now start capture loop (same working logic)
+    // Now start capture loop
     enum class State { WAIT_ENTER, IN_REGION };
     State state = State::WAIT_ENTER;
 
@@ -390,20 +429,6 @@ private:
   mutable rclcpp::Clock steady_clock_;
   rclcpp::Time tnow() const { return steady_clock_.now(); }
 
-  // ✅ 저장 시각 문자열(로컬 타임 기준) : "YYYY.MM.DD HH:MM"
-  static std::string nowStringKST()
-  {
-    std::time_t t = std::time(nullptr);
-    std::tm tm{};
-    localtime_r(&t, &tm);
-
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%04d.%02d.%02d %02d:%02d",
-                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                  tm.tm_hour, tm.tm_min);
-    return std::string(buf);
-  }
-
   // ---------- capture params ----------
   double pos_enter_mm_{20.0};
   double pos_exit_mm_{60.0};
@@ -424,6 +449,10 @@ private:
   double t_sa_hold_s_{0.25};
   double t_sa_fresh_s_{1.0};
 
+  // ✅ NEW
+  std::string t_sa_mode_{"keep"};     // keep/update
+  double t_sa_max_delta_deg_{20.0};   // update guard
+
   // ---------- units ----------
   bool wp_rotvec_in_degrees_{false};
   bool cp_rotvec_unit_decided_{false};
@@ -431,7 +460,7 @@ private:
   size_t cp_probe_cnt_{0};
   double cp_probe_max_abs_{0.0};
 
-  // VR position unit auto-detect (meters vs mm) for calibration math
+  // VR position unit auto-detect (meters vs mm)
   bool vr_pos_unit_decided_{false};
   bool vr_pos_in_mm_{false};
 
@@ -521,7 +550,6 @@ private:
       cp_probe_max_abs_ = std::max(cp_probe_max_abs_, std::fabs(last_cp_[5]));
 
       if (cp_probe_cnt_ >= cp_unit_probe_N_) {
-        // heuristic: if max_abs > ~6, likely degrees
         cp_rotvec_in_degrees_ = (cp_probe_max_abs_ > 6.0);
         cp_rotvec_unit_decided_ = true;
         RCLCPP_INFO(get_logger(),
@@ -550,7 +578,6 @@ private:
       mabs = std::max(mabs, std::fabs(last_vr_[0]));
       mabs = std::max(mabs, std::fabs(last_vr_[1]));
       mabs = std::max(mabs, std::fabs(last_vr_[2]));
-      // heuristic: if > 10 => mm-scale, else meters
       vr_pos_in_mm_ = (mabs > 10.0);
       vr_pos_unit_decided_ = true;
       RCLCPP_INFO(get_logger(),
@@ -601,7 +628,6 @@ private:
       waypoints_.push_back(wp);
     }
 
-    // heuristic: if rotvec magnitudes exceed ~6, likely degrees
     wp_rotvec_in_degrees_ = (max_abs_w > 6.0);
   }
 
@@ -763,18 +789,6 @@ private:
 
   // ==========================================================
   // T_SA computation (right-multiply)
-  //
-  // Vive python chain is (conceptually):
-  //   R_total = R_chain * R_SA_old
-  // we measure R_total via /calibrated_pose.
-  //
-  // We want new R_SA_new such that:
-  //   R_chain * R_SA_new = R_des
-  //
-  // Since R_chain = R_total * R_SA_old^T,
-  //   R_SA_new = R_chain^T * R_des
-  //           = (R_total * R_SA_old^T)^T * R_des
-  //           = R_SA_old * R_total^T * R_des
   // ==========================================================
   bool computeTSAFromLatestCalPose()
   {
@@ -803,38 +817,46 @@ private:
     const Eigen::Matrix3d R_SA_old = T_SA_old_.block<3,3>(0,0);
     const Eigen::Matrix3d R_SA_new = R_SA_old * R_total.transpose() * R_des;
 
+    // ✅ guard: old->new 변화가 너무 크면 reject
+    const double delta_deg = rotDiffAngleDeg(R_SA_old, R_SA_new);
+    if (delta_deg > t_sa_max_delta_deg_) {
+      RCLCPP_WARN(get_logger(),
+        "[T_SA_REJECT] delta too large: %.2f deg (limit=%.2f deg). Keeping old T_SA.",
+        delta_deg, t_sa_max_delta_deg_);
+      return false;
+    }
+
     T_SA_new_ = Eigen::Matrix4d::Identity();
     T_SA_new_.block<3,3>(0,0) = R_SA_new;
 
     t_sa_computed_ = true;
 
     RCLCPP_INFO(get_logger(),
-      "[T_SA_DONE] Computed T_SA (right-multiply). w_meas(rad)=[%.6f %.6f %.6f]  w_des=[0 0 %.6f]",
-      w_meas[0], w_meas[1], w_meas[2], t_sa_w_des_z_);
-
-    // quick sanity: predicted becomes R_des
-    // R_chain = R_total * R_old^T, R_pred = R_chain * R_new
-    Eigen::Matrix3d R_chain = R_total * R_SA_old.transpose();
-    Eigen::Matrix3d R_pred  = R_chain * R_SA_new;
-    // print small info: trace closeness
-    double tr = R_pred.trace();
-    RCLCPP_INFO(get_logger(), "[T_SA_CHECK] trace(R_pred)=%.6f (should be close to trace(R_des)=%.6f)",
-                tr, R_des.trace());
+      "[T_SA_DONE] Computed T_SA (right-multiply). delta=%.2fdeg, w_meas(rad)=[%.6f %.6f %.6f], w_des=[0 0 %.6f]",
+      delta_deg, w_meas[0], w_meas[1], w_meas[2], t_sa_w_des_z_);
 
     return true;
   }
 
   void computeTSAOnceBeforeCapture(rclcpp::executors::SingleThreadedExecutor& exec)
   {
+    // ✅ keep 모드면: 기존 YAML의 T_SA를 그대로 유지
+    if (t_sa_mode_ == "keep") {
+      t_sa_computed_ = false;          // "새로 계산"은 안 함
+      T_SA_new_ = Eigen::Matrix4d::Identity();
+      RCLCPP_INFO(get_logger(), "[T_SA] mode=keep: will keep existing T_SA from yaml (no recompute).");
+      return;
+    }
+
+    // update 모드
     RCLCPP_INFO(get_logger(),
-      "[T_SA] Pre-capture update: waiting for /calibrated_pose (fresh<=%.2fs) and robot STOP hold(%.2fs), timeout=%.1fs",
+      "[T_SA] mode=update: waiting for /calibrated_pose (fresh<=%.2fs) and robot STOP hold(%.2fs), timeout=%.1fs",
       t_sa_fresh_s_, t_sa_hold_s_, t_sa_wait_timeout_s_);
 
     const rclcpp::Time t0 = tnow();
     bool hold_active = false;
     rclcpp::Time hold_start = tnow();
 
-    // use same motion detector based on currentP
     resetMotionDetector();
 
     rclcpp::Rate rate(std::min(200.0, loop_hz_));
@@ -865,7 +887,6 @@ private:
         continue;
       }
 
-      // need fresh calibrated_pose
       if (!isCalPoseFresh()) {
         hold_active = false;
         rate.sleep();
@@ -882,20 +903,18 @@ private:
         if (computeTSAFromLatestCalPose()) {
           RCLCPP_INFO(get_logger(), "[T_SA] Pre-capture update done.");
           return;
+        } else {
+          // reject 등으로 실패하면 계속 기다려서 다시 시도
         }
       }
 
       rate.sleep();
     }
 
-    // timeout
-    if (!t_sa_computed_) {
-      RCLCPP_WARN(get_logger(),
-        "[T_SA_WARN] Pre-capture T_SA update timeout. Will save Identity (or keep computed later if available). "
-        "Make sure vive_tracker publishes /calibrated_pose and keep robot steady at initial pose.");
-      T_SA_new_ = Eigen::Matrix4d::Identity();
-      t_sa_computed_ = false; // keep false to indicate not reliable
-    }
+    // timeout: update 실패 -> old 유지
+    RCLCPP_WARN(get_logger(),
+      "[T_SA_WARN] Pre-capture T_SA update timeout or rejected. Will KEEP existing T_SA from yaml.");
+    t_sa_computed_ = false;
   }
 
   // ---------- capture ----------
@@ -981,7 +1000,7 @@ private:
   // ---------- YAML read (constants) ----------
   void loadExistingYamlConstants()
   {
-    // defaults (your earlier example)
+    // defaults
     T_CE_ = Eigen::Matrix4d::Identity();
     T_CE_(2,3) = 0.222;
 
@@ -1045,13 +1064,12 @@ private:
       throw std::runtime_error("Not enough samples to compute calibration (need >=2).");
     }
 
-    // clear finalize buffers
+    // clear buffers
     O_B0B1_list_.clear();
     O_C0C1_list_.clear();
     T_AB0_list_.clear();
     T_DC0_list_.clear();
 
-    // Build relative motions for pairs (i, i+1)
     const size_t K = N - 1;
 
     Eigen::MatrixXd M(9 * K, 9);
@@ -1076,29 +1094,24 @@ private:
       const Eigen::Matrix3d R_C0C1 = T_C0C1.block<3,3>(0,0);
       const Eigen::Vector3d O_C0C1 = T_C0C1.block<3,1>(0,3);
 
-      // M block: kron(I,R_B0B1) - kron(R_C0C1^T, I)
       Eigen::Matrix<double,9,9> m = kron3(I, R_B0B1) - kron3(R_C0C1.transpose(), I);
       M.block(9*i, 0, 9, 9) = m;
 
-      // K1 block
       K1.block(3*i, 0, 3, 3) = (I - R_B0B1);
 
-      // store for translation solve and T_AD average
       O_B0B1_list_.push_back(O_B0B1);
       O_C0C1_list_.push_back(O_C0C1);
       T_AB0_list_.push_back(T_AB0);
       T_DC0_list_.push_back(T_DC0);
     }
 
-    // Solve for R_BC via smallest eigenvector of X = M^T M
     Eigen::MatrixXd X = M.transpose() * M;
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(X);
     if (es.info() != Eigen::Success) throw std::runtime_error("EigenSolver failed on X=M^T*M");
 
-    Eigen::VectorXd vectX = es.eigenvectors().col(0); // smallest eigenvalue
+    Eigen::VectorXd vectX = es.eigenvectors().col(0);
     Eigen::Map<const Eigen::Matrix<double,3,3,Eigen::ColMajor>> R_BC_raw(vectX.data());
 
-    // Orthonormalize with SVD: R = U V^T, det>0
     Eigen::JacobiSVD<Eigen::Matrix3d> svd(R_BC_raw, Eigen::ComputeFullU | Eigen::ComputeFullV);
     Eigen::Matrix3d U = svd.matrixU();
     Eigen::Matrix3d V = svd.matrixV();
@@ -1108,7 +1121,6 @@ private:
       R_BC = U * V.transpose();
     }
 
-    // Now build K2 and solve O_BC
     for (size_t i=0; i<K; i++) {
       const Eigen::Vector3d& O_B0B1 = O_B0B1_list_[i];
       const Eigen::Vector3d& O_C0C1 = O_C0C1_list_[i];
@@ -1119,7 +1131,7 @@ private:
     Eigen::Vector3d O_BC = K1.colPivHouseholderQr().solve(K2);
     Eigen::Matrix4d T_BC = makeT(R_BC, O_BC);
 
-    // Compute T_AD_i = T_AB0_i * T_BC * inv(T_DC0_i), i=0..K-1
+    // Compute T_AD_i = T_AB0_i * T_BC * inv(T_DC0_i)
     std::vector<Eigen::Quaterniond> quats;
     quats.reserve(K);
     Eigen::Vector3d t_sum = Eigen::Vector3d::Zero();
@@ -1138,9 +1150,8 @@ private:
       t_sum += t;
     }
 
-    // Average quaternion with sign alignment
     Eigen::Quaterniond q_ref = quats.front();
-    Eigen::Vector4d q_sum = Eigen::Vector4d::Zero(); // (x y z w) in coeffs()
+    Eigen::Vector4d q_sum = Eigen::Vector4d::Zero();
     for (auto& q : quats) {
       if (q_ref.coeffs().dot(q.coeffs()) < 0) {
         q.coeffs() *= -1.0;
@@ -1156,18 +1167,15 @@ private:
 
     Eigen::Matrix4d T_AD_avg = makeT(q_mean.toRotationMatrix(), t_mean);
 
-    // If T_SA wasn't computed in pre-phase but we do have fresh cal_pose now, try once more
-    if (!t_sa_computed_ && have_cal_pose_ && isCalPoseFresh()) {
-      (void)computeTSAFromLatestCalPose();
+    // Decide final T_SA to save:
+    // - keep mode: always save old
+    // - update mode: if computed => save new else save old
+    Eigen::Matrix4d T_SA_to_save = T_SA_old_;
+    if (t_sa_mode_ == "update") {
+      if (t_sa_computed_) T_SA_to_save = T_SA_new_;
+      else T_SA_to_save = T_SA_old_;
     }
 
-    // Decide final T_SA to save:
-    // - if computed => use it
-    // - else => Identity (but still write key, so vive python won't warn)
-    Eigen::Matrix4d T_SA_to_save = Eigen::Matrix4d::Identity();
-    if (t_sa_computed_) T_SA_to_save = T_SA_new_;
-
-    // Write YAML ONCE with all matrices
     writeCalibrationYamlAll(
       T_AD_avg,
       T_BC,
@@ -1177,9 +1185,10 @@ private:
     );
 
     RCLCPP_INFO(get_logger(),
-      "[YAML_SAVED] Updated calibration_matrix.yaml with T_AD, T_BC, R_Adj(%s), T_CE, T_SA(%s) -> %s",
+      "[YAML_SAVED] T_AD, T_BC computed. R_Adj=%s. T_SA saved by mode=%s (%s). -> %s",
       have_radj_ ? "computed" : "IDENTITY(fallback)",
-      t_sa_computed_ ? "computed" : "IDENTITY(fallback)",
+      t_sa_mode_.c_str(),
+      (t_sa_mode_=="update" ? (t_sa_computed_ ? "new(computed)" : "old(fallback)") : "old(kept)"),
       calib_yaml_path_.c_str());
   }
 
@@ -1196,7 +1205,7 @@ private:
 
     ofs << "# VR calibration matrix setting\n";
     ofs << "# Auto-capture + One-shot YAML update (R_Adj, T_AD, T_BC, T_SA)\n";
-    ofs << "# saved_at: " << nowStringKST() << "\n\n";  // ✅ 추가: 저장 시각 주석
+    ofs << "# saved_at: " << nowLocalString() << "\n\n";
 
     ofs << "meta:\n";
     ofs << "  t_sa_w_des_z: " << std::fixed << std::setprecision(prec) << t_sa_w_des_z_ << "\n";

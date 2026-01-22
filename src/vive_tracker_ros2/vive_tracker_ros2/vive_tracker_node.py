@@ -222,7 +222,7 @@ class ViveTracker(Node):
 
         self.tf_broadcaster = TransformBroadcaster(self)
         # self.timer = self.create_timer(0.008, self.cb_vive_timer) # 125 Hz
-        self.timer = self.create_timer(0.002, self.cb_vive_timer) # 125 Hz
+        self.timer = self.create_timer(0.002, self.cb_vive_timer) # 500 Hz
 
     # ------------------------------------------------------------------
     # VR init
