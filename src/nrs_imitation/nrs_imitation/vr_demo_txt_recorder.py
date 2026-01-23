@@ -364,18 +364,10 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("pos_amax", 120.0)
         self.declare_parameter("ang_vmax", 0.6)
         self.declare_parameter("ang_amax", 3.0)
-        # self.declare_parameter("pos_vmax", 60.0)
-        # self.declare_parameter("pos_amax", 480.0)
-        # self.declare_parameter("ang_vmax", 1.2)
-        # self.declare_parameter("ang_amax", 12.0)
-
 
         # jerk limits (proxy)
         self.declare_parameter("pos_jmax", 5000.0)
         self.declare_parameter("ang_jmax", 80.0)
-        # self.declare_parameter("pos_jmax", 40000.0)
-        # self.declare_parameter("ang_jmax", 640.0)
-
         self.declare_parameter("safety", 1.05)
 
         # --- retiming
