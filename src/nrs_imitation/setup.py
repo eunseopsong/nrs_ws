@@ -35,6 +35,8 @@ setup(
             'vr_demo_hdf5_recorder= nrs_imitation.vr_demo_hdf5_recorder:main',
             'vr_demo_hdf5_episode_pusher = nrs_imitation.vr_demo_hdf5_episode_pusher:main',
             'robot_playback_act_hdf5_recorder = nrs_imitation.robot_playback_act_hdf5_recorder:main',
+            'act_keyboard_infer_node = nrs_imitation.act_keyboard_infer_node:main',
+            'act_txt_postprocessor = nrs_imitation.act_txt_postprocessor:main',
         ],
     },
 )
