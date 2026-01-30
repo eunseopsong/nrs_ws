@@ -557,8 +557,8 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("safety", 1.05)
 
         # --- retiming
-        self.declare_parameter("retime_enable", True)
-        self.declare_parameter("retime_use_jerk", True)
+        self.declare_parameter("retime_enable", False)
+        self.declare_parameter("retime_use_jerk", False)
         self.declare_parameter("retime_max_k", 20)
         self.declare_parameter("retime_passes", 2)
 
