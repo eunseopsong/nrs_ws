@@ -1,6 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+vr_demo_txt_recorder.py
+
+[동작]
+- /calibrated_pose (Float64MultiArray): [x y z wx wy wz] (m, rad)
+- /ftsensor/measured_Cvalue (Wrench): force (N)
+
+- episode rule:
+  start when |fx| >= start_abs_fx
+  stop  when |fy| >= stop_abs_fy  -> finish_episode() -> save + (optional) scp -> viz 저장 -> shutdown
+
+[후처리 파이프라인]
+- force_process (clamp, zero_xy, EMA)
+- pose_smooth (Hampel + WhittakerAuto + optional EMA)
+- retime_uniform (linear upsample time dilation)
+- precontact_gating (fz hysteresis + consecutive)
+- edge_force_window (start/end zero + fade)
+
+[저장]
+- txt: save_path (default: .../txtcmd/cmd_continue9D.txt)  (filtered output)
+- viz: /home/eunseop/nrs_ws/src/nrs_imitation/log/YYYYMMDD_HHMMSS/
+        - plot_1_lin_kinematics.png : x y z / vx vy vz / ax ay az / jx jy jz  (before vs after)
+        - plot_2_rotvec_kinematics.png : r_x r_y r_z / r_dot / r_ddot / r_dddot (before vs after)
+        - plot_3_forces.png         : fx fy fz (before vs after)
+
+[주의]
+- "wx,wy,wz" 는 angular velocity(ω)가 아니라 spatial angle(=rotation vector)라고 가정.
+  따라서 plot2는 r_x,r_y,r_z 및 그 미분(r_dot, r_ddot, r_dddot)로 표기.
+"""
+
 import os
 import time
 import math
@@ -15,9 +45,14 @@ from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 from geometry_msgs.msg import Wrench
 
+# plotting
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 
 # ----------------------------
-# Utility: percentile safely
+# Utility
 # ----------------------------
 def pctl(x: np.ndarray, q: float) -> float:
     if x.size == 0:
@@ -27,6 +62,28 @@ def pctl(x: np.ndarray, q: float) -> float:
 
 def norm_rows(x: np.ndarray) -> np.ndarray:
     return np.linalg.norm(x, axis=1)
+
+
+def finite_diff_pad(y: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    y: (N,) signal
+    returns v,a,j each shaped (N,) with NaN padding so plots align on same index/time.
+      v[0]=nan, v[1:]=diff(y)/dt
+      a[:2]=nan, a[2:]=diff(v)/dt
+      j[:3]=nan, j[3:]=diff(a)/dt
+    """
+    y = y.astype(np.float64).reshape(-1)
+    N = y.size
+    v = np.full(N, np.nan, dtype=np.float64)
+    a = np.full(N, np.nan, dtype=np.float64)
+    j = np.full(N, np.nan, dtype=np.float64)
+    if N >= 2:
+        v[1:] = (y[1:] - y[:-1]) / dt
+    if N >= 3:
+        a[2:] = (v[2:] - v[1:-1]) / dt
+    if N >= 4:
+        j[3:] = (a[3:] - a[2:-1]) / dt
+    return v, a, j
 
 
 # ----------------------------
@@ -49,7 +106,7 @@ def hampel_1d(x: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
         med = np.median(w)
         mad = np.median(np.abs(w - med))
         sigma = k * mad + 1e-12
-        if abs(x[i] - med) > n_sigmas * sigma:                                                                                                                          
+        if abs(x[i] - med) > n_sigmas * sigma:
             y[i] = med
     return y
 
@@ -136,7 +193,7 @@ def ema_nd(Y: np.ndarray, alpha: float) -> np.ndarray:
 class Limits:
     pos_vmax: float   # mm/s
     pos_amax: float   # mm/s^2
-    ang_vmax: float   # rad/s
+    ang_vmax: float   # rad/s  (NOTE: here it is for rotation-vector rate magnitude)
     ang_amax: float   # rad/s^2
     pos_jmax: float   # mm/s^3 (proxy)
     ang_jmax: float   # rad/s^3 (proxy)
@@ -171,15 +228,15 @@ class EvalStats:
 
 def eval_qp_proxy(pose6: np.ndarray, dt: float, lim: Limits, safety: float = 1.0) -> Tuple[EvalStats, Dict[str, np.ndarray]]:
     """
-    pose6: [x y z wx wy wz] with x,y,z in mm; w* in rad
+    pose6: [x y z r_x r_y r_z] with x,y,z in mm; r* in rad (rotation vector)
     """
     N = int(pose6.shape[0])
     T = dt * max(0, (N - 1))
 
     dp = pose6[1:, :3] - pose6[:-1, :3]
-    dw = pose6[1:, 3:] - pose6[:-1, 3:]
+    dr = pose6[1:, 3:] - pose6[:-1, 3:]
     vpos = norm_rows(dp) / dt
-    vang = norm_rows(dw) / dt
+    vang = norm_rows(dr) / dt  # rotation-vector rate magnitude (NOT ω)
 
     v = (pose6[1:, :] - pose6[:-1, :]) / dt  # (N-1,6)
     a = (v[1:, :] - v[:-1, :]) / dt          # (N-2,6)
@@ -228,17 +285,13 @@ def print_eval(logger, title: str, st: EvalStats, lim: Limits, safety: float):
     logger.info(f"[QP-EVAL] ===== {title} =====")
     logger.info(
         f"\n  N={st.N}  dt={st.dt:.6f}s  T={st.T:.3f}s"
-        f"\n  pos |v|: max={st.vpos_max:.3f} (lim {lim.pos_vmax:.3f}, {(st.vpos_max/(lim.pos_vmax+1e-9)):.3f}x), "
-        f"p95={st.vpos_p95:.3f}, mean={st.vpos_mean:.3f}  [mm/s]"
-        f"\n  pos |a|: max={st.apos_max:.3f} (lim {lim.pos_amax:.3f}, {(st.apos_max/(lim.pos_amax+1e-9)):.3f}x), "
-        f"p95={st.apos_p95:.3f}, mean={st.apos_mean:.3f}  [mm/s^2]"
-        f"\n  ang |w|: max={st.vang_max:.3f} (lim {lim.ang_vmax:.3f}, {(st.vang_max/(lim.ang_vmax+1e-9)):.3f}x), "
-        f"p95={st.vang_p95:.3f}, mean={st.vang_mean:.3f}  [rad/s]"
-        f"\n  ang |alpha|: max={st.aang_max:.3f} (lim {lim.ang_amax:.3f}, {(st.aang_max/(lim.ang_amax+1e-9)):.3f}x), "
-        f"p95={st.aang_p95:.3f}, mean={st.aang_mean:.3f}  [rad/s^2]"
-        f"\n  jerk(ref): pos max={st.jpos_max:.3f} [mm/s^3], ang max={st.jang_max:.3f} [rad/s^3]"
+        f"\n  pos |v|: max={st.vpos_max:.3f} (lim {lim.pos_vmax:.3f}), p95={st.vpos_p95:.3f}, mean={st.vpos_mean:.3f}  [mm/s]"
+        f"\n  pos |a|: max={st.apos_max:.3f} (lim {lim.pos_amax:.3f}), p95={st.apos_p95:.3f}, mean={st.apos_mean:.3f}  [mm/s^2]"
+        f"\n  rotvec |r_dot|: max={st.vang_max:.3f} (lim {lim.ang_vmax:.3f}), p95={st.vang_p95:.3f}, mean={st.vang_mean:.3f}  [rad/s]"
+        f"\n  rotvec |r_ddot|: max={st.aang_max:.3f} (lim {lim.ang_amax:.3f}), p95={st.aang_p95:.3f}, mean={st.aang_mean:.3f}  [rad/s^2]"
+        f"\n  jerk(ref): pos max={st.jpos_max:.3f} [mm/s^3], rotvec max={st.jang_max:.3f} [rad/s^3]"
         f"\n  violation_rate(safety={safety:.3f}): vpos={100*st.viol_v:.3f}%, apos={100*st.viol_a:.3f}%, "
-        f"vang={100*st.viol_w:.3f}%, aang={100*st.viol_alpha:.3f}%"
+        f"r_dot={100*st.viol_w:.3f}%, r_ddot={100*st.viol_alpha:.3f}%"
     )
 
 
@@ -303,6 +356,137 @@ def detect_contact_idx(fz: np.ndarray, fz_on: float, fz_off: float, consec_on: i
 
 
 # ----------------------------
+# Plot helpers (3 figures)
+# ----------------------------
+def plot_before_after(ax, t0, y0, t1, y1, title, ylabel):
+    ax.plot(t0, y0, label="before")
+    ax.plot(t1, y1, label="after")
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.grid(True)
+
+
+def _time_axes_time_aligned(dt: float, rawN: int, filN: int):
+    """
+    time-aligned rule:
+      - raw time: t_raw = [0, dt, ..., (rawN-1)dt]
+      - after time: t_fil is rescaled to match raw total duration T_raw
+                   (so both curves share the same time span on x-axis)
+    """
+    t_raw = np.arange(rawN, dtype=np.float64) * dt
+    if rawN <= 1:
+        T_raw = 0.0
+    else:
+        T_raw = float(t_raw[-1])
+
+    if filN <= 1:
+        t_fil = np.array([0.0], dtype=np.float64) if filN == 1 else np.zeros((0,), dtype=np.float64)
+    else:
+        t_fil = np.linspace(0.0, T_raw, filN, dtype=np.float64)
+
+    return t_raw, t_fil
+
+
+def save_plot_1_lin_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP: np.ndarray):
+    rawN = rawP.shape[0]
+    filN = filtP.shape[0]
+    t_raw, t_fil = _time_axes_time_aligned(dt, rawN, filN)
+
+    fig = plt.figure(figsize=(16, 12))
+    names = ["x", "y", "z"]
+    units = ["mm", "mm", "mm"]
+
+    # 네 코드에 이미 있는 finite_diff_pad, plot_before_after 를 그대로 사용한다고 가정
+    for c in range(3):
+        y_raw = rawP[:, c]
+        y_fil = filtP[:, c]
+        v_raw, a_raw, j_raw = finite_diff_pad(y_raw, dt)
+        v_fil, a_fil, j_fil = finite_diff_pad(y_fil, dt)
+
+        ax = plt.subplot(4, 3, 1 + c)
+        plot_before_after(ax, t_raw, y_raw, t_fil, y_fil, f"{names[c]}", units[c])
+        if c == 0:
+            ax.legend()
+
+        ax = plt.subplot(4, 3, 4 + c)
+        plot_before_after(ax, t_raw, v_raw, t_fil, v_fil, f"v{names[c]}", f"{units[c]}/s")
+
+        ax = plt.subplot(4, 3, 7 + c)
+        plot_before_after(ax, t_raw, a_raw, t_fil, a_fil, f"a{names[c]}", f"{units[c]}/s^2")
+
+        ax = plt.subplot(4, 3, 10 + c)
+        plot_before_after(ax, t_raw, j_raw, t_fil, j_fil, f"j{names[c]}", f"{units[c]}/s^3")
+        ax.set_xlabel("time [s]")
+
+    fig.suptitle("Linear kinematics: pos / vel / acc / jerk (before vs after, time-aligned)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    outpath = os.path.join(viz_dir, "plot_1_lin_kinematics.png")
+    plt.savefig(outpath, dpi=200)
+    plt.close(fig)
+
+
+def save_plot_2_rotvec_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP: np.ndarray):
+    """
+    wx/wy/wz는 네 말대로 angular velocity가 아니라 spatial angle(=rotation vector component)로 보고,
+    네이밍은 dot/d2/d3 대신: rate / accel / jerk 로 표기.
+    """
+    rawN = rawP.shape[0]
+    filN = filtP.shape[0]
+    t_raw, t_fil = _time_axes_time_aligned(dt, rawN, filN)
+
+    fig = plt.figure(figsize=(16, 12))
+    names = ["r_x", "r_y", "r_z"]      # rotation-vector component
+    units = ["rad", "rad", "rad"]
+
+    for c in range(3):
+        y_raw = rawP[:, 3 + c]
+        y_fil = filtP[:, 3 + c]
+        r_rate_raw, r_acc_raw, r_jerk_raw = finite_diff_pad(y_raw, dt)
+        r_rate_fil, r_acc_fil, r_jerk_fil = finite_diff_pad(y_fil, dt)
+
+        ax = plt.subplot(4, 3, 1 + c)
+        plot_before_after(ax, t_raw, y_raw, t_fil, y_fil, f"{names[c]}", units[c])
+        if c == 0:
+            ax.legend()
+
+        ax = plt.subplot(4, 3, 4 + c)
+        plot_before_after(ax, t_raw, r_rate_raw, t_fil, r_rate_fil, f"{names[c]}_rate", f"{units[c]}/s")
+
+        ax = plt.subplot(4, 3, 7 + c)
+        plot_before_after(ax, t_raw, r_acc_raw, t_fil, r_acc_fil, f"{names[c]}_accel", f"{units[c]}/s^2")
+
+        ax = plt.subplot(4, 3, 10 + c)
+        plot_before_after(ax, t_raw, r_jerk_raw, t_fil, r_jerk_fil, f"{names[c]}_jerk", f"{units[c]}/s^3")
+        ax.set_xlabel("time [s]")
+
+    fig.suptitle("Rotation-vector kinematics: r / r_rate / r_accel / r_jerk (before vs after, time-aligned)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    outpath = os.path.join(viz_dir, "plot_2_rotvec_kinematics.png")
+    plt.savefig(outpath, dpi=200)
+    plt.close(fig)
+
+
+def save_plot_3_forces(viz_dir: str, dt: float, rawF: np.ndarray, filtF: np.ndarray):
+    rawN = rawF.shape[0]
+    filN = filtF.shape[0]
+    t_raw, t_fil = _time_axes_time_aligned(dt, rawN, filN)
+
+    fig = plt.figure(figsize=(16, 4))
+    names = ["fx", "fy", "fz"]
+    for c in range(3):
+        ax = plt.subplot(1, 3, 1 + c)
+        plot_before_after(ax, t_raw, rawF[:, c], t_fil, filtF[:, c], f"{names[c]}", "N")
+        ax.set_xlabel("time [s]")
+        if c == 0:
+            ax.legend()
+
+    fig.suptitle("Forces: fx / fy / fz (before vs after, time-aligned)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
+    outpath = os.path.join(viz_dir, "plot_3_forces.png")
+    plt.savefig(outpath, dpi=200)
+    plt.close(fig)
+
+# ----------------------------
 # Main Node
 # ----------------------------
 class VrDemoTxtRecorder(Node):
@@ -314,15 +498,18 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("force_topic", "/ftsensor/measured_Cvalue")   # geometry_msgs/Wrench
 
         # --- recorder timing
-        self.declare_parameter("record_hz", 125.0)       # sampling while recording
+        self.declare_parameter("record_hz", 125.0)
         self.declare_parameter("require_fresh_sec", 0.2)
 
-        # --- episode rule (ActDataRecorder와 동일)
+        # --- episode rule
         self.declare_parameter("start_abs_fx", 10.0)  # start when |fx| >= 10
         self.declare_parameter("stop_abs_fy", 10.0)   # end   when |fy| >= 10
 
-        # --- save path
+        # --- save path (filtered output)
         self.declare_parameter("save_path", "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd/cmd_continue9D.txt")
+
+        # --- viz log root
+        self.declare_parameter("viz_root", "/home/eunseop/nrs_ws/src/nrs_imitation/log")
 
         # --- SCP transfer
         self.declare_parameter("transfer_enable", True)
@@ -332,8 +519,8 @@ class VrDemoTxtRecorder(Node):
 
         # --- force shaping
         self.declare_parameter("zero_xy_forces", True)
-        self.declare_parameter("force_clamp_abs", 200.0)           # N
-        self.declare_parameter("force_ema_alpha", 0.2)             # 0 disables
+        self.declare_parameter("force_clamp_abs", 200.0)
+        self.declare_parameter("force_ema_alpha", 0.2)
         self.declare_parameter("edge_force_zero_sec", 0.5)
         self.declare_parameter("edge_force_fade_sec", 0.3)
 
@@ -356,6 +543,7 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("lam_iters", 6)
         self.declare_parameter("cg_iters", 200)
         self.declare_parameter("cg_tol", 1e-8)
+
         self.declare_parameter("pose_ema_enable", False)
         self.declare_parameter("pose_ema_alpha", 0.2)
 
@@ -364,8 +552,6 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("pos_amax", 120.0)
         self.declare_parameter("ang_vmax", 0.6)
         self.declare_parameter("ang_amax", 3.0)
-
-        # jerk limits (proxy)
         self.declare_parameter("pos_jmax", 5000.0)
         self.declare_parameter("ang_jmax", 80.0)
         self.declare_parameter("safety", 1.05)
@@ -374,7 +560,7 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("retime_enable", True)
         self.declare_parameter("retime_use_jerk", True)
         self.declare_parameter("retime_max_k", 20)
-        self.declare_parameter("retime_passes", 3)
+        self.declare_parameter("retime_passes", 2)
 
         # -------------------------
         # internal state
@@ -387,6 +573,7 @@ class VrDemoTxtRecorder(Node):
         self.require_fresh_sec = float(self.get_parameter("require_fresh_sec").value)
 
         self.save_path = str(self.get_parameter("save_path").value)
+        self.viz_root = str(self.get_parameter("viz_root").value)
 
         self.start_abs_fx = float(self.get_parameter("start_abs_fx").value)
         self.stop_abs_fy = float(self.get_parameter("stop_abs_fy").value)
@@ -419,6 +606,7 @@ class VrDemoTxtRecorder(Node):
         self.lam_iters = int(self.get_parameter("lam_iters").value)
         self.cg_iters = int(self.get_parameter("cg_iters").value)
         self.cg_tol = float(self.get_parameter("cg_tol").value)
+
         self.pose_ema_enable = bool(self.get_parameter("pose_ema_enable").value)
         self.pose_ema_alpha = float(self.get_parameter("pose_ema_alpha").value)
 
@@ -457,38 +645,22 @@ class VrDemoTxtRecorder(Node):
         self.timer = self.create_timer(self.dt, self.cb_timer)
 
         self.get_logger().info(f"Initialized. Local save path: {self.save_path}")
+        self.get_logger().info(f"Viz root: {self.viz_root}")
         self.get_logger().info(f"Topics: pose={self.pose_topic} (Float64MultiArray), force={self.force_topic} (Wrench)")
         self.get_logger().info(f"Episode rule: start=|fx|>={self.start_abs_fx}, end=|fy|>={self.stop_abs_fy}  (end -> auto shutdown)")
-        self.get_logger().info(
-            f"Pose smoothing: Hampel={self.hampel_enable}(win={self.hampel_win}, sig={self.hampel_sig}) + "
-            f"WhittakerAuto={self.whittaker_auto}(lam_pos_init={self.lam_pos_init}, lam_ang_init={self.lam_ang_init}, "
-            f"growth={self.lam_growth}, iters={self.lam_iters}) + PoseEMA={self.pose_ema_enable}(alpha={self.pose_ema_alpha})"
-        )
-        self.get_logger().info(
-            f"Pre-contact force gating: {self.precontact_gating}  (fz_on={self.fz_on}, fz_off={self.fz_off}, "
-            f"consec_on={self.consec_on}, consec_off={self.consec_off})"
-        )
-        self.get_logger().info(
-            f"QP-proxy limits: pos_vmax={self.lim.pos_vmax} mm/s, pos_amax={self.lim.pos_amax} mm/s^2, "
-            f"ang_vmax={self.lim.ang_vmax} rad/s, ang_amax={self.lim.ang_amax} rad/s^2, safety={self.safety}"
-        )
-        self.get_logger().info(
-            f"Retime: enable={self.retime_enable}, use_jerk={self.retime_use_jerk}, max_k={self.retime_max_k}, passes={self.retime_passes}"
-        )
 
     # -------------------------
     # callbacks
     # -------------------------
     def cb_pose(self, msg: Float64MultiArray):
-        # [x y z wx wy wz] (m, rad) -> (mm, rad)
+        # [x y z r_x r_y r_z] (m, rad) -> (mm, rad)
         if len(msg.data) < 6:
             return
-        x, y, z, wx, wy, wz = msg.data[:6]
-        self.latest_pose6_mm_rad = np.array([1000.0 * x, 1000.0 * y, 1000.0 * z, wx, wy, wz], dtype=np.float64)
+        x, y, z, rx, ry, rz = msg.data[:6]
+        self.latest_pose6_mm_rad = np.array([1000.0 * x, 1000.0 * y, 1000.0 * z, rx, ry, rz], dtype=np.float64)
         self.latest_pose_t = time.time()
 
     def cb_force(self, msg: Wrench):
-        # geometry_msgs/Wrench: msg.force.(x,y,z)
         fx = float(msg.force.x)
         fy = float(msg.force.y)
         fz = float(msg.force.z)
@@ -499,11 +671,10 @@ class VrDemoTxtRecorder(Node):
         if self.finishing_:
             return
 
-        # ActDataRecorder와 동일 start/end 룰
         abs_fx_over_start = abs(fx) >= self.start_abs_fx
-        abs_fy_over_end   = abs(fy) >= self.stop_abs_fy
+        abs_fy_over_end = abs(fy) >= self.stop_abs_fy
 
-        # start: |fx|>=10, not active
+        # start
         if (not self.episode_active) and abs_fx_over_start:
             self.episode_active = True
             self.buf_pose.clear()
@@ -514,7 +685,7 @@ class VrDemoTxtRecorder(Node):
                 self.get_logger().info(f"[START] fx={fx:.3f} fy={fy:.3f} fz={fz:.3f} | (pose not received yet)")
             return
 
-        # end: |fy|>=10, active -> finish + shutdown
+        # end
         if self.episode_active and abs_fy_over_end:
             self.get_logger().info("=== EPISODE ENDED (by |fy| >= stop_abs_fy) ===")
             self.finish_episode()
@@ -545,10 +716,8 @@ class VrDemoTxtRecorder(Node):
         if self.zero_xy_forces:
             Fp[:, 0] = 0.0
             Fp[:, 1] = 0.0
-
         if 0.0 < self.force_ema_alpha < 1.0:
             Fp = ema_nd(Fp, alpha=self.force_ema_alpha)
-
         return Fp
 
     def _apply_edge_force_window(self, F: np.ndarray, hz: float) -> np.ndarray:
@@ -587,8 +756,7 @@ class VrDemoTxtRecorder(Node):
             Pp[:, 3:] = whittaker_cg_nd(Pp[:, 3:], lam=self.lam_ang_init, cg_iters=self.cg_iters, tol=self.cg_tol)
             if self.pose_ema_enable:
                 Pp = ema_nd(Pp, alpha=self.pose_ema_alpha)
-            info = {"lam_pos": self.lam_pos_init, "lam_ang": self.lam_ang_init}
-            return Pp, info
+            return Pp, {"lam_pos": self.lam_pos_init, "lam_ang": self.lam_ang_init}
 
         lam_pos = self.lam_pos_init
         lam_ang = self.lam_ang_init
@@ -597,8 +765,8 @@ class VrDemoTxtRecorder(Node):
         best_score = 1e18
         best_info = {"lam_pos": lam_pos, "lam_ang": lam_ang}
 
-        max_pos_delta_allow = 5.0      # mm
-        max_ang_delta_allow = 0.03     # rad
+        max_pos_delta_allow = 5.0    # mm
+        max_ang_delta_allow = 0.03   # rad
 
         for _ in range(max(1, self.lam_iters)):
             Pp = P0.copy()
@@ -617,8 +785,7 @@ class VrDemoTxtRecorder(Node):
             score = max(st.apos_p95 / (self.lim.pos_amax + 1e-9),
                         st.aang_p95 / (self.lim.ang_amax + 1e-9),
                         st.jpos_p95 / (self.lim.pos_jmax + 1e-9),
-                        st.jang_p95 / (self.lim.ang_jmax + 1e-9)) \
-                    + 0.05 * (float(dpos.mean()) / 1.0)
+                        st.jang_p95 / (self.lim.ang_jmax + 1e-9)) + 0.05 * (float(dpos.mean()) / 1.0)
 
             if score < best_score:
                 best_score = score
@@ -674,6 +841,21 @@ class VrDemoTxtRecorder(Node):
 
         return Pcur, Fcur, k_total
 
+    def _make_viz_dir(self) -> str:
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        out_dir = os.path.join(self.viz_root, ts)
+        os.makedirs(out_dir, exist_ok=True)
+        return out_dir
+
+    def _save_viz(self, out_dir: str, rawP: np.ndarray, rawF: np.ndarray, filtP: np.ndarray, filtF: np.ndarray):
+        try:
+            save_plot_1_lin_kinematics(out_dir, self.dt, rawP, filtP)
+            save_plot_2_rotvec_kinematics(out_dir, self.dt, rawP, filtP)
+            save_plot_3_forces(out_dir, self.dt, rawF, filtF)
+            self.get_logger().info(f"[VIZ] Saved 3 plots to: {out_dir}")
+        except Exception as e:
+            self.get_logger().error(f"[VIZ] Failed to save plots: {e}")
+
     def finish_episode(self):
         if self.finishing_:
             return
@@ -685,18 +867,20 @@ class VrDemoTxtRecorder(Node):
             rclpy.shutdown()
             return
 
-        P = np.asarray(self.buf_pose, dtype=np.float64)   # (N,6) [mm, rad]
-        F = np.asarray(self.buf_force, dtype=np.float64)  # (N,3) [N]
-        rawN = int(P.shape[0])
+        # --- raw buffers
+        rawP = np.asarray(self.buf_pose, dtype=np.float64)   # (N,6)
+        rawF = np.asarray(self.buf_force, dtype=np.float64)  # (N,3)
+        rawN = int(rawP.shape[0])
 
         # --- eval raw
-        st_raw, dbg_raw = eval_qp_proxy(P, self.dt, self.lim, safety=self.safety)
+        st_raw, dbg_raw = eval_qp_proxy(rawP, self.dt, self.lim, safety=self.safety)
         print_eval(self.get_logger(), "BEFORE pose smoothing (RAW)", st_raw, self.lim, self.safety)
 
+        # (optional) print some top violations
         vpos_lim = self.lim.pos_vmax * self.safety
         apos_lim = self.lim.pos_amax * self.safety
-        vang_lim = self.lim.ang_vmax * self.safety
-        aang_lim = self.lim.ang_amax * self.safety
+        rdot_lim = self.lim.ang_vmax * self.safety
+        rddot_lim = self.lim.ang_amax * self.safety
 
         idx_v = topk_violations(dbg_raw["vpos"], vpos_lim)
         if idx_v.size:
@@ -710,35 +894,26 @@ class VrDemoTxtRecorder(Node):
             for i in idx_a:
                 self.get_logger().info(f"    idx={int(i):6d}, t={float(i+1)*self.dt:8.3f}s, value={float(dbg_raw['apos'][i]):.6f}")
 
-        idx_w = topk_violations(dbg_raw["vang"], vang_lim)
-        if idx_w.size:
-            self.get_logger().info("[QP-EVAL] ang|w| top6 violating indices:")
-            for i in idx_w:
+        idx_rdot = topk_violations(dbg_raw["vang"], rdot_lim)
+        if idx_rdot.size:
+            self.get_logger().info("[QP-EVAL] rotvec|r_dot| top6 violating indices:")
+            for i in idx_rdot:
                 self.get_logger().info(f"    idx={int(i):6d}, t={float(i)*self.dt:8.3f}s, value={float(dbg_raw['vang'][i]):.6f}")
 
-        idx_alpha = topk_violations(dbg_raw["aang"], aang_lim)
-        if idx_alpha.size:
-            self.get_logger().info("[QP-EVAL] ang|alpha| top6 violating indices:")
-            for i in idx_alpha:
+        idx_rddot = topk_violations(dbg_raw["aang"], rddot_lim)
+        if idx_rddot.size:
+            self.get_logger().info("[QP-EVAL] rotvec|r_ddot| top6 violating indices:")
+            for i in idx_rddot:
                 self.get_logger().info(f"    idx={int(i):6d}, t={float(i+1)*self.dt:8.3f}s, value={float(dbg_raw['aang'][i]):.6f}")
 
-        # --- force process
-        Fp = self._force_process(F)
+        # --- pipeline
+        Fp = self._force_process(rawF)
 
-        # --- pose smoothing
-        Ps, info = self._pose_smooth(P)
+        Ps, info = self._pose_smooth(rawP)
         st_sm, _ = eval_qp_proxy(Ps, self.dt, self.lim, safety=self.safety)
         print_eval(self.get_logger(), "AFTER pose smoothing", st_sm, self.lim, self.safety)
         self.get_logger().info(f"[POSE-SMOOTH] used_lams={info}")
 
-        dpos = norm_rows(Ps[:, :3] - P[:, :3])
-        dang = norm_rows(Ps[:, 3:] - P[:, 3:])
-        self.get_logger().info(
-            f"[POSE-DELTA] pos: rms={float(np.sqrt(np.mean(dpos**2))):.3f} mm, max={float(dpos.max()):.3f} mm | "
-            f"ang: rms={float(np.sqrt(np.mean(dang**2))):.6f} rad, max={float(dang.max()):.6f} rad"
-        )
-
-        # --- retime
         Pr, Fr, k_total = self._retime_uniform(Ps, Fp)
         st_rt, _ = eval_qp_proxy(Pr, self.dt, self.lim, safety=self.safety)
         print_eval(self.get_logger(), "AFTER retiming (pose)", st_rt, self.lim, self.safety)
@@ -755,15 +930,17 @@ class VrDemoTxtRecorder(Node):
         # --- edge force window
         Fr = self._apply_edge_force_window(Fr, hz=self.record_hz)
 
-        # --- save txt
+        # --- save txt (filtered)
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
-        out = np.hstack([Pr, Fr])  # (N,9)
-
+        out9 = np.hstack([Pr, Fr])  # (N,9)
         with open(self.save_path, "w") as f:
-            for row in out:
+            for row in out9:
                 f.write("\t".join([f"{v:.6f}" for v in row.tolist()]) + "\n")
+        self.get_logger().info(f"Saved local file: {self.save_path}  (raw rows={rawN} -> out rows={out9.shape[0]})")
 
-        self.get_logger().info(f"Saved local file: {self.save_path}  (raw rows={rawN} -> out rows={out.shape[0]})")
+        # --- viz save (after saving path)
+        viz_dir = self._make_viz_dir()
+        self._save_viz(viz_dir, rawP, rawF, Pr, Fr)
 
         # --- transfer
         if self.transfer_enable:
