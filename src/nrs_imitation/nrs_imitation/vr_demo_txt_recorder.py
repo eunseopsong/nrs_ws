@@ -2,14 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-vr_demo_txt_recorder.py  (QP-safe version)
+vr_demo_txt_recorder.py  (QP-safe + strong contact approach slow-down)
 
-핵심
-- retime은 무조건 2배(k=2)만 수행
-- "플롯용 미분"이 아니라, txt에 저장되는 pose 자체(Pr)가 v/a/j 제약을 만족하도록 만든다.
-- retime 이후에 D3(3차 차분) jerk-penalty smoothing을 추가하고,
-  QP-guard 루프에서 위반 시 lam을 자동 증가시켜 제약 만족을 유도한다.
-- 플롯은 before/after 동시, AFTER(retimed) 시간축 기준 정렬 유지.
+요구사항 반영:
+- retime x2 유지
+- force clamp 유지 (force_clamp_abs)
+- fz는 clamp 이후, "첫 fz>=5N 발생 이전" 구간을 모두 0으로 강제
+- contact 판단은 (위 pre-zero 처리된 fz) 기반
+- contact 직전 3초 동안 확실히 느리게 접근(time-warp)
+- plot: before/after 동시, AFTER-time-aligned
 """
 
 import os
@@ -44,9 +45,6 @@ def norm_rows(x: np.ndarray) -> np.ndarray:
 
 
 def finite_diff_pad(y: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    단순 후진차분 (QP가 보는 것과 유사한 형태로 디버깅용)
-    """
     y = y.astype(np.float64).reshape(-1)
     N = y.size
     v = np.full(N, np.nan, dtype=np.float64)
@@ -69,7 +67,7 @@ def hampel_1d(x: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
         return x.copy()
     n = x.size
     y = x.copy()
-    k = 1.4826  # MAD->std
+    k = 1.4826
     for i in range(n):
         i0 = max(0, i - win)
         i1 = min(n, i + win + 1)
@@ -91,7 +89,6 @@ def hampel_nd(X: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
 
 # ----------------------------
 # Whittaker smoother via CG (D2 penalty)
-#   minimize ||y-z||^2 + lam*||D2 z||^2
 # ----------------------------
 def _apply_D2(x: np.ndarray) -> np.ndarray:
     return x[:-2] - 2.0 * x[1:-1] + x[2:]
@@ -155,8 +152,6 @@ def ema_nd(Y: np.ndarray, alpha: float) -> np.ndarray:
 
 # ----------------------------
 # Jerk-penalty smoother via CG (D3 penalty)
-#   minimize ||y-z||^2 + lam*||D3 z||^2
-# D3 forward: x[i] - 3x[i+1] + 3x[i+2] - x[i+3]   (i=0..n-4)
 # ----------------------------
 def _apply_D3(x: np.ndarray) -> np.ndarray:
     return x[:-3] - 3.0 * x[1:-2] + 3.0 * x[2:-1] - x[3:]
@@ -164,7 +159,6 @@ def _apply_D3(x: np.ndarray) -> np.ndarray:
 
 def _apply_D3t(u: np.ndarray, n: int) -> np.ndarray:
     out = np.zeros(n, dtype=np.float64)
-    # u length = n-3
     out[:-3] += u
     out[1:-2] += -3.0 * u
     out[2:-1] += 3.0 * u
@@ -216,12 +210,12 @@ def whittaker_jerk_cg_nd(Y: np.ndarray, lam: float, cg_iters: int = 200, tol: fl
 # ----------------------------
 @dataclass
 class Limits:
-    pos_vmax: float   # mm/s
-    pos_amax: float   # mm/s^2
-    ang_vmax: float   # rad/s  (rotation-vector rate magnitude)
-    ang_amax: float   # rad/s^2
-    pos_jmax: float   # mm/s^3
-    ang_jmax: float   # rad/s^3
+    pos_vmax: float
+    pos_amax: float
+    ang_vmax: float
+    ang_amax: float
+    pos_jmax: float
+    ang_jmax: float
 
 
 @dataclass
@@ -308,45 +302,6 @@ def eval_qp_proxy(pose6: np.ndarray, dt: float, lim: Limits, safety: float = 1.0
     return st, debug
 
 
-def _topk_idx(arr: np.ndarray, k: int = 6) -> np.ndarray:
-    if arr.size == 0:
-        return np.zeros((0,), dtype=np.int64)
-    idx = np.argsort(-arr)[:k]
-    return idx.astype(np.int64)
-
-
-def log_topk_violations(logger, dbg: Dict[str, np.ndarray], dt: float, k: int = 6):
-    # 각 배열은 길이가 서로 다름: vpos/vang: N-1, apos/aang: N-2, jpos/jang: N-3
-    items = [
-        ("vpos", "mm/s", dbg["vpos"], dbg["vpos_lim"]),
-        ("vang", "rad/s", dbg["vang"], dbg["vang_lim"]),
-        ("apos", "mm/s^2", dbg["apos"], dbg["apos_lim"]),
-        ("aang", "rad/s^2", dbg["aang"], dbg["aang_lim"]),
-        ("jpos", "mm/s^3", dbg["jpos"], dbg["jpos_lim"]),
-        ("jang", "rad/s^3", dbg["jang"], dbg["jang_lim"]),
-    ]
-    for name, unit, arr, lim in items:
-        if arr.size == 0:
-            continue
-        idx = _topk_idx(arr, k=k)
-        # time mapping:
-        # v: i corresponds between pose[i] and pose[i+1] -> use t=(i+0.5)dt
-        # a: between v[i] and v[i+1] -> roughly t=(i+1)dt
-        # j: -> roughly t=(i+1.5)dt
-        if name in ("vpos", "vang"):
-            t = (idx + 0.5) * dt
-        elif name in ("apos", "aang"):
-            t = (idx + 1.0) * dt
-        else:
-            t = (idx + 1.5) * dt
-
-        over = arr[idx] - lim
-        logger.info(f"[TOP-{k}] {name} (limit={lim:.3f} {unit})")
-        for ii, tt, vv, oo in zip(idx.tolist(), t.tolist(), arr[idx].tolist(), over.tolist()):
-            flag = "VIOL" if vv > lim else " ok "
-            logger.info(f"   idx={ii:5d}  t={tt:7.3f}s  val={vv:10.3f} {unit}  (val-limit={oo:10.3f})  {flag}")
-
-
 def print_eval(logger, title: str, st: EvalStats, lim: Limits, safety: float):
     logger.info(f"[QP-EVAL] ===== {title} =====")
     logger.info(
@@ -363,13 +318,12 @@ def print_eval(logger, title: str, st: EvalStats, lim: Limits, safety: float):
 
 
 def constraints_ok(st: EvalStats) -> bool:
-    # "rate"는 비율이라서 0이 아니면 위반 존재
     return (st.viol_v == 0.0 and st.viol_a == 0.0 and st.viol_w == 0.0 and st.viol_alpha == 0.0 and
             st.viol_jpos == 0.0 and st.viol_jang == 0.0)
 
 
 # ----------------------------
-# Uniform upsample (time dilation)
+# Resampling helpers
 # ----------------------------
 def upsample_linear(X: np.ndarray, factor: int) -> np.ndarray:
     if factor <= 1:
@@ -387,9 +341,76 @@ def upsample_linear(X: np.ndarray, factor: int) -> np.ndarray:
     return out
 
 
+def resample_uniform_by_timewarp(P: np.ndarray, F: np.ndarray, dt: float, seg_scale: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    seg_scale: length N-1, 각 구간의 "시간 스케일" (>=1이면 느려짐)
+    새 시간은 t'_0=0, t'_{k+1}=t'_k + dt*seg_scale[k]
+    그 후 t'에 대해 다시 uniform dt 그리드로 보간해 반환.
+    """
+    N = P.shape[0]
+    assert seg_scale.shape[0] == N - 1
+
+    tprime = np.zeros(N, dtype=np.float64)
+    tprime[1:] = np.cumsum(dt * seg_scale)
+
+    T = float(tprime[-1])
+    if T <= 0.0:
+        return P.copy(), F.copy()
+
+    M = int(np.round(T / dt)) + 1
+    t_u = np.arange(M, dtype=np.float64) * dt
+    t_u[-1] = T
+
+    Pn = np.empty((M, P.shape[1]), dtype=np.float64)
+    Fn = np.empty((M, F.shape[1]), dtype=np.float64)
+    for d in range(P.shape[1]):
+        Pn[:, d] = np.interp(t_u, tprime, P[:, d])
+    for d in range(F.shape[1]):
+        Fn[:, d] = np.interp(t_u, tprime, F[:, d])
+    return Pn, Fn
+
+
 # ----------------------------
-# Contact detection
+# Contact logic (fz pre-zero + detection)
 # ----------------------------
+def force_process_with_fz_prezero(
+    Fraw: np.ndarray,
+    clamp_abs: float,
+    ema_alpha: float,
+    zero_xy: bool,
+    fz_prezero_gate_N: float
+) -> np.ndarray:
+    """
+    1) clamp 유지
+    2) (옵션) fx,fy=0
+    3) EMA
+    4) fz: '첫 fz >= gate' 이전 구간은 0으로 강제
+       (gate는 "이미 clamp & EMA 적용된 fz" 기준)
+    """
+    Fp = np.clip(Fraw.copy(), -clamp_abs, clamp_abs)
+
+    if zero_xy:
+        Fp[:, 0] = 0.0
+        Fp[:, 1] = 0.0
+
+    if 0.0 < ema_alpha < 1.0:
+        for i in range(1, Fp.shape[0]):
+            Fp[i] = ema_alpha * Fp[i] + (1.0 - ema_alpha) * Fp[i - 1]
+
+    fz = Fp[:, 2].copy()
+    first_on = None
+    for i in range(fz.size):
+        if fz[i] >= fz_prezero_gate_N:
+            first_on = i
+            break
+    if first_on is None:
+        # never contacted -> all fz = 0
+        Fp[:, 2] = 0.0
+    else:
+        Fp[:first_on, 2] = 0.0
+    return Fp
+
+
 def detect_contact_idx(fz: np.ndarray, fz_on: float, consec_on: int) -> Optional[int]:
     cnt_on = 0
     for i in range(fz.size):
@@ -565,37 +586,45 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("zero_xy_forces", True)
         self.declare_parameter("force_clamp_abs", 200.0)
         self.declare_parameter("force_ema_alpha", 0.2)
-        self.declare_parameter("edge_force_zero_sec", 0.5)
-        self.declare_parameter("edge_force_fade_sec", 0.3)
 
-        # pre-contact gating
-        self.declare_parameter("precontact_gating", True)
+        # fz pre-zero gate (요구: 5N 이전은 모두 0)
+        self.declare_parameter("fz_prezero_gate_N", 5.0)
+
+        # contact detection (on threshold)
         self.declare_parameter("fz_on", 5.0)
         self.declare_parameter("consec_on", 10)
+
+        # approach slow-down: 요구 -> contact 직전 3초
+        self.declare_parameter("approach_slowdown_enable", True)
+        self.declare_parameter("approach_pre_sec", 5.0)
+        self.declare_parameter("approach_post_sec", 0.3)
+        self.declare_parameter("approach_scale_max", 30.0)     # 더 느리게(강하게)
+        self.declare_parameter("approach_profile", "cosine")   # smooth
+        self.declare_parameter("approach_use_fz_ramp", True)
+        self.declare_parameter("approach_fz_full", 20.0)
 
         # pose smoothing (pre)
         self.declare_parameter("hampel_enable", True)
         self.declare_parameter("hampel_win", 16)
         self.declare_parameter("hampel_sig", 2.0)
 
-        # D2 (acc-penalty) smoothing (pre)
+        # D2 smoothing (pre)
         self.declare_parameter("lam_pos_d2", 250000.0)
         self.declare_parameter("lam_ang_d2", 6000.0)
         self.declare_parameter("pose_ema_enable", True)
         self.declare_parameter("pose_ema_alpha", 0.10)
 
         # retime fixed x2
-        self.retime_enable = True
         self.retime_k = 2
 
-        # post-retime jerk penalty (D3)
+        # post jerk penalty (D3)
         self.declare_parameter("post_enable", True)
         self.declare_parameter("lam_pos_d3", 2.0e7)
         self.declare_parameter("lam_ang_d3", 6.0e5)
 
         # QP-guard loop
         self.declare_parameter("qp_guard_enable", True)
-        self.declare_parameter("qp_guard_safety", 0.75)  # 컨트롤러가 더 빡빡할 가능성 -> 보수적으로
+        self.declare_parameter("qp_guard_safety", 0.75)
         self.declare_parameter("qp_guard_max_iter", 8)
         self.declare_parameter("qp_guard_growth", 2.2)
         self.declare_parameter("max_dev_pos_mm", 8.0)
@@ -605,7 +634,7 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("cg_iters", 400)
         self.declare_parameter("cg_tol", 1e-8)
 
-        # QP-proxy limits (네 컨트롤러에 맞게 더 줄여도 됨)
+        # QP-proxy limits
         self.declare_parameter("pos_vmax", 30.0)
         self.declare_parameter("pos_amax", 120.0)
         self.declare_parameter("ang_vmax", 0.6)
@@ -635,12 +664,19 @@ class VrDemoTxtRecorder(Node):
         self.zero_xy_forces = bool(self.get_parameter("zero_xy_forces").value)
         self.force_clamp_abs = float(self.get_parameter("force_clamp_abs").value)
         self.force_ema_alpha = float(self.get_parameter("force_ema_alpha").value)
-        self.edge_force_zero_sec = float(self.get_parameter("edge_force_zero_sec").value)
-        self.edge_force_fade_sec = float(self.get_parameter("edge_force_fade_sec").value)
 
-        self.precontact_gating = bool(self.get_parameter("precontact_gating").value)
+        self.fz_prezero_gate_N = float(self.get_parameter("fz_prezero_gate_N").value)
+
         self.fz_on = float(self.get_parameter("fz_on").value)
         self.consec_on = int(self.get_parameter("consec_on").value)
+
+        self.approach_slowdown_enable = bool(self.get_parameter("approach_slowdown_enable").value)
+        self.approach_pre_sec = float(self.get_parameter("approach_pre_sec").value)
+        self.approach_post_sec = float(self.get_parameter("approach_post_sec").value)
+        self.approach_scale_max = float(self.get_parameter("approach_scale_max").value)
+        self.approach_profile = str(self.get_parameter("approach_profile").value)
+        self.approach_use_fz_ramp = bool(self.get_parameter("approach_use_fz_ramp").value)
+        self.approach_fz_full = float(self.get_parameter("approach_fz_full").value)
 
         self.hampel_enable = bool(self.get_parameter("hampel_enable").value)
         self.hampel_win = int(self.get_parameter("hampel_win").value)
@@ -692,6 +728,14 @@ class VrDemoTxtRecorder(Node):
         self.timer = self.create_timer(self.dt, self.cb_timer)
 
         self.get_logger().info(f"[RETIME] fixed x2 enabled. dt={self.dt:.6f}s, save={self.save_path}")
+        self.get_logger().info(
+            f"[FZ] clamp_abs={self.force_clamp_abs}, prezero_gate={self.fz_prezero_gate_N}N, "
+            f"contact_on={self.fz_on}N (consec={self.consec_on})"
+        )
+        self.get_logger().info(
+            f"[APPROACH] enable={self.approach_slowdown_enable}, pre={self.approach_pre_sec}s, post={self.approach_post_sec}s, "
+            f"scale_max={self.approach_scale_max}"
+        )
 
     def cb_pose(self, msg: Float64MultiArray):
         if len(msg.data) < 6:
@@ -733,44 +777,12 @@ class VrDemoTxtRecorder(Node):
         self.buf_pose.append(self.latest_pose6_mm_rad.copy())
         self.buf_force.append(self.latest_force3_N.copy())
 
-    # ---------- force processing ----------
-    def _force_process(self, F: np.ndarray) -> np.ndarray:
-        Fp = np.clip(F.copy(), -self.force_clamp_abs, self.force_clamp_abs)
-        if self.zero_xy_forces:
-            Fp[:, 0] = 0.0
-            Fp[:, 1] = 0.0
-        if 0.0 < self.force_ema_alpha < 1.0:
-            # EMA
-            for i in range(1, Fp.shape[0]):
-                Fp[i] = self.force_ema_alpha * Fp[i] + (1.0 - self.force_ema_alpha) * Fp[i - 1]
-        return Fp
-
-    def _apply_edge_force_window(self, F: np.ndarray) -> np.ndarray:
-        out = F.copy()
-        n = out.shape[0]
-        zN = int(round(self.edge_force_zero_sec * self.record_hz))
-        fN = int(round(self.edge_force_fade_sec * self.record_hz))
-        zN = max(0, min(n, zN))
-        fN = max(0, min(n, fN))
-
-        if zN > 0:
-            out[:zN, :] = 0.0
-            out[n - zN:, :] = 0.0
-        if fN > 0 and (zN + fN) < n:
-            w = np.linspace(0.0, 1.0, fN, dtype=np.float64).reshape(-1, 1)
-            out[zN:zN + fN, :] *= w
-        if fN > 0 and (n - zN - fN) > 0:
-            w = np.linspace(1.0, 0.0, fN, dtype=np.float64).reshape(-1, 1)
-            out[n - zN - fN:n - zN, :] *= w
-        return out
-
     # ---------- pose smoothing ----------
     def _pose_pre_smooth(self, P: np.ndarray) -> np.ndarray:
         P0 = P.copy()
         if self.hampel_enable:
             P0 = hampel_nd(P0, win=self.hampel_win, n_sigmas=self.hampel_sig)
 
-        # D2 smoothing
         P1 = P0.copy()
         P1[:, :3] = whittaker_cg_nd(P1[:, :3], lam=self.lam_pos_d2, cg_iters=self.cg_iters, tol=self.cg_tol)
         P1[:, 3:] = whittaker_cg_nd(P1[:, 3:], lam=self.lam_ang_d2, cg_iters=self.cg_iters, tol=self.cg_tol)
@@ -780,11 +792,58 @@ class VrDemoTxtRecorder(Node):
         return P1
 
     def _retime_x2(self, P: np.ndarray, F: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        # fixed x2
-        Pr = upsample_linear(P, 2)
-        Fr = upsample_linear(F, 2)
+        Pr = upsample_linear(P, self.retime_k)
+        Fr = upsample_linear(F, self.retime_k)
         return Pr, Fr
 
+    # ---------- approach slow-down (strong; 3 sec pre-contact) ----------
+    def _apply_contact_approach_slowdown(self, Pr: np.ndarray, Fr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        if not self.approach_slowdown_enable:
+            return Pr, Fr
+
+        fz = Fr[:, 2]  # 이미 pre-zero 반영된 fz
+        cidx = detect_contact_idx(fz, self.fz_on, self.consec_on)
+        if cidx is None:
+            self.get_logger().warn("[APPROACH] contact not found -> skip approach slow-down")
+            return Pr, Fr
+
+        # 요구: contact 직전 3초
+        preN = int(round(self.approach_pre_sec * self.record_hz))
+        postN = int(round(self.approach_post_sec * self.record_hz))
+
+        N = Pr.shape[0]
+        seg_scale = np.ones(N - 1, dtype=np.float64)
+
+        s0 = max(0, cidx - preN)
+        s1 = min(N - 1, cidx + postN)
+        if s1 <= s0 + 2:
+            self.get_logger().warn("[APPROACH] window too small -> skip")
+            return Pr, Fr
+
+        idx = np.arange(s0, s1, dtype=np.float64)
+        u = (idx - float(s0)) / max(1.0, float(s1 - s0))
+
+        # smooth bump (0->0, mid->1, end->0)
+        bump = 0.5 - 0.5 * np.cos(2.0 * np.pi * u)
+        bump = np.clip(bump, 0.0, 1.0)
+
+        scale_target = 1.0 + (self.approach_scale_max - 1.0) * bump
+
+        if self.approach_use_fz_ramp:
+            fz_win = fz[s0:s1]
+            ramp = np.clip(fz_win / max(1e-6, self.approach_fz_full), 0.0, 1.0)
+            scale_target = 1.0 + (scale_target - 1.0) * ramp
+
+        seg_scale[s0:s1] = np.maximum(seg_scale[s0:s1], scale_target)
+
+        Pn, Fn = resample_uniform_by_timewarp(Pr, Fr, self.dt, seg_scale)
+        self.get_logger().info(
+            f"[APPROACH] contact idx={cidx} (t={cidx*self.dt:.3f}s), "
+            f"slow window [{s0},{s1}] pre={self.approach_pre_sec:.2f}s -> rows {Pr.shape[0]} -> {Pn.shape[0]}"
+        )
+        return Pn, Fn
+
+    # ---------- post smoothing ----------
     def _pose_post_smooth_d3(self, P: np.ndarray, lam_pos_d3: float, lam_ang_d3: float) -> np.ndarray:
         if not self.post_enable:
             return P
@@ -794,9 +853,6 @@ class VrDemoTxtRecorder(Node):
         return P2
 
     def _qp_guard(self, Pref: np.ndarray) -> np.ndarray:
-        """
-        Pref (retimed + pre-smoothed) -> (post D3) -> eval -> violation 있으면 lam을 키워 반복
-        """
         if not self.qp_guard_enable:
             return self._pose_post_smooth_d3(Pref, self.lam_pos_d3, self.lam_ang_d3)
 
@@ -808,7 +864,6 @@ class VrDemoTxtRecorder(Node):
         for it in range(max(1, self.qp_guard_max_iter)):
             Pk = self._pose_post_smooth_d3(Pref, lam_p, lam_a)
 
-            # deviation guard (너무 원본에서 멀어지면 중단)
             dpos = norm_rows(Pk[:, :3] - Pref[:, :3])
             dang = norm_rows(Pk[:, 3:] - Pref[:, 3:])
             if float(dpos.max()) > self.max_dev_pos_mm or float(dang.max()) > self.max_dev_ang_rad:
@@ -818,10 +873,9 @@ class VrDemoTxtRecorder(Node):
                 )
                 break
 
-            st, dbg = eval_qp_proxy(Pk, self.dt, self.lim, safety=self.qp_guard_safety)
+            st, _ = eval_qp_proxy(Pk, self.dt, self.lim, safety=self.qp_guard_safety)
             print_eval(self.get_logger(), f"QP-GUARD iter={it} (lam_p={lam_p:.3e}, lam_a={lam_a:.3e}, safety={self.qp_guard_safety})", st, self.lim, self.qp_guard_safety)
 
-            # score: jerk 위주로
             score = max(
                 st.jpos_p95 / (self.lim.pos_jmax * self.qp_guard_safety + 1e-9),
                 st.jang_p95 / (self.lim.ang_jmax * self.qp_guard_safety + 1e-9),
@@ -836,14 +890,10 @@ class VrDemoTxtRecorder(Node):
                 self.get_logger().info("[QP-GUARD] constraints satisfied.")
                 return Pk
 
-            # 어디서 터지는지 top-k 출력
-            log_topk_violations(self.get_logger(), dbg, dt=self.dt, k=6)
-
-            # grow lambda (jerk 더 강하게)
             lam_p *= self.qp_guard_growth
             lam_a *= self.qp_guard_growth
 
-        self.get_logger().warn("[QP-GUARD] could not fully satisfy constraints within limits. Returning best smoothed.")
+        self.get_logger().warn("[QP-GUARD] could not fully satisfy constraints. Returning best smoothed.")
         return best if best is not None else self._pose_post_smooth_d3(Pref, self.lam_pos_d3, self.lam_ang_d3)
 
     # ---------- viz ----------
@@ -877,43 +927,37 @@ class VrDemoTxtRecorder(Node):
         rawP = np.asarray(self.buf_pose, dtype=np.float64)
         rawF = np.asarray(self.buf_force, dtype=np.float64)
 
-        st0, dbg0 = eval_qp_proxy(rawP, self.dt, self.lim, safety=1.0)
-        print_eval(self.get_logger(), "RAW (before any smoothing)", st0, self.lim, 1.0)
-        log_topk_violations(self.get_logger(), dbg0, dt=self.dt, k=4)
+        st0, _ = eval_qp_proxy(rawP, self.dt, self.lim, safety=1.0)
+        print_eval(self.get_logger(), "RAW (before)", st0, self.lim, 1.0)
 
-        # forces
-        Fp = self._force_process(rawF)
+        # forces: clamp 유지 + EMA + fz pre-zero(5N 이전 0)
+        Fp = force_process_with_fz_prezero(
+            rawF,
+            clamp_abs=self.force_clamp_abs,
+            ema_alpha=self.force_ema_alpha,
+            zero_xy=self.zero_xy_forces,
+            fz_prezero_gate_N=self.fz_prezero_gate_N
+        )
 
-        # pre smooth
+        # pre smooth pose
         Ps = self._pose_pre_smooth(rawP)
-        st1, dbg1 = eval_qp_proxy(Ps, self.dt, self.lim, safety=1.0)
-        print_eval(self.get_logger(), "AFTER pre-smooth (D2)", st1, self.lim, 1.0)
-        log_topk_violations(self.get_logger(), dbg1, dt=self.dt, k=4)
 
         # retime x2
         Pr, Fr = self._retime_x2(Ps, Fp)
         self.get_logger().info(f"[RETIME] x2 applied: rows {Ps.shape[0]} -> {Pr.shape[0]}")
 
-        # post jerk smoothing with QP guard
-        Pr2 = self._qp_guard(Pr)
+        # strong approach slow-down (3 sec pre-contact)
+        Pr_slow, Fr_slow = self._apply_contact_approach_slowdown(Pr, Fr)
 
-        st2, dbg2 = eval_qp_proxy(Pr2, self.dt, self.lim, safety=self.qp_guard_safety)
-        print_eval(self.get_logger(), "FINAL pose (retime x2 + D3 jerk smoothing)", st2, self.lim, self.qp_guard_safety)
-        log_topk_violations(self.get_logger(), dbg2, dt=self.dt, k=6)
+        # final pose smoothing + QP guard
+        Pf = self._qp_guard(Pr_slow)
 
-        # contact gating (forces only)
-        if self.precontact_gating:
-            cidx = detect_contact_idx(Fr[:, 2], self.fz_on, self.consec_on)
-            if cidx is not None and cidx > 0:
-                self.get_logger().info(f"[CONTACT] at idx={cidx} (t={cidx*self.dt:.3f}s) -> zero forces before contact")
-                Fr[:cidx, :] = 0.0
-
-        # edge force window
-        Fr = self._apply_edge_force_window(Fr)
+        st2, _ = eval_qp_proxy(Pf, self.dt, self.lim, safety=self.qp_guard_safety)
+        print_eval(self.get_logger(), "FINAL pose (retime x2 + 3s approach slow-down + D3)", st2, self.lim, self.qp_guard_safety)
 
         # save txt (pose+force)
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
-        out9 = np.hstack([Pr2, Fr])
+        out9 = np.hstack([Pf, Fr_slow])
         with open(self.save_path, "w") as f:
             for row in out9:
                 f.write("\t".join([f"{v:.6f}" for v in row.tolist()]) + "\n")
@@ -921,7 +965,7 @@ class VrDemoTxtRecorder(Node):
 
         # viz
         viz_dir = self._make_viz_dir()
-        self._save_viz(viz_dir, rawP, rawF, Pr2, Fr)
+        self._save_viz(viz_dir, rawP, rawF, Pf, Fr_slow)
 
         # transfer
         if self.transfer_enable:
