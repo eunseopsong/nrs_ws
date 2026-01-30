@@ -4,22 +4,29 @@
 """
 filter_cmd_continue9D.py
 
-[요구사항 반영]
-- input: cmd_continue9D.txt (raw trajectory)
+[동작]
+- input: cmd_continue9D.txt (x y z [mm], wx wy wz [rad], fx fy fz [N]) 각 행 9개 실수
 - 실행하면:
   (1) raw를 non_filtered_cmd_continue9D.txt 로 백업
-  (2) VrDemoTxtRecorder.finish_episode()의 후처리 파이프라인을 그대로 적용
+  (2) VrDemoTxtRecorder.finish_episode() 후처리 파이프라인 동일 적용
+      - force_process
+      - pose_smooth (Hampel + WhittakerAuto + optional EMA)
+      - retime_uniform (조건부 upsample_linear)
+      - precontact_gating
+      - edge_force_window
   (3) 결과를 cmd_continue9D.txt 에 덮어쓰기 저장
-  (4) viz_YYYYMMDD_HHMMSS 폴더 생성
-  (5) 9개 채널 각각에 대해 before/after를 한 figure(단일 subplot)로 저장 (png)
-      x, y, z, wx, wy, wz, fx, fy, fz 각각 1장씩
-  (+) summary.png: 9개 subplot 한 장(편의용)
+  (4) viz_YYYYMMDD_HHMMSS 폴더 생성 후, png 3장만 저장:
+      1) plot_1_lin_kinematics.png : x y z / vx vy vz / ax ay az / jx jy jz
+      2) plot_2_ang_kinematics.png : wx wy wz / wdot / wddot / wdddot
+      3) plot_3_forces.png         : fx fy fz
 
-Input TXT format per row (9 floats):
-  x y z [mm], wx wy wz [rad], fx fy fz [N]
-
-Output TXT format per row (9 floats):
-  same as above (tab-separated, %.6f)
+[시각화(time-align)]
+- 저장값(Pr/Fr)은 그대로 두고,
+- plot 단계에서만 before/after를 "같은 time grid"로 보간해서 겹쳐 그림.
+- 보간 축은 항상 seconds 기준으로 통일:
+    raw: 0..T_raw  -> 0..T_common 로 시간 스케일만 늘려서 보간
+    after: 0..T_after -> 0..T_common 로 보간
+- 이렇게 하면 before/after 시간축이 완전히 동일하게 맞음.
 """
 
 import argparse
@@ -31,14 +38,13 @@ from typing import Optional, Tuple, Dict
 
 import numpy as np
 
-# headless 환경에서도 png 저장 가능하게
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
 # ----------------------------
-# Utility: percentile safely
+# Utility
 # ----------------------------
 def pctl(x: np.ndarray, q: float) -> float:
     if x.size == 0:
@@ -50,19 +56,90 @@ def norm_rows(x: np.ndarray) -> np.ndarray:
     return np.linalg.norm(x, axis=1)
 
 
+def finite_diff_pad(y: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    y: (N,) signal
+    returns v,a,j each shaped (N,) with NaN padding so plots align on same index/time.
+      v[0]=nan, v[1:]=diff(y)/dt
+      a[:2]=nan, a[2:]=diff(v)/dt
+      j[:3]=nan, j[3:]=diff(a)/dt
+    """
+    y = y.astype(np.float64).reshape(-1)
+    N = y.size
+    v = np.full(N, np.nan, dtype=np.float64)
+    a = np.full(N, np.nan, dtype=np.float64)
+    j = np.full(N, np.nan, dtype=np.float64)
+    if N >= 2:
+        v[1:] = (y[1:] - y[:-1]) / dt
+    if N >= 3:
+        a[2:] = (v[2:] - v[1:-1]) / dt
+    if N >= 4:
+        j[3:] = (a[3:] - a[2:-1]) / dt
+    return v, a, j
+
+
+def make_common_time_and_align(raw_y: np.ndarray, after_y: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """
+    Plot용 time-align 전용.
+    - raw_y: (N0,)
+    - after_y: (N1,)
+    - dt: 원래 sampling dt (초)
+
+    리타임 후 after는 샘플 수가 늘어나면서 총 duration이 길어짐.
+    여기서는 before/after를 동일 time축(0..T_common)에 겹쳐 그리기 위해,
+    둘 다 0..T_common로 '시간 스케일만' 맞춘 뒤 공통 grid(t_common)로 보간한다.
+
+    반환:
+      t_common, raw_aligned, after_aligned, dt_plot
+    """
+    raw_y = raw_y.reshape(-1).astype(np.float64)
+    after_y = after_y.reshape(-1).astype(np.float64)
+    N0 = raw_y.size
+    N1 = after_y.size
+    if N0 < 2 or N1 < 2:
+        # 너무 짧으면 그냥 그대로
+        T_common = dt * max(0, max(N0, N1) - 1)
+        t_common = np.arange(max(N0, N1), dtype=np.float64) * dt
+        # 길이 맞추기: 가능한 경우만
+        raw_pad = np.full_like(t_common, np.nan)
+        aft_pad = np.full_like(t_common, np.nan)
+        raw_pad[:N0] = raw_y
+        aft_pad[:N1] = after_y
+        dt_plot = dt if t_common.size < 2 else float(t_common[1] - t_common[0])
+        return t_common, raw_pad, aft_pad, dt_plot
+
+    # durations
+    T0 = dt * (N0 - 1)
+    T1 = dt * (N1 - 1)
+    T_common = max(T0, T1)
+
+    # common grid length: 더 촘촘한 쪽(보통 after)이 정보 손실이 적음
+    N_common = max(N0, N1)
+    if N_common < 2:
+        N_common = 2
+
+    t_common = np.linspace(0.0, T_common, N_common, dtype=np.float64)
+
+    # 각 신호의 "스케일된 시간축" (0..T_common)
+    t0_scaled = np.linspace(0.0, T_common, N0, dtype=np.float64)
+    t1_scaled = np.linspace(0.0, T_common, N1, dtype=np.float64)
+
+    raw_aligned = np.interp(t_common, t0_scaled, raw_y)
+    aft_aligned = np.interp(t_common, t1_scaled, after_y)
+
+    dt_plot = float(t_common[1] - t_common[0])
+    return t_common, raw_aligned, aft_aligned, dt_plot
+
+
 # ----------------------------
 # Hampel filter (per-dim)
 # ----------------------------
 def hampel_1d(x: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
-    """
-    Robust outlier filter. Replaces outliers with local median.
-    win: half-window size (samples)
-    """
     if win <= 0:
         return x.copy()
     n = x.size
     y = x.copy()
-    k = 1.4826  # scale factor for MAD -> std approx
+    k = 1.4826  # MAD -> std approx
     for i in range(n):
         i0 = max(0, i - win)
         i1 = min(n, i + win + 1)
@@ -84,7 +161,6 @@ def hampel_nd(X: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
 
 # ----------------------------
 # Whittaker smoother via CG
-#   minimize ||y-z||^2 + lam*||D2 z||^2
 # ----------------------------
 def _apply_D2(x: np.ndarray) -> np.ndarray:
     return x[:-2] - 2.0 * x[1:-1] + x[2:]
@@ -99,9 +175,6 @@ def _apply_D2t(u: np.ndarray, n: int) -> np.ndarray:
 
 
 def whittaker_cg_1d(y: np.ndarray, lam: float, cg_iters: int = 200, tol: float = 1e-8) -> np.ndarray:
-    """
-    Solve (I + lam*D2^T D2) z = y with conjugate gradient.
-    """
     n = y.size
     if n < 5 or lam <= 0.0:
         return y.copy()
@@ -151,16 +224,16 @@ def ema_nd(Y: np.ndarray, alpha: float) -> np.ndarray:
 
 
 # ----------------------------
-# QP-proxy kinematics eval
+# QP-proxy eval
 # ----------------------------
 @dataclass
 class Limits:
-    pos_vmax: float   # mm/s
-    pos_amax: float   # mm/s^2
-    ang_vmax: float   # rad/s
-    ang_amax: float   # rad/s^2
-    pos_jmax: float   # mm/s^3 (proxy)
-    ang_jmax: float   # rad/s^3 (proxy)
+    pos_vmax: float
+    pos_amax: float
+    ang_vmax: float
+    ang_amax: float
+    pos_jmax: float
+    ang_jmax: float
 
 
 @dataclass
@@ -191,9 +264,6 @@ class EvalStats:
 
 
 def eval_qp_proxy(pose6: np.ndarray, dt: float, lim: Limits, safety: float = 1.0) -> Tuple[EvalStats, Dict[str, np.ndarray]]:
-    """
-    pose6: [x y z wx wy wz] with x,y,z in mm; w* in rad
-    """
     N = int(pose6.shape[0])
     T = dt * max(0, (N - 1))
 
@@ -202,12 +272,12 @@ def eval_qp_proxy(pose6: np.ndarray, dt: float, lim: Limits, safety: float = 1.0
     vpos = norm_rows(dp) / dt
     vang = norm_rows(dw) / dt
 
-    v = (pose6[1:, :] - pose6[:-1, :]) / dt  # (N-1,6)
-    a = (v[1:, :] - v[:-1, :]) / dt          # (N-2,6)
+    v = (pose6[1:, :] - pose6[:-1, :]) / dt
+    a = (v[1:, :] - v[:-1, :]) / dt
     apos = norm_rows(a[:, :3])
     aang = norm_rows(a[:, 3:])
 
-    j = (a[1:, :] - a[:-1, :]) / dt          # (N-3,6)
+    j = (a[1:, :] - a[:-1, :]) / dt
     jpos = norm_rows(j[:, :3])
     jang = norm_rows(j[:, 3:])
 
@@ -240,7 +310,6 @@ def eval_qp_proxy(pose6: np.ndarray, dt: float, lim: Limits, safety: float = 1.0
         aang_mean=float(aang.mean()) if aang.size else 0.0,
         viol_v=viol_v, viol_a=viol_a, viol_w=viol_w, viol_alpha=viol_alpha
     )
-
     debug = {"vpos": vpos, "vang": vang, "apos": apos, "aang": aang, "jpos": jpos, "jang": jang}
     return st, debug
 
@@ -249,34 +318,26 @@ def print_eval(title: str, st: EvalStats, lim: Limits, safety: float):
     print(f"[QP-EVAL] ===== {title} =====")
     print(
         f"\n  N={st.N}  dt={st.dt:.6f}s  T={st.T:.3f}s"
-        f"\n  pos |v|: max={st.vpos_max:.3f} (lim {lim.pos_vmax:.3f}, {(st.vpos_max/(lim.pos_vmax+1e-9)):.3f}x), "
-        f"p95={st.vpos_p95:.3f}, mean={st.vpos_mean:.3f}  [mm/s]"
-        f"\n  pos |a|: max={st.apos_max:.3f} (lim {lim.pos_amax:.3f}, {(st.apos_max/(lim.pos_amax+1e-9)):.3f}x), "
-        f"p95={st.apos_p95:.3f}, mean={st.apos_mean:.3f}  [mm/s^2]"
-        f"\n  ang |w|: max={st.vang_max:.3f} (lim {lim.ang_vmax:.3f}, {(st.vang_max/(lim.ang_vmax+1e-9)):.3f}x), "
-        f"p95={st.vang_p95:.3f}, mean={st.vang_mean:.3f}  [rad/s]"
-        f"\n  ang |alpha|: max={st.aang_max:.3f} (lim {lim.ang_amax:.3f}, {(st.aang_max/(lim.ang_amax+1e-9)):.3f}x), "
-        f"p95={st.aang_p95:.3f}, mean={st.aang_mean:.3f}  [rad/s^2]"
+        f"\n  pos |v|: max={st.vpos_max:.3f} (lim {lim.pos_vmax:.3f}), p95={st.vpos_p95:.3f}, mean={st.vpos_mean:.3f}  [mm/s]"
+        f"\n  pos |a|: max={st.apos_max:.3f} (lim {lim.pos_amax:.3f}), p95={st.apos_p95:.3f}, mean={st.apos_mean:.3f}  [mm/s^2]"
+        f"\n  ang |w|: max={st.vang_max:.3f} (lim {lim.ang_vmax:.3f}), p95={st.vang_p95:.3f}, mean={st.vang_mean:.3f}  [rad/s]"
+        f"\n  ang |alpha|: max={st.aang_max:.3f} (lim {lim.ang_amax:.3f}), p95={st.aang_p95:.3f}, mean={st.aang_mean:.3f}  [rad/s^2]"
         f"\n  jerk(ref): pos max={st.jpos_max:.3f} [mm/s^3], ang max={st.jang_max:.3f} [rad/s^3]"
-        f"\n  violation_rate(safety={safety:.3f}): vpos={100*st.viol_v:.3f}%, apos={100*st.viol_a:.3f}%, "
-        f"vang={100*st.viol_w:.3f}%, aang={100*st.viol_alpha:.3f}%"
+        f"\n  violation_rate(safety={safety:.3f}): vpos={100*st.viol_v:.3f}%, apos={100*st.viol_a:.3f}%, vang={100*st.viol_w:.3f}%, aang={100*st.viol_alpha:.3f}%"
     )
 
 
 # ----------------------------
-# Uniform upsample (time dilation)
+# Upsample + contact + edge window
 # ----------------------------
 def upsample_linear(X: np.ndarray, factor: int) -> np.ndarray:
-    """
-    factor=k: (N-1)*k + 1 rows, linear interpolation between samples.
-    """
     if factor <= 1:
         return X.copy()
     N, D = X.shape
     outN = (N - 1) * factor + 1
     out = np.empty((outN, D), dtype=np.float64)
 
-    frac = (np.arange(factor, dtype=np.float64) / float(factor)).reshape(-1, 1)  # (k,1)
+    frac = (np.arange(factor, dtype=np.float64) / float(factor)).reshape(-1, 1)
     for i in range(N - 1):
         base = i * factor
         delta = (X[i + 1] - X[i]).reshape(1, -1)
@@ -285,18 +346,10 @@ def upsample_linear(X: np.ndarray, factor: int) -> np.ndarray:
     return out
 
 
-# ----------------------------
-# Contact detection (identical)
-# ----------------------------
 def detect_contact_idx(fz: np.ndarray, fz_on: float, fz_off: float, consec_on: int, consec_off: int) -> Optional[int]:
-    """
-    Returns first index where contact is considered ON.
-    (Recorder 코드와 동일하게 fz_on + consec_on만 실제로 사용)
-    """
     on = False
     cnt_on = 0
     first_on_idx = None
-
     for i in range(fz.size):
         if not on:
             if fz[i] >= fz_on:
@@ -309,13 +362,9 @@ def detect_contact_idx(fz: np.ndarray, fz_on: float, fz_off: float, consec_on: i
                 cnt_on = 0
         else:
             break
-
     return first_on_idx
 
 
-# ----------------------------
-# Force window (identical)
-# ----------------------------
 def apply_edge_force_window(F: np.ndarray, hz: float, edge_force_zero_sec: float, edge_force_fade_sec: float) -> np.ndarray:
     out = F.copy()
     n = out.shape[0]
@@ -324,14 +373,12 @@ def apply_edge_force_window(F: np.ndarray, hz: float, edge_force_zero_sec: float
     zN = max(0, min(n, zN))
     fN = max(0, min(n, fN))
 
-    # start
     if zN > 0:
         out[:zN, :] = 0.0
     if fN > 0 and (zN + fN) < n:
         w = np.linspace(0.0, 1.0, fN, dtype=np.float64).reshape(-1, 1)
         out[zN:zN + fN, :] = w * out[zN:zN + fN, :]
 
-    # end
     if zN > 0:
         out[n - zN:, :] = 0.0
     if fN > 0 and (n - zN - fN) > 0:
@@ -342,8 +389,19 @@ def apply_edge_force_window(F: np.ndarray, hz: float, edge_force_zero_sec: float
 
 
 # ----------------------------
-# Pose smoothing (identical)
+# Pipeline blocks
 # ----------------------------
+def force_process(F: np.ndarray, zero_xy_forces: bool, force_clamp_abs: float, force_ema_alpha: float) -> np.ndarray:
+    Fp = F.copy()
+    Fp = np.clip(Fp, -force_clamp_abs, force_clamp_abs)
+    if zero_xy_forces:
+        Fp[:, 0] = 0.0
+        Fp[:, 1] = 0.0
+    if 0.0 < force_ema_alpha < 1.0:
+        Fp = ema_nd(Fp, alpha=force_ema_alpha)
+    return Fp
+
+
 def pose_smooth(
     P: np.ndarray,
     dt: float,
@@ -373,8 +431,7 @@ def pose_smooth(
         Pp[:, 3:] = whittaker_cg_nd(Pp[:, 3:], lam=lam_ang_init, cg_iters=cg_iters, tol=cg_tol)
         if pose_ema_enable:
             Pp = ema_nd(Pp, alpha=pose_ema_alpha)
-        info = {"lam_pos": lam_pos_init, "lam_ang": lam_ang_init}
-        return Pp, info
+        return Pp, {"lam_pos": lam_pos_init, "lam_ang": lam_ang_init}
 
     lam_pos = lam_pos_init
     lam_ang = lam_ang_init
@@ -383,8 +440,8 @@ def pose_smooth(
     best_score = 1e18
     best_info = {"lam_pos": lam_pos, "lam_ang": lam_ang}
 
-    max_pos_delta_allow = 5.0      # mm
-    max_ang_delta_allow = 0.03     # rad
+    max_pos_delta_allow = 5.0
+    max_ang_delta_allow = 0.03
 
     for _ in range(max(1, lam_iters)):
         Pp = P0.copy()
@@ -419,23 +476,6 @@ def pose_smooth(
     return best, best_info
 
 
-# ----------------------------
-# Force process (identical)
-# ----------------------------
-def force_process(F: np.ndarray, zero_xy_forces: bool, force_clamp_abs: float, force_ema_alpha: float) -> np.ndarray:
-    Fp = F.copy()
-    Fp = np.clip(Fp, -force_clamp_abs, force_clamp_abs)
-    if zero_xy_forces:
-        Fp[:, 0] = 0.0
-        Fp[:, 1] = 0.0
-    if 0.0 < force_ema_alpha < 1.0:
-        Fp = ema_nd(Fp, alpha=force_ema_alpha)
-    return Fp
-
-
-# ----------------------------
-# Retime (identical)
-# ----------------------------
 def retime_uniform(
     P: np.ndarray, F: np.ndarray,
     dt: float, lim: Limits, safety: float,
@@ -511,64 +551,97 @@ def write_txt9_tab6(path: str, out: np.ndarray):
 
 
 # ----------------------------
-# Visualization
+# Plot helpers (3 figures only, time-aligned)
 # ----------------------------
-def save_one_channel_png(outdir: str, name: str, y_raw: np.ndarray, y_filt: np.ndarray, unit: str, dt: float):
-    n_raw = y_raw.size
-    n_f = y_filt.size
-
-    # raw time (reference)
-    t_raw = np.arange(n_raw) * dt
-    T_raw = t_raw[-1] if n_raw > 0 else 0.0
-
-    # after time: FORCE match the same total duration as raw
-    # (so both end at T_raw)
-    if n_f <= 1:
-        t_f = np.array([0.0])
-    else:
-        t_f = np.linspace(0.0, T_raw, n_f)
-
-    plt.figure(figsize=(12, 4))
-    plt.plot(t_raw, y_raw, label="before")
-    plt.plot(t_f,   y_filt, label="after")
-    plt.xlabel("time [s]")
-    plt.ylabel(f"{name} [{unit}]")
-    plt.title(f"{name}: before vs after (time-aligned)")
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(outdir, f"{name}.png"), dpi=200)
-    plt.close()
+def plot_before_after(ax, t, y0, y1, title, ylabel):
+    ax.plot(t, y0, label="before")
+    ax.plot(t, y1, label="after")
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.grid(True)
 
 
+def save_plot_1_lin_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP: np.ndarray):
+    fig = plt.figure(figsize=(16, 12))
+    names = ["x", "y", "z"]
+    units = ["mm", "mm", "mm"]
 
-def save_summary_png(outdir: str, raw9: np.ndarray, filt9: np.ndarray, dt: float):
-    names_units = [
-        ("x_mm", "mm"), ("y_mm", "mm"), ("z_mm", "mm"),
-        ("wx_rad", "rad"), ("wy_rad", "rad"), ("wz_rad", "rad"),
-        ("fx_N", "N"), ("fy_N", "N"), ("fz_N", "N"),
-    ]
+    for c in range(3):
+        t, y_raw, y_fil, dtp = make_common_time_and_align(rawP[:, c], filtP[:, c], dt)
+        v_raw, a_raw, j_raw = finite_diff_pad(y_raw, dtp)
+        v_fil, a_fil, j_fil = finite_diff_pad(y_fil, dtp)
 
-    n_raw = raw9.shape[0]
-    n_f   = filt9.shape[0]
+        ax = plt.subplot(4, 3, 1 + c)
+        plot_before_after(ax, t, y_raw, y_fil, f"{names[c]}", units[c])
+        if c == 0:
+            ax.legend()
 
-    tr = np.arange(n_raw) * dt
-    T_raw = tr[-1] if n_raw > 0 else 0.0
-    tf = np.linspace(0.0, T_raw, n_f) if n_f > 1 else np.array([0.0])
+        ax = plt.subplot(4, 3, 4 + c)
+        plot_before_after(ax, t, v_raw, v_fil, f"v{names[c]}", f"{units[c]}/s")
 
-    plt.figure(figsize=(14, 12))
-    for i, (nm, unit) in enumerate(names_units):
-        plt.subplot(3, 3, i + 1)
-        plt.plot(tr, raw9[:, i], label="before")
-        plt.plot(tf, filt9[:, i], label="after")
-        plt.title(nm)
-        plt.grid(True)
-        if i == 0:
-            plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(outdir, "summary.png"), dpi=200)
-    plt.close()
+        ax = plt.subplot(4, 3, 7 + c)
+        plot_before_after(ax, t, a_raw, a_fil, f"a{names[c]}", f"{units[c]}/s^2")
 
+        ax = plt.subplot(4, 3, 10 + c)
+        plot_before_after(ax, t, j_raw, j_fil, f"j{names[c]}", f"{units[c]}/s^3")
+        ax.set_xlabel("time [s]")
+
+    fig.suptitle("Linear kinematics: pos / vel / acc / jerk (before vs after, time-aligned)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    outpath = os.path.join(viz_dir, "plot_1_lin_kinematics.png")
+    plt.savefig(outpath, dpi=200)
+    plt.close(fig)
+
+
+def save_plot_2_ang_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP: np.ndarray):
+    fig = plt.figure(figsize=(16, 12))
+    names = ["wx", "wy", "wz"]
+    units = ["rad", "rad", "rad"]
+
+    for c in range(3):
+        t, y_raw, y_fil, dtp = make_common_time_and_align(rawP[:, 3 + c], filtP[:, 3 + c], dt)
+        v_raw, a_raw, j_raw = finite_diff_pad(y_raw, dtp)
+        v_fil, a_fil, j_fil = finite_diff_pad(y_fil, dtp)
+
+        ax = plt.subplot(4, 3, 1 + c)
+        plot_before_after(ax, t, y_raw, y_fil, f"{names[c]}", units[c])
+        if c == 0:
+            ax.legend()
+
+        ax = plt.subplot(4, 3, 4 + c)
+        plot_before_after(ax, t, v_raw, v_fil, f"{names[c]}_dot", f"{units[c]}/s")
+
+        ax = plt.subplot(4, 3, 7 + c)
+        plot_before_after(ax, t, a_raw, a_fil, f"{names[c]}_dotdot", f"{units[c]}/s^2")
+
+        ax = plt.subplot(4, 3, 10 + c)
+        plot_before_after(ax, t, j_raw, j_fil, f"{names[c]}_dotdotdot", f"{units[c]}/s^3")
+        ax.set_xlabel("time [s]")
+
+    fig.suptitle("Angular kinematics: w / w_dot / w_ddot / w_dddot (before vs after, time-aligned)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    outpath = os.path.join(viz_dir, "plot_2_ang_kinematics.png")
+    plt.savefig(outpath, dpi=200)
+    plt.close(fig)
+
+
+def save_plot_3_forces(viz_dir: str, dt: float, rawF: np.ndarray, filtF: np.ndarray):
+    fig = plt.figure(figsize=(16, 4))
+    names = ["fx", "fy", "fz"]
+
+    for c in range(3):
+        t, y_raw, y_fil, _dtp = make_common_time_and_align(rawF[:, c], filtF[:, c], dt)
+        ax = plt.subplot(1, 3, 1 + c)
+        plot_before_after(ax, t, y_raw, y_fil, f"{names[c]}", "N")
+        ax.set_xlabel("time [s]")
+        if c == 0:
+            ax.legend()
+
+    fig.suptitle("Forces: fx / fy / fz (before vs after, time-aligned)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
+    outpath = os.path.join(viz_dir, "plot_3_forces.png")
+    plt.savefig(outpath, dpi=200)
+    plt.close(fig)
 
 
 # ----------------------------
@@ -577,21 +650,21 @@ def save_summary_png(outdir: str, raw9: np.ndarray, filt9: np.ndarray, dt: float
 def main():
     ap = argparse.ArgumentParser()
 
-    # 파일은 기본적으로 cmd_continue9D.txt를 사용 (요구사항)
     ap.add_argument("--dir", default=".", help="cmd_continue9D.txt 가 있는 디렉토리 (default: .)")
     ap.add_argument("--infile", default="cmd_continue9D.txt", help="입력 파일명 (default: cmd_continue9D.txt)")
     ap.add_argument("--backup", default="non_filtered_cmd_continue9D.txt", help="백업 파일명")
+
     ap.add_argument("--record_hz", type=float, default=125.0)
 
     # force shaping
-    ap.add_argument("--zero_xy_forces", type=int, default=1, help="1이면 fx,fy=0 강제 (default=1)")
+    ap.add_argument("--zero_xy_forces", type=int, default=1)
     ap.add_argument("--force_clamp_abs", type=float, default=200.0)
     ap.add_argument("--force_ema_alpha", type=float, default=0.2)
     ap.add_argument("--edge_force_zero_sec", type=float, default=0.5)
     ap.add_argument("--edge_force_fade_sec", type=float, default=0.3)
 
     # precontact gating
-    ap.add_argument("--precontact_gating", type=int, default=1, help="1이면 contact 이전 force=0 (default=1)")
+    ap.add_argument("--precontact_gating", type=int, default=1)
     ap.add_argument("--fz_on", type=float, default=5.0)
     ap.add_argument("--fz_off", type=float, default=3.0)
     ap.add_argument("--consec_on", type=int, default=10)
@@ -647,41 +720,33 @@ def main():
         ang_jmax=args.ang_jmax,
     )
 
-    # -------------------------
     # (1) read raw
-    # -------------------------
     raw9 = read_txt9(in_path)
     rawN = int(raw9.shape[0])
     print(f"[INFO] Read raw: {in_path} (N={rawN})")
 
-    # -------------------------
-    # (2) backup raw -> non_filtered_cmd_continue9D.txt
-    # -------------------------
+    # (2) backup raw
     write_txt9_tab6(backup_path, raw9)
     print(f"[INFO] Backup saved: {backup_path}")
 
-    P = raw9[:, :6].copy()
-    F = raw9[:, 6:].copy()
+    rawP = raw9[:, :6].copy()
+    rawF = raw9[:, 6:].copy()
 
-    # --- eval raw (same as recorder)
-    st_raw, _ = eval_qp_proxy(P, dt, lim, safety=args.safety)
+    # eval raw
+    st_raw, _ = eval_qp_proxy(rawP, dt, lim, safety=args.safety)
     print_eval("BEFORE pose smoothing (RAW)", st_raw, lim, args.safety)
 
-    # -------------------------
     # (3) force process
-    # -------------------------
     Fp = force_process(
-        F,
+        rawF,
         zero_xy_forces=bool(args.zero_xy_forces),
         force_clamp_abs=args.force_clamp_abs,
         force_ema_alpha=args.force_ema_alpha
     )
 
-    # -------------------------
     # (4) pose smoothing
-    # -------------------------
     Ps, info = pose_smooth(
-        P, dt, lim, args.safety,
+        rawP, dt, lim, args.safety,
         hampel_enable=bool(args.hampel_enable),
         hampel_win=args.hampel_win,
         hampel_sig=args.hampel_sig,
@@ -699,16 +764,7 @@ def main():
     print_eval("AFTER pose smoothing", st_sm, lim, args.safety)
     print(f"[POSE-SMOOTH] used_lams={info}")
 
-    dpos = norm_rows(Ps[:, :3] - P[:, :3])
-    dang = norm_rows(Ps[:, 3:] - P[:, 3:])
-    print(
-        f"[POSE-DELTA] pos: rms={float(np.sqrt(np.mean(dpos**2))):.3f} mm, max={float(dpos.max()):.3f} mm | "
-        f"ang: rms={float(np.sqrt(np.mean(dang**2))):.6f} rad, max={float(dang.max()):.6f} rad"
-    )
-
-    # -------------------------
     # (5) retime
-    # -------------------------
     Pr, Fr, k_total = retime_uniform(
         Ps, Fp,
         dt=dt, lim=lim, safety=args.safety,
@@ -720,67 +776,41 @@ def main():
     st_rt, _ = eval_qp_proxy(Pr, dt, lim, safety=args.safety)
     print_eval("AFTER retiming (pose)", st_rt, lim, args.safety)
     if k_total > 1:
-        print(f"[QP-EVAL] Applied time-scale k_total={k_total}  (rows: {Ps.shape[0]} -> {Pr.shape[0]})")
+        print(f"[QP-EVAL] Applied time-scale k_total={k_total} (rows: {Ps.shape[0]} -> {Pr.shape[0]})")
 
-    # -------------------------
     # (6) contact gating
-    # -------------------------
     if bool(args.precontact_gating):
         cidx = detect_contact_idx(Fr[:, 2], args.fz_on, args.fz_off, args.consec_on, args.consec_off)
         if cidx is not None and cidx > 0:
             print(f"[CONTACT] Detected at idx={cidx}/{Pr.shape[0]} (t={cidx*dt:.3f}s) -> Zeroing forces for [0:{cidx})")
             Fr[:cidx, :] = 0.0
 
-    # -------------------------
     # (7) edge force window
-    # -------------------------
     Fr = apply_edge_force_window(
-        Fr, hz=args.record_hz,
+        Fr,
+        hz=args.record_hz,
         edge_force_zero_sec=args.edge_force_zero_sec,
         edge_force_fade_sec=args.edge_force_fade_sec
     )
 
-    # -------------------------
-    # (8) save filtered -> cmd_continue9D.txt (overwrite)
-    # -------------------------
+    # (8) overwrite filtered -> cmd_continue9D.txt
     filt9 = np.hstack([Pr, Fr])
     write_txt9_tab6(in_path, filt9)
     print(f"[DONE] Overwrote filtered file: {in_path} (rawN={rawN} -> outN={filt9.shape[0]})")
 
-    # -------------------------
-    # (9) visualization folder + per-channel pngs
-    # -------------------------
+    # (9) viz folder + 3 plots only (time-aligned)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     viz_dir = os.path.join(base_dir, f"viz_{ts}")
     os.makedirs(viz_dir, exist_ok=True)
 
-    # channel names/units + column index
-    meta = [
-        ("x_mm", 0, "mm"),
-        ("y_mm", 1, "mm"),
-        ("z_mm", 2, "mm"),
-        ("wx_rad", 3, "rad"),
-        ("wy_rad", 4, "rad"),
-        ("wz_rad", 5, "rad"),
-        ("fx_N", 6, "N"),
-        ("fy_N", 7, "N"),
-        ("fz_N", 8, "N"),
-    ]
+    save_plot_1_lin_kinematics(viz_dir, dt, rawP, Pr)
+    save_plot_2_ang_kinematics(viz_dir, dt, rawP, Pr)
+    save_plot_3_forces(viz_dir, dt, rawF, Fr)
 
-    for nm, idx, unit in meta:
-        save_one_channel_png(
-            outdir=viz_dir,
-            name=nm,
-            y_raw=raw9[:, idx],
-            y_filt=filt9[:, idx],
-            unit=unit,
-            dt=dt
-        )
-
-    # optional summary (9-subplots in one)
-    save_summary_png(viz_dir, raw9, filt9, dt)
-
-    print(f"[VIZ] Saved per-channel pngs + summary.png to: {viz_dir}")
+    print(f"[VIZ] Saved 3 plots to: {viz_dir}")
+    print("      - plot_1_lin_kinematics.png")
+    print("      - plot_2_ang_kinematics.png")
+    print("      - plot_3_forces.png")
 
 
 if __name__ == "__main__":
