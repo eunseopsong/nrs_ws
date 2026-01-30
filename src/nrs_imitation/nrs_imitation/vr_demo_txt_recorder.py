@@ -15,7 +15,7 @@ vr_demo_txt_recorder.py
 [후처리 파이프라인]
 - force_process (clamp, zero_xy, EMA)
 - pose_smooth (Hampel + WhittakerAuto + optional EMA)
-- retime_uniform (linear upsample time dilation)
+- retime_uniform (linear upsample time dilation)  <-- FIXED x4
 - precontact_gating (fz hysteresis + consecutive)
 - edge_force_window (start/end zero + fade)
 
@@ -29,6 +29,12 @@ vr_demo_txt_recorder.py
 [주의]
 - "wx,wy,wz" 는 angular velocity(ω)가 아니라 spatial angle(=rotation vector)라고 가정.
   따라서 plot2는 r_x,r_y,r_z 및 그 미분(r_dot, r_ddot, r_dddot)로 표기.
+
+[이번 수정사항]
+1) retime 파라미터(declare/get_parameter) 전부 제거하고, 코드 내부에서 무조건 x4로 고정.
+2) plot 시간축: "retime된 after 시간"을 기준으로 가로축을 표시.
+   - raw 시간축은 rawN*dt
+   - after 시간축은 filN*dt (retime로 늘어난 실제 재생 시간)
 """
 
 import os
@@ -337,22 +343,19 @@ def detect_contact_idx(fz: np.ndarray, fz_on: float, fz_off: float, consec_on: i
     """
     on = False
     cnt_on = 0
-    first_on_idx = None
 
     for i in range(fz.size):
         if not on:
             if fz[i] >= fz_on:
                 cnt_on += 1
                 if cnt_on >= consec_on:
-                    on = True
-                    first_on_idx = i - consec_on + 1
-                    break
+                    return i - consec_on + 1
             else:
                 cnt_on = 0
         else:
             break
 
-    return first_on_idx
+    return None
 
 
 # ----------------------------
@@ -366,37 +369,27 @@ def plot_before_after(ax, t0, y0, t1, y1, title, ylabel):
     ax.grid(True)
 
 
-def _time_axes_time_aligned(dt: float, rawN: int, filN: int):
+def _time_axes_by_each_duration(dt: float, rawN: int, filN: int):
     """
-    time-aligned rule:
-      - raw time: t_raw = [0, dt, ..., (rawN-1)dt]
-      - after time: t_fil is rescaled to match raw total duration T_raw
-                   (so both curves share the same time span on x-axis)
+    이번 요구사항: "retime된 시간을 기준"으로 after의 x축을 표시.
+      - raw time:  [0, dt, ..., (rawN-1)dt]
+      - after time:[0, dt, ..., (filN-1)dt]  (retime로 늘어난 실제 시간)
+    즉, 두 곡선의 x축 범위가 다를 수 있음(정상).
     """
     t_raw = np.arange(rawN, dtype=np.float64) * dt
-    if rawN <= 1:
-        T_raw = 0.0
-    else:
-        T_raw = float(t_raw[-1])
-
-    if filN <= 1:
-        t_fil = np.array([0.0], dtype=np.float64) if filN == 1 else np.zeros((0,), dtype=np.float64)
-    else:
-        t_fil = np.linspace(0.0, T_raw, filN, dtype=np.float64)
-
+    t_fil = np.arange(filN, dtype=np.float64) * dt
     return t_raw, t_fil
 
 
 def save_plot_1_lin_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP: np.ndarray):
     rawN = rawP.shape[0]
     filN = filtP.shape[0]
-    t_raw, t_fil = _time_axes_time_aligned(dt, rawN, filN)
+    t_raw, t_fil = _time_axes_by_each_duration(dt, rawN, filN)
 
     fig = plt.figure(figsize=(16, 12))
     names = ["x", "y", "z"]
     units = ["mm", "mm", "mm"]
 
-    # 네 코드에 이미 있는 finite_diff_pad, plot_before_after 를 그대로 사용한다고 가정
     for c in range(3):
         y_raw = rawP[:, c]
         y_fil = filtP[:, c]
@@ -418,7 +411,7 @@ def save_plot_1_lin_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP:
         plot_before_after(ax, t_raw, j_raw, t_fil, j_fil, f"j{names[c]}", f"{units[c]}/s^3")
         ax.set_xlabel("time [s]")
 
-    fig.suptitle("Linear kinematics: pos / vel / acc / jerk (before vs after, time-aligned)", fontsize=14)
+    fig.suptitle("Linear kinematics: pos / vel / acc / jerk (before vs after, AFTER uses retimed time)", fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     outpath = os.path.join(viz_dir, "plot_1_lin_kinematics.png")
     plt.savefig(outpath, dpi=200)
@@ -427,15 +420,15 @@ def save_plot_1_lin_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP:
 
 def save_plot_2_rotvec_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, filtP: np.ndarray):
     """
-    wx/wy/wz는 네 말대로 angular velocity가 아니라 spatial angle(=rotation vector component)로 보고,
-    네이밍은 dot/d2/d3 대신: rate / accel / jerk 로 표기.
+    wx/wy/wz는 angular velocity가 아니라 spatial angle(=rotation vector component)로 보고,
+    r_x,r_y,r_z 및 미분(rate/accel/jerk)로 표시.
     """
     rawN = rawP.shape[0]
     filN = filtP.shape[0]
-    t_raw, t_fil = _time_axes_time_aligned(dt, rawN, filN)
+    t_raw, t_fil = _time_axes_by_each_duration(dt, rawN, filN)
 
     fig = plt.figure(figsize=(16, 12))
-    names = ["r_x", "r_y", "r_z"]      # rotation-vector component
+    names = ["r_x", "r_y", "r_z"]
     units = ["rad", "rad", "rad"]
 
     for c in range(3):
@@ -459,7 +452,7 @@ def save_plot_2_rotvec_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, fil
         plot_before_after(ax, t_raw, r_jerk_raw, t_fil, r_jerk_fil, f"{names[c]}_jerk", f"{units[c]}/s^3")
         ax.set_xlabel("time [s]")
 
-    fig.suptitle("Rotation-vector kinematics: r / r_rate / r_accel / r_jerk (before vs after, time-aligned)", fontsize=14)
+    fig.suptitle("Rotation-vector kinematics: r / r_rate / r_accel / r_jerk (AFTER uses retimed time)", fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     outpath = os.path.join(viz_dir, "plot_2_rotvec_kinematics.png")
     plt.savefig(outpath, dpi=200)
@@ -469,7 +462,7 @@ def save_plot_2_rotvec_kinematics(viz_dir: str, dt: float, rawP: np.ndarray, fil
 def save_plot_3_forces(viz_dir: str, dt: float, rawF: np.ndarray, filtF: np.ndarray):
     rawN = rawF.shape[0]
     filN = filtF.shape[0]
-    t_raw, t_fil = _time_axes_time_aligned(dt, rawN, filN)
+    t_raw, t_fil = _time_axes_by_each_duration(dt, rawN, filN)
 
     fig = plt.figure(figsize=(16, 4))
     names = ["fx", "fy", "fz"]
@@ -480,11 +473,12 @@ def save_plot_3_forces(viz_dir: str, dt: float, rawF: np.ndarray, filtF: np.ndar
         if c == 0:
             ax.legend()
 
-    fig.suptitle("Forces: fx / fy / fz (before vs after, time-aligned)", fontsize=14)
+    fig.suptitle("Forces: fx / fy / fz (AFTER uses retimed time)", fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.90])
     outpath = os.path.join(viz_dir, "plot_3_forces.png")
     plt.savefig(outpath, dpi=200)
     plt.close(fig)
+
 
 # ----------------------------
 # Main Node
@@ -494,19 +488,22 @@ class VrDemoTxtRecorder(Node):
         super().__init__("vr_demo_txt_recorder")
 
         # --- topics
-        self.declare_parameter("pose_topic", "/calibrated_pose")              # Float64MultiArray [x y z wx wy wz] (m,rad)
-        self.declare_parameter("force_topic", "/ftsensor/measured_Cvalue")   # geometry_msgs/Wrench
+        self.declare_parameter("pose_topic", "/calibrated_pose")
+        self.declare_parameter("force_topic", "/ftsensor/measured_Cvalue")
 
         # --- recorder timing
         self.declare_parameter("record_hz", 125.0)
         self.declare_parameter("require_fresh_sec", 0.2)
 
         # --- episode rule
-        self.declare_parameter("start_abs_fx", 10.0)  # start when |fx| >= 10
-        self.declare_parameter("stop_abs_fy", 10.0)   # end   when |fy| >= 10
+        self.declare_parameter("start_abs_fx", 10.0)
+        self.declare_parameter("stop_abs_fy", 10.0)
 
         # --- save path (filtered output)
-        self.declare_parameter("save_path", "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd/cmd_continue9D.txt")
+        self.declare_parameter(
+            "save_path",
+            "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/txtcmd/cmd_continue9D.txt"
+        )
 
         # --- viz log root
         self.declare_parameter("viz_root", "/home/eunseop/nrs_ws/src/nrs_imitation/log")
@@ -556,11 +553,11 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("ang_jmax", 80.0)
         self.declare_parameter("safety", 1.05)
 
-        # --- retiming
-        self.declare_parameter("retime_enable", False)
-        self.declare_parameter("retime_use_jerk", False)
-        self.declare_parameter("retime_max_k", 20)
-        self.declare_parameter("retime_passes", 2)
+        # --- retiming (HARDCODED: always x4)
+        # IMPORTANT: declare_parameter / get_parameter 로 다시 덮어쓰지 않음.
+        self.retime_enable = False
+        self.retime_fixed_k = 4
+        self.retime_max_k = 4
 
         # -------------------------
         # internal state
@@ -621,11 +618,6 @@ class VrDemoTxtRecorder(Node):
             ang_jmax=float(self.get_parameter("ang_jmax").value),
         )
 
-        self.retime_enable = bool(self.get_parameter("retime_enable").value)
-        self.retime_use_jerk = bool(self.get_parameter("retime_use_jerk").value)
-        self.retime_max_k = int(self.get_parameter("retime_max_k").value)
-        self.retime_passes = int(self.get_parameter("retime_passes").value)
-
         # latest samples
         self.latest_pose6_mm_rad: Optional[np.ndarray] = None
         self.latest_force3_N: Optional[np.ndarray] = None
@@ -648,12 +640,12 @@ class VrDemoTxtRecorder(Node):
         self.get_logger().info(f"Viz root: {self.viz_root}")
         self.get_logger().info(f"Topics: pose={self.pose_topic} (Float64MultiArray), force={self.force_topic} (Wrench)")
         self.get_logger().info(f"Episode rule: start=|fx|>={self.start_abs_fx}, end=|fy|>={self.stop_abs_fy}  (end -> auto shutdown)")
+        self.get_logger().info(f"[RETIME] HARD FIXED: enable={self.retime_enable}, k={self.retime_fixed_k}, max_k={self.retime_max_k}")
 
     # -------------------------
     # callbacks
     # -------------------------
     def cb_pose(self, msg: Float64MultiArray):
-        # [x y z r_x r_y r_z] (m, rad) -> (mm, rad)
         if len(msg.data) < 6:
             return
         x, y, z, rx, ry, rz = msg.data[:6]
@@ -697,7 +689,6 @@ class VrDemoTxtRecorder(Node):
 
         now = time.time()
 
-        # freshness check
         if self.latest_pose6_mm_rad is None or (now - self.latest_pose_t) > self.require_fresh_sec:
             return
         if self.latest_force3_N is None or (now - self.latest_force_t) > self.require_fresh_sec:
@@ -782,10 +773,12 @@ class VrDemoTxtRecorder(Node):
                 break
 
             st, _ = eval_qp_proxy(Pp, self.dt, self.lim, safety=self.safety)
-            score = max(st.apos_p95 / (self.lim.pos_amax + 1e-9),
-                        st.aang_p95 / (self.lim.ang_amax + 1e-9),
-                        st.jpos_p95 / (self.lim.pos_jmax + 1e-9),
-                        st.jang_p95 / (self.lim.ang_jmax + 1e-9)) + 0.05 * (float(dpos.mean()) / 1.0)
+            score = max(
+                st.apos_p95 / (self.lim.pos_amax + 1e-9),
+                st.aang_p95 / (self.lim.ang_amax + 1e-9),
+                st.jpos_p95 / (self.lim.pos_jmax + 1e-9),
+                st.jang_p95 / (self.lim.ang_jmax + 1e-9),
+            ) + 0.05 * (float(dpos.mean()) / 1.0)
 
             if score < best_score:
                 best_score = score
@@ -803,43 +796,14 @@ class VrDemoTxtRecorder(Node):
         if not self.retime_enable:
             return P, F, 1
 
-        Pcur = P.copy()
-        Fcur = F.copy()
-        k_total = 1
+        k = int(self.retime_fixed_k)
+        if k <= 1:
+            return P, F, 1
 
-        for _ in range(max(1, self.retime_passes)):
-            st, _ = eval_qp_proxy(Pcur, self.dt, self.lim, safety=self.safety)
-
-            rv = max(
-                st.vpos_max / (self.lim.pos_vmax * self.safety + 1e-9),
-                st.vang_max / (self.lim.ang_vmax * self.safety + 1e-9),
-            )
-            ra = max(
-                math.sqrt(st.apos_max / (self.lim.pos_amax * self.safety + 1e-9)),
-                math.sqrt(st.aang_max / (self.lim.ang_amax * self.safety + 1e-9)),
-            )
-
-            rj = 1.0
-            if self.retime_use_jerk:
-                rj = max(
-                    (st.jpos_max / (self.lim.pos_jmax * self.safety + 1e-9)) ** (1.0 / 3.0),
-                    (st.jang_max / (self.lim.ang_jmax * self.safety + 1e-9)) ** (1.0 / 3.0),
-                )
-
-            r_need = max(1.0, rv, ra, rj)
-            k_need = int(math.ceil(r_need))
-
-            remaining = max(1, self.retime_max_k // max(1, k_total))
-            k_need = min(k_need, remaining)
-
-            if k_need <= 1:
-                break
-
-            Pcur = upsample_linear(Pcur, k_need)
-            Fcur = upsample_linear(Fcur, k_need)
-            k_total *= k_need
-
-        return Pcur, Fcur, k_total
+        k = min(k, int(self.retime_max_k))
+        Pcur = upsample_linear(P, k)
+        Fcur = upsample_linear(F, k)
+        return Pcur, Fcur, k
 
     def _make_viz_dir(self) -> str:
         ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
@@ -867,16 +831,13 @@ class VrDemoTxtRecorder(Node):
             rclpy.shutdown()
             return
 
-        # --- raw buffers
         rawP = np.asarray(self.buf_pose, dtype=np.float64)   # (N,6)
         rawF = np.asarray(self.buf_force, dtype=np.float64)  # (N,3)
         rawN = int(rawP.shape[0])
 
-        # --- eval raw
         st_raw, dbg_raw = eval_qp_proxy(rawP, self.dt, self.lim, safety=self.safety)
         print_eval(self.get_logger(), "BEFORE pose smoothing (RAW)", st_raw, self.lim, self.safety)
 
-        # (optional) print some top violations
         vpos_lim = self.lim.pos_vmax * self.safety
         apos_lim = self.lim.pos_amax * self.safety
         rdot_lim = self.lim.ang_vmax * self.safety
@@ -906,7 +867,7 @@ class VrDemoTxtRecorder(Node):
             for i in idx_rddot:
                 self.get_logger().info(f"    idx={int(i):6d}, t={float(i+1)*self.dt:8.3f}s, value={float(dbg_raw['aang'][i]):.6f}")
 
-        # --- pipeline
+        # pipeline
         Fp = self._force_process(rawF)
 
         Ps, info = self._pose_smooth(rawP)
@@ -918,19 +879,19 @@ class VrDemoTxtRecorder(Node):
         st_rt, _ = eval_qp_proxy(Pr, self.dt, self.lim, safety=self.safety)
         print_eval(self.get_logger(), "AFTER retiming (pose)", st_rt, self.lim, self.safety)
         if k_total > 1:
-            self.get_logger().info(f"[QP-EVAL] Applied time-scale k_total={k_total}  (rows: {Ps.shape[0]} -> {Pr.shape[0]})")
+            self.get_logger().info(f"[RETIME] Applied fixed k={k_total}  (rows: {Ps.shape[0]} -> {Pr.shape[0]})")
 
-        # --- contact gating
+        # contact gating
         if self.precontact_gating:
             cidx = detect_contact_idx(Fr[:, 2], self.fz_on, self.fz_off, self.consec_on, self.consec_off)
             if cidx is not None and cidx > 0:
                 self.get_logger().info(f"[CONTACT] Detected at idx={cidx}/{Pr.shape[0]} (t={cidx*self.dt:.3f}s) -> Zeroing forces for [0:{cidx})")
                 Fr[:cidx, :] = 0.0
 
-        # --- edge force window
+        # edge force window (uses record_hz; ok)
         Fr = self._apply_edge_force_window(Fr, hz=self.record_hz)
 
-        # --- save txt (filtered)
+        # save txt
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
         out9 = np.hstack([Pr, Fr])  # (N,9)
         with open(self.save_path, "w") as f:
@@ -938,11 +899,11 @@ class VrDemoTxtRecorder(Node):
                 f.write("\t".join([f"{v:.6f}" for v in row.tolist()]) + "\n")
         self.get_logger().info(f"Saved local file: {self.save_path}  (raw rows={rawN} -> out rows={out9.shape[0]})")
 
-        # --- viz save (after saving path)
+        # viz
         viz_dir = self._make_viz_dir()
         self._save_viz(viz_dir, rawP, rawF, Pr, Fr)
 
-        # --- transfer
+        # transfer
         if self.transfer_enable:
             self._transfer_file()
 
