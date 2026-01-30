@@ -49,7 +49,7 @@ def hampel_1d(x: np.ndarray, win: int, n_sigmas: float) -> np.ndarray:
         med = np.median(w)
         mad = np.median(np.abs(w - med))
         sigma = k * mad + 1e-12
-        if abs(x[i] - med) > n_sigmas * sigma:
+        if abs(x[i] - med) > n_sigmas * sigma:                                                                                                                          
             y[i] = med
     return y
 
