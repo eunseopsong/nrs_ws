@@ -1,15 +1,5 @@
-// vr_calibration.cpp  (v6.1: pair-dt guard + VR unit force + solve validation + saved_at stamp)
-// - Adds: pair_max_dt_s (cp_t vs vr_t sync guard)
-// - Adds: vr_pos_unit ("auto"/"m"/"mm") force option
-// - Adds: solver validation via rotation reprojection error; if bad -> DO NOT overwrite YAML
-// - Keeps: saved_at timestamp comment
-//
-// Build/Run: ros2 run vr_calibration vr_calibration
-//
-// Notes:
-// - /ur10skku/currentP: [x y z wx wy wz] where xyz in mm, rotvec in rad (usually) or deg (auto-detected)
-// - /raw_pose: geometry_msgs/PoseStamped (xyz in m typically, quat)
-// - /calibrated_pose: [x y z wx wy wz] rotvec in rad (assumed), used for T_SA right-multiply update
+// vr_calibration.cpp  (Option B: Auto-capture + Update R_Adj, T_AD, T_BC, T_SA in one YAML write)
+// v7: add saved_at timestamp comment + add t_sa_mode(keep/update) + add t_sa_max_delta_deg guard
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
@@ -32,7 +22,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <cstdlib>
-#include <ctime>
+#include <ctime>   // for timestamp
 
 // ================= Constants =================
 static constexpr double kPi = 3.14159265358979323846;
@@ -45,6 +35,26 @@ static inline double clampd(double x, double lo, double hi)
   if (x < lo) return lo;
   if (x > hi) return hi;
   return x;
+}
+
+// local time string: "YYYY.MM.DD HH:MM"
+static std::string nowLocalString()
+{
+  std::time_t t = std::time(nullptr);
+  std::tm tm{};
+#ifdef _WIN32
+  localtime_s(&tm, &t);
+#else
+  localtime_r(&t, &tm);
+#endif
+  std::ostringstream oss;
+  oss << std::setfill('0')
+      << (tm.tm_year + 1900) << "."
+      << std::setw(2) << (tm.tm_mon + 1) << "."
+      << std::setw(2) << tm.tm_mday << " "
+      << std::setw(2) << tm.tm_hour << ":"
+      << std::setw(2) << tm.tm_min;
+  return oss.str();
 }
 
 // ================= Rodrigues (rotvec -> R) =================
@@ -144,25 +154,12 @@ static Eigen::Matrix<double,9,9> kron3(const Eigen::Matrix3d& A, const Eigen::Ma
   return K;
 }
 
-// ================= time stamp helper =================
-static std::string formatNowKST()
+static double rotDiffAngleDeg(const Eigen::Matrix3d& R1, const Eigen::Matrix3d& R2)
 {
-  // Assume system time already KST; just format localtime.
-  std::time_t t = std::time(nullptr);
-  std::tm tm{};
-#if defined(_WIN32)
-  localtime_s(&tm, &t);
-#else
-  localtime_r(&t, &tm);
-#endif
-  std::ostringstream oss;
-  oss << std::setfill('0')
-      << (tm.tm_year + 1900) << "."
-      << std::setw(2) << (tm.tm_mon + 1) << "."
-      << std::setw(2) << tm.tm_mday << " "
-      << std::setw(2) << tm.tm_hour << ":"
-      << std::setw(2) << tm.tm_min;
-  return oss.str();
+  Eigen::Matrix3d Rrel = R1.transpose() * R2;
+  double cosang = (Rrel.trace() - 1.0) * 0.5;
+  cosang = clampd(cosang, -1.0, 1.0);
+  return rad2deg(std::acos(cosang));
 }
 
 // ================= Class =================
@@ -174,7 +171,7 @@ public:
     steady_clock_(RCL_STEADY_TIME)
   {
     // ----------------------------
-    // Files (keep your working defaults)
+    // Files
     // ----------------------------
     waypoint_file_ =
       "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/vr_calibration/for_vr_calibration_point.txt";
@@ -185,7 +182,7 @@ public:
       "/home/eunseop/dev_ws/src/y2_ur10skku_control/Y2RobMotion/vr_calibration/ur10_vr.txt";
 
     // ----------------------------
-    // Tunables (same as your working version)
+    // Tunables
     // ----------------------------
     pos_enter_mm_ = 20.0;
     pos_exit_mm_  = 60.0;
@@ -207,40 +204,27 @@ public:
     cp_unit_probe_N_ = 30;
 
     // ----------------------------
-    // Pairing safety guard (NEW)
-    // ----------------------------
-    this->declare_parameter<double>("pair_max_dt_s", 0.02);    // max |cp_t - vr_t| allowed at capture
-    this->declare_parameter<double>("pair_warn_throttle_ms", 1500.0);
-    pair_max_dt_s_ = this->get_parameter("pair_max_dt_s").as_double();
-    pair_warn_throttle_ms_ = this->get_parameter("pair_warn_throttle_ms").as_double();
-
-    // ----------------------------
-    // VR position unit (NEW)
-    // ----------------------------
-    // "auto" (heuristic), "m" (force meters), "mm" (force millimeters)
-    this->declare_parameter<std::string>("vr_pos_unit", "auto");
-    vr_pos_unit_mode_ = this->get_parameter("vr_pos_unit").as_string();
-
-    // ----------------------------
-    // Solve validation (NEW)
-    // ----------------------------
-    this->declare_parameter<double>("solve_rot_err_mean_max", 0.05); // Frobenius mean threshold
-    this->declare_parameter<double>("solve_rot_err_max_max",  0.15); // Frobenius max threshold
-    solve_rot_err_mean_max_ = this->get_parameter("solve_rot_err_mean_max").as_double();
-    solve_rot_err_max_max_  = this->get_parameter("solve_rot_err_max_max").as_double();
-
-    // ----------------------------
     // T_SA params
     // ----------------------------
     this->declare_parameter<double>("t_sa_w_des_z", 1.5707963267948966); // rad (≈ pi/2)
-    this->declare_parameter<double>("t_sa_wait_timeout_s", 15.0);        // wait for /calibrated_pose + stop
-    this->declare_parameter<double>("t_sa_hold_s", 0.25);                // ensure stable
-    this->declare_parameter<double>("t_sa_fresh_s", 1.0);                // msg freshness
+    this->declare_parameter<double>("t_sa_wait_timeout_s", 15.0);
+    this->declare_parameter<double>("t_sa_hold_s", 0.25);
+    this->declare_parameter<double>("t_sa_fresh_s", 1.0);
+
+    // ✅ NEW: T_SA update mode
+    // - keep   : YAML의 기존 T_SA 유지(덮어쓰기 방지, 기본)
+    // - update : pre-phase에서 /calibrated_pose 기반으로 T_SA 재계산
+    this->declare_parameter<std::string>("t_sa_mode", "keep"); // "keep" or "update"
+    this->declare_parameter<double>("t_sa_max_delta_deg", 20.0); // update 시 old->new 변화량 제한
 
     t_sa_w_des_z_        = this->get_parameter("t_sa_w_des_z").as_double();
     t_sa_wait_timeout_s_ = this->get_parameter("t_sa_wait_timeout_s").as_double();
     t_sa_hold_s_         = this->get_parameter("t_sa_hold_s").as_double();
     t_sa_fresh_s_        = this->get_parameter("t_sa_fresh_s").as_double();
+
+    t_sa_mode_           = this->get_parameter("t_sa_mode").as_string();
+    std::transform(t_sa_mode_.begin(), t_sa_mode_.end(), t_sa_mode_.begin(), ::tolower);
+    t_sa_max_delta_deg_  = this->get_parameter("t_sa_max_delta_deg").as_double();
 
     // ----------------------------
     // Waypoints
@@ -256,7 +240,7 @@ public:
       throw std::runtime_error("Failed to open output files (truncate mode)");
 
     // ----------------------------
-    // subscriptions (keep working topics)
+    // subscriptions
     // ----------------------------
     sub_currentP_ =
       create_subscription<std_msgs::msg::Float64MultiArray>(
@@ -284,15 +268,13 @@ public:
     // load existing constants (T_CE, T_SA_old)
     loadExistingYamlConstants();
 
-    // print VR unit mode
-    RCLCPP_INFO(get_logger(), "vr_pos_unit mode: %s", vr_pos_unit_mode_.c_str());
-    RCLCPP_INFO(get_logger(), "pair_max_dt_s=%.4f", pair_max_dt_s_);
-    RCLCPP_INFO(get_logger(), "solve_rot_err thresholds: mean<=%.4f, max<=%.4f",
-                solve_rot_err_mean_max_, solve_rot_err_max_max_);
-
     RCLCPP_INFO(get_logger(),
       "Loaded %zu waypoints (%zu target points, flag!=0). Auto-capture enabled.",
       waypoints_.size(), target_indices_.size());
+
+    RCLCPP_INFO(get_logger(),
+      "[T_SA_MODE] t_sa_mode=%s, t_sa_max_delta_deg=%.1f",
+      t_sa_mode_.c_str(), t_sa_max_delta_deg_);
   }
 
   void run()
@@ -416,20 +398,7 @@ public:
             continue;
           }
 
-          // ================================
-          // (NEW) pairing time guard
-          // ================================
-          const double dt_pair = std::fabs((cp_t - vr_t).seconds());
-          if (dt_pair > pair_max_dt_s_) {
-            RCLCPP_WARN_THROTTLE(
-              get_logger(), steady_clock_, (int)pair_warn_throttle_ms_,
-              "[PAIR_GUARD] |cp_t - vr_t|=%.4fs > %.4fs. Skip capture, waiting...",
-              dt_pair, pair_max_dt_s_);
-            rate.sleep();
-            continue;
-          }
-
-          captureOnce(target_k, wp_idx, cp, vr, dist_mm, ang_deg, cp_t, vr_t);
+          captureOnce(target_k, wp_idx, cp, vr, dist_mm, ang_deg);
 
           target_k++;
           state = State::WAIT_ENTER;
@@ -445,8 +414,8 @@ public:
     RCLCPP_INFO(get_logger(), "All target waypoints processed.");
 
     // ==========================================================
-    // (final) compute T_BC / T_AD_avg and write YAML ONCE
-    //         (NEW) validate solution; if invalid -> DO NOT overwrite yaml
+    // (final) compute T_BC / T_AD_avg and write YAML ONCE with:
+    //         R_Adj, T_AD, T_BC, T_SA, T_CE
     // ==========================================================
     try {
       finalizeCalibrationAndSaveYaml();
@@ -474,22 +443,15 @@ private:
   double loop_hz_{200.0};
   size_t cp_unit_probe_N_{30};
 
-  // ---------- pairing guard (NEW) ----------
-  double pair_max_dt_s_{0.02};
-  double pair_warn_throttle_ms_{1500.0};
-
-  // ---------- VR position unit (NEW) ----------
-  std::string vr_pos_unit_mode_{"auto"}; // "auto"|"m"|"mm"
-
-  // ---------- solve validation (NEW) ----------
-  double solve_rot_err_mean_max_{0.05};
-  double solve_rot_err_max_max_{0.15};
-
   // ---------- T_SA params ----------
   double t_sa_w_des_z_{1.5707963267948966};
   double t_sa_wait_timeout_s_{15.0};
   double t_sa_hold_s_{0.25};
   double t_sa_fresh_s_{1.0};
+
+  // ✅ NEW
+  std::string t_sa_mode_{"keep"};     // keep/update
+  double t_sa_max_delta_deg_{20.0};   // update guard
 
   // ---------- units ----------
   bool wp_rotvec_in_degrees_{false};
@@ -498,7 +460,7 @@ private:
   size_t cp_probe_cnt_{0};
   double cp_probe_max_abs_{0.0};
 
-  // VR position unit auto-detect (meters vs mm) (kept but can be overridden)
+  // VR position unit auto-detect (meters vs mm)
   bool vr_pos_unit_decided_{false};
   bool vr_pos_in_mm_{false};
 
@@ -588,7 +550,6 @@ private:
       cp_probe_max_abs_ = std::max(cp_probe_max_abs_, std::fabs(last_cp_[5]));
 
       if (cp_probe_cnt_ >= cp_unit_probe_N_) {
-        // heuristic: if max_abs > ~6, likely degrees
         cp_rotvec_in_degrees_ = (cp_probe_max_abs_ > 6.0);
         cp_rotvec_unit_decided_ = true;
         RCLCPP_INFO(get_logger(),
@@ -612,22 +573,16 @@ private:
     have_vr_ = true;
     last_vr_time_ = ts;
 
-    // Unit detect only if mode is auto
-    if (vr_pos_unit_mode_ == "auto" && !vr_pos_unit_decided_) {
+    if (!vr_pos_unit_decided_) {
       double mabs = 0.0;
       mabs = std::max(mabs, std::fabs(last_vr_[0]));
       mabs = std::max(mabs, std::fabs(last_vr_[1]));
       mabs = std::max(mabs, std::fabs(last_vr_[2]));
-      // heuristic: if > 10 => mm-scale, else meters
       vr_pos_in_mm_ = (mabs > 10.0);
       vr_pos_unit_decided_ = true;
       RCLCPP_INFO(get_logger(),
         "raw_pose position unit decided (heuristic): %s (max_abs=%.3f)",
         vr_pos_in_mm_ ? "MM" : "M", mabs);
-    } else if (vr_pos_unit_mode_ != "auto") {
-      // forced mode
-      vr_pos_unit_decided_ = true;
-      vr_pos_in_mm_ = (vr_pos_unit_mode_ == "mm");
     }
   }
 
@@ -673,9 +628,7 @@ private:
       waypoints_.push_back(wp);
     }
 
-    // heuristic: if rotvec magnitudes exceed ~6, likely degrees
     wp_rotvec_in_degrees_ = (max_abs_w > 6.0);
-    RCLCPP_INFO(get_logger(), "waypoint rotvec unit: %s", wp_rotvec_in_degrees_ ? "DEG" : "RAD");
   }
 
   void buildTargetIndices()
@@ -864,28 +817,40 @@ private:
     const Eigen::Matrix3d R_SA_old = T_SA_old_.block<3,3>(0,0);
     const Eigen::Matrix3d R_SA_new = R_SA_old * R_total.transpose() * R_des;
 
+    // ✅ guard: old->new 변화가 너무 크면 reject
+    const double delta_deg = rotDiffAngleDeg(R_SA_old, R_SA_new);
+    if (delta_deg > t_sa_max_delta_deg_) {
+      RCLCPP_WARN(get_logger(),
+        "[T_SA_REJECT] delta too large: %.2f deg (limit=%.2f deg). Keeping old T_SA.",
+        delta_deg, t_sa_max_delta_deg_);
+      return false;
+    }
+
     T_SA_new_ = Eigen::Matrix4d::Identity();
     T_SA_new_.block<3,3>(0,0) = R_SA_new;
 
     t_sa_computed_ = true;
 
     RCLCPP_INFO(get_logger(),
-      "[T_SA_DONE] Computed T_SA (right-multiply). w_meas(rad)=[%.6f %.6f %.6f]  w_des=[0 0 %.6f]",
-      w_meas[0], w_meas[1], w_meas[2], t_sa_w_des_z_);
-
-    // sanity: predicted becomes R_des
-    Eigen::Matrix3d R_chain = R_total * R_SA_old.transpose();
-    Eigen::Matrix3d R_pred  = R_chain * R_SA_new;
-    RCLCPP_INFO(get_logger(), "[T_SA_CHECK] trace(R_pred)=%.6f (trace(R_des)=%.6f)",
-                R_pred.trace(), R_des.trace());
+      "[T_SA_DONE] Computed T_SA (right-multiply). delta=%.2fdeg, w_meas(rad)=[%.6f %.6f %.6f], w_des=[0 0 %.6f]",
+      delta_deg, w_meas[0], w_meas[1], w_meas[2], t_sa_w_des_z_);
 
     return true;
   }
 
   void computeTSAOnceBeforeCapture(rclcpp::executors::SingleThreadedExecutor& exec)
   {
+    // ✅ keep 모드면: 기존 YAML의 T_SA를 그대로 유지
+    if (t_sa_mode_ == "keep") {
+      t_sa_computed_ = false;          // "새로 계산"은 안 함
+      T_SA_new_ = Eigen::Matrix4d::Identity();
+      RCLCPP_INFO(get_logger(), "[T_SA] mode=keep: will keep existing T_SA from yaml (no recompute).");
+      return;
+    }
+
+    // update 모드
     RCLCPP_INFO(get_logger(),
-      "[T_SA] Pre-capture update: waiting for /calibrated_pose (fresh<=%.2fs) and robot STOP hold(%.2fs), timeout=%.1fs",
+      "[T_SA] mode=update: waiting for /calibrated_pose (fresh<=%.2fs) and robot STOP hold(%.2fs), timeout=%.1fs",
       t_sa_fresh_s_, t_sa_hold_s_, t_sa_wait_timeout_s_);
 
     const rclcpp::Time t0 = tnow();
@@ -938,28 +903,25 @@ private:
         if (computeTSAFromLatestCalPose()) {
           RCLCPP_INFO(get_logger(), "[T_SA] Pre-capture update done.");
           return;
+        } else {
+          // reject 등으로 실패하면 계속 기다려서 다시 시도
         }
       }
 
       rate.sleep();
     }
 
-    if (!t_sa_computed_) {
-      RCLCPP_WARN(get_logger(),
-        "[T_SA_WARN] Pre-capture T_SA update timeout. Will save Identity fallback. "
-        "Make sure vive_tracker publishes /calibrated_pose and keep robot steady.");
-      T_SA_new_ = Eigen::Matrix4d::Identity();
-      t_sa_computed_ = false;
-    }
+    // timeout: update 실패 -> old 유지
+    RCLCPP_WARN(get_logger(),
+      "[T_SA_WARN] Pre-capture T_SA update timeout or rejected. Will KEEP existing T_SA from yaml.");
+    t_sa_computed_ = false;
   }
 
   // ---------- capture ----------
   void captureOnce(size_t target_k, size_t wp_idx,
                    const std::array<double,6>& cp,
                    const std::array<double,7>& vr,
-                   double dist_mm, double ang_deg,
-                   const rclcpp::Time& cp_t,
-                   const rclcpp::Time& vr_t)
+                   double dist_mm, double ang_deg)
   {
     // --- EE rotation from rotvec ---
     const auto w_c = toRotvecRad_CP(cp);
@@ -972,18 +934,7 @@ private:
     const double cp_z_m = cp[2] * 1e-3;
 
     double vr_x = vr[0], vr_y = vr[1], vr_z = vr[2];
-
-    // VR unit handling (forced or auto-decided)
-    bool vr_is_mm = false;
-    if (vr_pos_unit_mode_ == "m") {
-      vr_is_mm = false;
-    } else if (vr_pos_unit_mode_ == "mm") {
-      vr_is_mm = true;
-    } else { // auto
-      vr_is_mm = (vr_pos_unit_decided_ && vr_pos_in_mm_);
-    }
-
-    if (vr_is_mm) {
+    if (vr_pos_unit_decided_ && vr_pos_in_mm_) {
       vr_x *= 1e-3; vr_y *= 1e-3; vr_z *= 1e-3;
     }
 
@@ -1040,13 +991,10 @@ private:
         R_adj_(2,0), R_adj_(2,1), R_adj_(2,2));
     }
 
-    const double dt_pair = std::fabs((cp_t - vr_t).seconds());
     RCLCPP_INFO(get_logger(),
-      "[CAPTURE] target %zu/%zu (wp line %zu) | dist=%.2fmm ang=%.2fdeg | v=%.2fmm/s w=%.2fdeg/s | dt_pair=%.4fs | vr_unit=%s",
+      "[CAPTURE] target %zu/%zu (wp line %zu) | dist=%.2fmm ang=%.2fdeg | v=%.2fmm/s w=%.2fdeg/s",
       target_k+1, target_indices_.size(), wp_idx+1,
-      dist_mm, ang_deg, last_vnorm_mms_, last_omega_dps_,
-      dt_pair,
-      (vr_is_mm ? "mm->m" : "m"));
+      dist_mm, ang_deg, last_vnorm_mms_, last_omega_dps_);
   }
 
   // ---------- YAML read (constants) ----------
@@ -1096,6 +1044,18 @@ private:
     return true;
   }
 
+  bool readMat3(const YAML::Node& n, Eigen::Matrix3d& R)
+  {
+    if (!n || !n.IsSequence() || n.size() != 3) return false;
+    for (int r=0;r<3;r++){
+      if (!n[r].IsSequence() || n[r].size() != 3) return false;
+      for (int c=0;c<3;c++){
+        R(r,c) = n[r][c].as<double>();
+      }
+    }
+    return true;
+  }
+
   // ---------- compute T_BC / T_AD_avg and save yaml ----------
   void finalizeCalibrationAndSaveYaml()
   {
@@ -1104,7 +1064,7 @@ private:
       throw std::runtime_error("Not enough samples to compute calibration (need >=2).");
     }
 
-    // clear finalize buffers
+    // clear buffers
     O_B0B1_list_.clear();
     O_C0C1_list_.clear();
     T_AB0_list_.clear();
@@ -1117,11 +1077,6 @@ private:
     Eigen::VectorXd K2(3 * K);
 
     const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
-
-    // For validation: keep relative rotations
-    std::vector<Eigen::Matrix3d> RB_list, RC_list;
-    RB_list.reserve(K);
-    RC_list.reserve(K);
 
     for (size_t i=0; i<K; i++) {
       const Eigen::Matrix4d& T_AB0 = T_AB_all_[i];
@@ -1139,31 +1094,24 @@ private:
       const Eigen::Matrix3d R_C0C1 = T_C0C1.block<3,3>(0,0);
       const Eigen::Vector3d O_C0C1 = T_C0C1.block<3,1>(0,3);
 
-      // M block: kron(I,R_B0B1) - kron(R_C0C1^T, I)
       Eigen::Matrix<double,9,9> m = kron3(I, R_B0B1) - kron3(R_C0C1.transpose(), I);
       M.block(9*i, 0, 9, 9) = m;
 
-      // K1 block
       K1.block(3*i, 0, 3, 3) = (I - R_B0B1);
 
       O_B0B1_list_.push_back(O_B0B1);
       O_C0C1_list_.push_back(O_C0C1);
       T_AB0_list_.push_back(T_AB0);
       T_DC0_list_.push_back(T_DC0);
-
-      RB_list.push_back(R_B0B1);
-      RC_list.push_back(R_C0C1);
     }
 
-    // Solve for R_BC via smallest eigenvector of X = M^T M
     Eigen::MatrixXd X = M.transpose() * M;
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(X);
     if (es.info() != Eigen::Success) throw std::runtime_error("EigenSolver failed on X=M^T*M");
 
-    Eigen::VectorXd vectX = es.eigenvectors().col(0); // smallest eigenvalue
+    Eigen::VectorXd vectX = es.eigenvectors().col(0);
     Eigen::Map<const Eigen::Matrix<double,3,3,Eigen::ColMajor>> R_BC_raw(vectX.data());
 
-    // Orthonormalize with SVD: R = U V^T, det>0
     Eigen::JacobiSVD<Eigen::Matrix3d> svd(R_BC_raw, Eigen::ComputeFullU | Eigen::ComputeFullV);
     Eigen::Matrix3d U = svd.matrixU();
     Eigen::Matrix3d V = svd.matrixV();
@@ -1173,32 +1121,6 @@ private:
       R_BC = U * V.transpose();
     }
 
-    // (NEW) Validate rotation reprojection error:
-    // want R_B0B1 * R_BC ~= R_BC * R_C0C1
-    double err_sum = 0.0;
-    double err_max = 0.0;
-    for (size_t i=0; i<K; i++) {
-      Eigen::Matrix3d E = RB_list[i]*R_BC - R_BC*RC_list[i];
-      const double e = E.norm(); // Frobenius
-      err_sum += e;
-      err_max = std::max(err_max, e);
-    }
-    const double err_mean = err_sum / std::max<size_t>(1, K);
-
-    RCLCPP_INFO(get_logger(), "[SOLVE_CHECK] rot reprojection err: mean=%.6f max=%.6f (thr mean<=%.6f max<=%.6f)",
-                err_mean, err_max, solve_rot_err_mean_max_, solve_rot_err_max_max_);
-
-    if (err_mean > solve_rot_err_mean_max_ || err_max > solve_rot_err_max_max_) {
-      // IMPORTANT: Do NOT overwrite yaml if solve looks broken
-      std::ostringstream oss;
-      oss << "Solve validation failed: rot_err_mean=" << err_mean
-          << ", rot_err_max=" << err_max
-          << " (threshold mean<=" << solve_rot_err_mean_max_
-          << ", max<=" << solve_rot_err_max_max_ << ").";
-      throw std::runtime_error(oss.str());
-    }
-
-    // Now build K2 and solve O_BC
     for (size_t i=0; i<K; i++) {
       const Eigen::Vector3d& O_B0B1 = O_B0B1_list_[i];
       const Eigen::Vector3d& O_C0C1 = O_C0C1_list_[i];
@@ -1228,9 +1150,8 @@ private:
       t_sum += t;
     }
 
-    // Average quaternion with sign alignment
     Eigen::Quaterniond q_ref = quats.front();
-    Eigen::Vector4d q_sum = Eigen::Vector4d::Zero(); // (x y z w) in coeffs()
+    Eigen::Vector4d q_sum = Eigen::Vector4d::Zero();
     for (auto& q : quats) {
       if (q_ref.coeffs().dot(q.coeffs()) < 0) {
         q.coeffs() *= -1.0;
@@ -1243,18 +1164,18 @@ private:
     q_mean.normalize();
 
     Eigen::Vector3d t_mean = t_sum / static_cast<double>(K);
+
     Eigen::Matrix4d T_AD_avg = makeT(q_mean.toRotationMatrix(), t_mean);
 
-    // If T_SA wasn't computed in pre-phase but we do have fresh cal_pose now, try once more
-    if (!t_sa_computed_ && have_cal_pose_ && isCalPoseFresh()) {
-      (void)computeTSAFromLatestCalPose();
+    // Decide final T_SA to save:
+    // - keep mode: always save old
+    // - update mode: if computed => save new else save old
+    Eigen::Matrix4d T_SA_to_save = T_SA_old_;
+    if (t_sa_mode_ == "update") {
+      if (t_sa_computed_) T_SA_to_save = T_SA_new_;
+      else T_SA_to_save = T_SA_old_;
     }
 
-    // Decide final T_SA to save
-    Eigen::Matrix4d T_SA_to_save = Eigen::Matrix4d::Identity();
-    if (t_sa_computed_) T_SA_to_save = T_SA_new_;
-
-    // Write YAML ONCE with all matrices
     writeCalibrationYamlAll(
       T_AD_avg,
       T_BC,
@@ -1264,9 +1185,10 @@ private:
     );
 
     RCLCPP_INFO(get_logger(),
-      "[YAML_SAVED] Updated calibration_matrix.yaml with T_AD, T_BC, R_Adj(%s), T_CE, T_SA(%s) -> %s",
+      "[YAML_SAVED] T_AD, T_BC computed. R_Adj=%s. T_SA saved by mode=%s (%s). -> %s",
       have_radj_ ? "computed" : "IDENTITY(fallback)",
-      t_sa_computed_ ? "computed" : "IDENTITY(fallback)",
+      t_sa_mode_.c_str(),
+      (t_sa_mode_=="update" ? (t_sa_computed_ ? "new(computed)" : "old(fallback)") : "old(kept)"),
       calib_yaml_path_.c_str());
   }
 
@@ -1276,9 +1198,6 @@ private:
                                const Eigen::Matrix4d& T_CE,
                                const Eigen::Matrix4d& T_SA)
   {
-    // (NEW) saved_at string
-    const std::string saved_at = formatNowKST();
-
     std::ofstream ofs(calib_yaml_path_, std::ios::out | std::ios::trunc);
     if (!ofs.is_open()) throw std::runtime_error("Failed to open yaml: " + calib_yaml_path_);
 
@@ -1286,7 +1205,7 @@ private:
 
     ofs << "# VR calibration matrix setting\n";
     ofs << "# Auto-capture + One-shot YAML update (R_Adj, T_AD, T_BC, T_SA)\n";
-    ofs << "# saved_at: " << saved_at << "\n\n";
+    ofs << "# saved_at: " << nowLocalString() << "\n\n";
 
     ofs << "meta:\n";
     ofs << "  t_sa_w_des_z: " << std::fixed << std::setprecision(prec) << t_sa_w_des_z_ << "\n";
