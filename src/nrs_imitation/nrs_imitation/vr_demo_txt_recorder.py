@@ -9,8 +9,12 @@ vr_demo_txt_recorder.py  (QP-safe + strong contact approach slow-down)
 - force clamp 유지 (force_clamp_abs)
 - fz는 clamp 이후, "첫 fz>=5N 발생 이전" 구간을 모두 0으로 강제
 - contact 판단은 (위 pre-zero 처리된 fz) 기반
-- contact 직전 3초 동안 확실히 느리게 접근(time-warp)
+- contact 직전 구간에서 확실히 느리게 접근(time-warp)
 - plot: before/after 동시, AFTER-time-aligned
+
+[NEW]
+- fz만: 0에서 안정적으로 증가하도록 soft-start ramp + slew-rate limiter 추가
+  (fz 외 다른 기능은 그대로 유지)
 """
 
 import os
@@ -373,19 +377,98 @@ def resample_uniform_by_timewarp(P: np.ndarray, F: np.ndarray, dt: float, seg_sc
 # ----------------------------
 # Contact logic (fz pre-zero + detection)
 # ----------------------------
+def detect_contact_idx(fz: np.ndarray, fz_on: float, consec_on: int) -> Optional[int]:
+    cnt_on = 0
+    for i in range(fz.size):
+        if fz[i] >= fz_on:
+            cnt_on += 1
+            if cnt_on >= consec_on:
+                return i - consec_on + 1
+        else:
+            cnt_on = 0
+    return None
+
+
+def _apply_fz_softstart_and_slew(
+    fz: np.ndarray,
+    dt: float,
+    contact_idx: int,
+    ramp_sec: float,
+    slew_up_N_per_s: float,
+    slew_down_N_per_s: float,
+) -> np.ndarray:
+    """
+    fz는 이미 (clamp/EMA/pre-zero)를 통과한 값.
+    - contact_idx 이후에만:
+      1) soft-start ramp(0->1) 게이트 적용
+      2) slew-rate limiter 적용 (Δfz/Δt 제한)
+    """
+    out = fz.copy()
+    n = out.size
+    if n == 0:
+        return out
+
+    # ----- (1) soft-start gate -----
+    if ramp_sec > 0.0:
+        rampN = int(round(ramp_sec / max(1e-9, dt)))
+        rampN = max(1, rampN)
+        i0 = int(contact_idx)
+        i1 = min(n, i0 + rampN)
+        if i0 < n:
+            # cosine ramp: 0->1 smooth (C1)
+            k = np.arange(i0, i1, dtype=np.float64) - float(i0)
+            u = k / float(max(1, (i1 - i0) - 1))
+            gate = 0.5 - 0.5 * np.cos(np.pi * np.clip(u, 0.0, 1.0))
+            out[i0:i1] = out[i0:i1] * gate
+
+    # ----- (2) slew-rate limiter -----
+    up = float(slew_up_N_per_s)
+    dn = float(slew_down_N_per_s)
+    if up <= 0.0 and dn <= 0.0:
+        return out
+
+    max_up = (up if up > 0.0 else 1e18) * dt
+    max_dn = (dn if dn > 0.0 else 1e18) * dt
+
+    # contact_idx 이전은 이미 0이므로, contact_idx부터 누적 제한
+    start = max(0, int(contact_idx))
+    for i in range(start + 1, n):
+        df = out[i] - out[i - 1]
+        if df > max_up:
+            out[i] = out[i - 1] + max_up
+        elif df < -max_dn:
+            out[i] = out[i - 1] - max_dn
+
+    return out
+
+
 def force_process_with_fz_prezero(
     Fraw: np.ndarray,
     clamp_abs: float,
     ema_alpha: float,
     zero_xy: bool,
-    fz_prezero_gate_N: float
+    fz_prezero_gate_N: float,
+    # NEW (fz only)
+    dt: float,
+    fz_on: float,
+    consec_on: int,
+    fz_softstart_enable: bool,
+    fz_softstart_ramp_sec: float,
+    fz_slew_up_N_per_s: float,
+    fz_slew_down_N_per_s: float,
 ) -> np.ndarray:
     """
+    (기존 유지)
     1) clamp 유지
     2) (옵션) fx,fy=0
     3) EMA
     4) fz: '첫 fz >= gate' 이전 구간은 0으로 강제
        (gate는 "이미 clamp & EMA 적용된 fz" 기준)
+
+    (NEW: fz만 추가 처리)
+    5) contact_idx(=fz_on 연속 consec_on) 이후:
+       - soft-start ramp gate
+       - slew-rate limiter
     """
     Fp = np.clip(Fraw.copy(), -clamp_abs, clamp_abs)
 
@@ -397,6 +480,7 @@ def force_process_with_fz_prezero(
         for i in range(1, Fp.shape[0]):
             Fp[i] = ema_alpha * Fp[i] + (1.0 - ema_alpha) * Fp[i - 1]
 
+    # ----- fz pre-zero (요구 유지) -----
     fz = Fp[:, 2].copy()
     first_on = None
     for i in range(fz.size):
@@ -404,23 +488,27 @@ def force_process_with_fz_prezero(
             first_on = i
             break
     if first_on is None:
-        # never contacted -> all fz = 0
         Fp[:, 2] = 0.0
+        return Fp
     else:
         Fp[:first_on, 2] = 0.0
+
+    # ----- NEW: fz soft-start + slew (fz only) -----
+    if fz_softstart_enable:
+        fz2 = Fp[:, 2].copy()  # pre-zero 반영된 fz
+        cidx = detect_contact_idx(fz2, fz_on=fz_on, consec_on=consec_on)
+        if cidx is not None:
+            fz2 = _apply_fz_softstart_and_slew(
+                fz2,
+                dt=dt,
+                contact_idx=cidx,
+                ramp_sec=fz_softstart_ramp_sec,
+                slew_up_N_per_s=fz_slew_up_N_per_s,
+                slew_down_N_per_s=fz_slew_down_N_per_s,
+            )
+            Fp[:, 2] = fz2
+        # contact을 못 찾으면(전체가 0 또는 애매) 그냥 기존 fz 유지
     return Fp
-
-
-def detect_contact_idx(fz: np.ndarray, fz_on: float, consec_on: int) -> Optional[int]:
-    cnt_on = 0
-    for i in range(fz.size):
-        if fz[i] >= fz_on:
-            cnt_on += 1
-            if cnt_on >= consec_on:
-                return i - consec_on + 1
-        else:
-            cnt_on = 0
-    return None
 
 
 # ----------------------------
@@ -594,7 +682,13 @@ class VrDemoTxtRecorder(Node):
         self.declare_parameter("fz_on", 5.0)
         self.declare_parameter("consec_on", 10)
 
-        # approach slow-down: 요구 -> contact 직전 3초
+        # [NEW] fz soft-start + slew limiter (fz only)
+        self.declare_parameter("fz_softstart_enable", True)
+        self.declare_parameter("fz_softstart_ramp_sec", 0.50)      # 0->steady까지 걸리는 시간(초)
+        self.declare_parameter("fz_slew_up_N_per_s", 30.0)         # 초당 fz 증가 상한 (N/s)
+        self.declare_parameter("fz_slew_down_N_per_s", 120.0)      # 초당 fz 감소 상한 (N/s) (보통 up보다 크게)
+
+        # approach slow-down
         self.declare_parameter("approach_slowdown_enable", True)
         self.declare_parameter("approach_pre_sec", 5.0)
         self.declare_parameter("approach_post_sec", 0.3)
@@ -670,6 +764,12 @@ class VrDemoTxtRecorder(Node):
         self.fz_on = float(self.get_parameter("fz_on").value)
         self.consec_on = int(self.get_parameter("consec_on").value)
 
+        # NEW fz shaping params
+        self.fz_softstart_enable = bool(self.get_parameter("fz_softstart_enable").value)
+        self.fz_softstart_ramp_sec = float(self.get_parameter("fz_softstart_ramp_sec").value)
+        self.fz_slew_up_N_per_s = float(self.get_parameter("fz_slew_up_N_per_s").value)
+        self.fz_slew_down_N_per_s = float(self.get_parameter("fz_slew_down_N_per_s").value)
+
         self.approach_slowdown_enable = bool(self.get_parameter("approach_slowdown_enable").value)
         self.approach_pre_sec = float(self.get_parameter("approach_pre_sec").value)
         self.approach_post_sec = float(self.get_parameter("approach_post_sec").value)
@@ -731,6 +831,10 @@ class VrDemoTxtRecorder(Node):
         self.get_logger().info(
             f"[FZ] clamp_abs={self.force_clamp_abs}, prezero_gate={self.fz_prezero_gate_N}N, "
             f"contact_on={self.fz_on}N (consec={self.consec_on})"
+        )
+        self.get_logger().info(
+            f"[FZ-SOFT] enable={self.fz_softstart_enable}, ramp={self.fz_softstart_ramp_sec}s, "
+            f"slew_up={self.fz_slew_up_N_per_s}N/s, slew_down={self.fz_slew_down_N_per_s}N/s"
         )
         self.get_logger().info(
             f"[APPROACH] enable={self.approach_slowdown_enable}, pre={self.approach_pre_sec}s, post={self.approach_post_sec}s, "
@@ -796,18 +900,17 @@ class VrDemoTxtRecorder(Node):
         Fr = upsample_linear(F, self.retime_k)
         return Pr, Fr
 
-    # ---------- approach slow-down (strong; 3 sec pre-contact) ----------
+    # ---------- approach slow-down ----------
     def _apply_contact_approach_slowdown(self, Pr: np.ndarray, Fr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         if not self.approach_slowdown_enable:
             return Pr, Fr
 
-        fz = Fr[:, 2]  # 이미 pre-zero 반영된 fz
+        fz = Fr[:, 2]  # 이미 pre-zero (+ fz softstart) 반영된 fz
         cidx = detect_contact_idx(fz, self.fz_on, self.consec_on)
         if cidx is None:
             self.get_logger().warn("[APPROACH] contact not found -> skip approach slow-down")
             return Pr, Fr
 
-        # 요구: contact 직전 3초
         preN = int(round(self.approach_pre_sec * self.record_hz))
         postN = int(round(self.approach_post_sec * self.record_hz))
 
@@ -823,7 +926,6 @@ class VrDemoTxtRecorder(Node):
         idx = np.arange(s0, s1, dtype=np.float64)
         u = (idx - float(s0)) / max(1.0, float(s1 - s0))
 
-        # smooth bump (0->0, mid->1, end->0)
         bump = 0.5 - 0.5 * np.cos(2.0 * np.pi * u)
         bump = np.clip(bump, 0.0, 1.0)
 
@@ -930,13 +1032,20 @@ class VrDemoTxtRecorder(Node):
         st0, _ = eval_qp_proxy(rawP, self.dt, self.lim, safety=1.0)
         print_eval(self.get_logger(), "RAW (before)", st0, self.lim, 1.0)
 
-        # forces: clamp 유지 + EMA + fz pre-zero(5N 이전 0)
+        # forces: clamp 유지 + EMA + fz pre-zero(5N 이전 0) + [NEW] fz soft-start + slew
         Fp = force_process_with_fz_prezero(
             rawF,
             clamp_abs=self.force_clamp_abs,
             ema_alpha=self.force_ema_alpha,
             zero_xy=self.zero_xy_forces,
-            fz_prezero_gate_N=self.fz_prezero_gate_N
+            fz_prezero_gate_N=self.fz_prezero_gate_N,
+            dt=self.dt,
+            fz_on=self.fz_on,
+            consec_on=self.consec_on,
+            fz_softstart_enable=self.fz_softstart_enable,
+            fz_softstart_ramp_sec=self.fz_softstart_ramp_sec,
+            fz_slew_up_N_per_s=self.fz_slew_up_N_per_s,
+            fz_slew_down_N_per_s=self.fz_slew_down_N_per_s,
         )
 
         # pre smooth pose
@@ -946,14 +1055,14 @@ class VrDemoTxtRecorder(Node):
         Pr, Fr = self._retime_x2(Ps, Fp)
         self.get_logger().info(f"[RETIME] x2 applied: rows {Ps.shape[0]} -> {Pr.shape[0]}")
 
-        # strong approach slow-down (3 sec pre-contact)
+        # strong approach slow-down
         Pr_slow, Fr_slow = self._apply_contact_approach_slowdown(Pr, Fr)
 
         # final pose smoothing + QP guard
         Pf = self._qp_guard(Pr_slow)
 
         st2, _ = eval_qp_proxy(Pf, self.dt, self.lim, safety=self.qp_guard_safety)
-        print_eval(self.get_logger(), "FINAL pose (retime x2 + 3s approach slow-down + D3)", st2, self.lim, self.qp_guard_safety)
+        print_eval(self.get_logger(), "FINAL pose (retime x2 + approach slow-down + D3)", st2, self.lim, self.qp_guard_safety)
 
         # save txt (pose+force)
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
