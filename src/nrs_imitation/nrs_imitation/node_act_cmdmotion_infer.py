@@ -31,6 +31,7 @@ def _ensure_act_paths(act_root: str) -> None:
     """
     act_root 예: /home/eunseop/nrs_lab2/nrs_act
     이 경로를 sys.path에 넣어서 `from act.detr.models.detr_vae import build`가 되게 만든다.
+    (주의) training script (act.detr.main 등) import 금지! argparse 터짐.
     """
     if not act_root or not os.path.isdir(act_root):
         raise FileNotFoundError(f"act_root not found: {act_root}")
@@ -50,23 +51,34 @@ def _ensure_act_paths(act_root: str) -> None:
 
 def _load_dataset_stats(ckpt_dir: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
-    ckpt_dir/dataset_stats.pkl에서 action_mean, action_std 로드
+    1) ckpt_dir/dataset_stats.pkl에서 action_mean, action_std 로드
+    2) 없으면 action_mean.npy / action_std.npy도 시도
     """
     stats_path = os.path.join(ckpt_dir, "dataset_stats.pkl")
-    if not os.path.exists(stats_path):
-        return None, None
+    if os.path.exists(stats_path):
+        try:
+            with open(stats_path, "rb") as f:
+                stats = pickle.load(f)
+            if "action_mean" in stats and "action_std" in stats:
+                mean = np.asarray(stats["action_mean"], dtype=np.float32).reshape(-1)
+                std = np.asarray(stats["action_std"], dtype=np.float32).reshape(-1)
+                std = np.maximum(std, 1e-6)  # divide-by-zero guard
+                return mean, std
+        except Exception:
+            pass
 
-    try:
-        with open(stats_path, "rb") as f:
-            stats = pickle.load(f)
-        if "action_mean" in stats and "action_std" in stats:
-            mean = np.asarray(stats["action_mean"], dtype=np.float32)
-            std = np.asarray(stats["action_std"], dtype=np.float32)
-            std = np.maximum(std, 1e-6)  # divide-by-zero guard
+    mean_npy = os.path.join(ckpt_dir, "action_mean.npy")
+    std_npy  = os.path.join(ckpt_dir, "action_std.npy")
+    if os.path.exists(mean_npy) and os.path.exists(std_npy):
+        try:
+            mean = np.load(mean_npy).astype(np.float32).reshape(-1)
+            std  = np.load(std_npy).astype(np.float32).reshape(-1)
+            std = np.maximum(std, 1e-6)
             return mean, std
-        return None, None
-    except Exception:
-        return None, None
+        except Exception:
+            pass
+
+    return None, None
 
 
 def _imagenet_norm(t: torch.Tensor) -> torch.Tensor:
@@ -78,7 +90,7 @@ def _imagenet_norm(t: torch.Tensor) -> torch.Tensor:
     return (t - mean) / std
 
 
-def _safe_resize_rgb(img_bgr: np.ndarray, out_hw: Tuple[int, int]) -> np.ndarray:
+def _safe_resize_rgb(img_bgr: np.ndarray, out_hw: Tuple[int, int]) -> Optional[np.ndarray]:
     """
     img_bgr -> RGB uint8, resize to (H,W)
     out_hw: (H,W)
@@ -103,7 +115,20 @@ def _safe_resize_rgb(img_bgr: np.ndarray, out_hw: Tuple[int, int]) -> np.ndarray
 
 
 def _clip_step(target: float, current: float, max_step: float) -> float:
+    # per-scalar step limiter
     return current + float(np.clip(target - current, -max_step, +max_step))
+
+
+def _clip_norm_step(vec_target: np.ndarray, vec_current: np.ndarray, max_step_norm: float) -> np.ndarray:
+    """
+    벡터 전체의 L2 norm 기준으로 step 제한
+      new = current + dp,  ||dp|| <= max_step_norm
+    """
+    dp = vec_target - vec_current
+    n = float(np.linalg.norm(dp))
+    if n <= max_step_norm or n < 1e-12:
+        return vec_target.copy()
+    return vec_current + dp * (max_step_norm / n)
 
 
 # ============================================================
@@ -124,6 +149,8 @@ def build_policy_and_load_ckpt_programmatic(
     - act_root를 sys.path에 올린 후
     - act.detr.models.detr_vae.build()로 모델을 구성하고
     - ckpt_dir/policy_best.ckpt의 state_dict를 로드한다.
+
+    ※ 주의: act.detr.main (training CLI) import 금지 (argparse 요구로 ros2 run에서 터짐)
     """
     _ensure_act_paths(act_root)
 
@@ -139,7 +166,6 @@ def build_policy_and_load_ckpt_programmatic(
     # build()가 기대하는 args를 Namespace 형태로 구성 (학습 CLI parser 절대 안 씀)
     import argparse
     args = argparse.Namespace(
-        # 아래 값들은 build() 호환용 (대부분은 build에서만 사용)
         lr=1e-4,
         lr_backbone=1e-5,
         batch_size=1,
@@ -221,10 +247,19 @@ class ActCmdMotionInferNode(Node):
         # Smoothing (normalized action space EMA)
         self.declare_parameter("smooth_alpha", 0.4)  # 0~1 (1=노스무딩)
 
-        # Safety clamp (현재값 대비 변화량 제한)
-        self.declare_parameter("max_pos_step_mm", 1.5)      # mm per tick @25Hz
-        self.declare_parameter("max_rot_step_rad", 0.02)    # rad per tick
-        self.declare_parameter("max_fz_step", 1.0)          # N per tick
+        # ===== 핵심 요구사항 관련 =====
+        # 1) 첫 publish는 current를 "latched"해서 동일하게 내보냄 (노이즈로 흔들리지 않게)
+        self.declare_parameter("warmup_sec", 1.0)            # warmup 동안 latched current만 publish
+        self.declare_parameter("anchor_to_current", True)    # 첫 inference target을 current에 맞추는 offset (current - pred)
+
+        # 2) 매우 천천히 움직이기: "틱당 변화량"을 last_cmd 기준으로 제한 (txt 간격 수준)
+        #    (기존 max_* 이름은 유지하되, 기본값을 매우 보수적으로 바꿈)
+        self.declare_parameter("max_pos_step_mm", 0.31)      # mm per tick @25Hz
+        self.declare_parameter("max_rot_step_rad", 0.0004)   # rad per tick
+        self.declare_parameter("max_fz_step", 0.2)           # N per tick
+
+        # (추가) 축별 clamp가 아니라 "벡터 norm"으로도 제한하고 싶으면 True
+        self.declare_parameter("use_norm_step_cap", True)
 
         # Force clamp
         self.declare_parameter("fz_min", 0.0)
@@ -236,6 +271,7 @@ class ActCmdMotionInferNode(Node):
         self.ckpt_dir = str(self.get_parameter("ckpt_dir").value)
         self.robot_name = str(self.get_parameter("robot_name").value)
         self.hz = float(self.get_parameter("hz").value)
+        self.dt = 1.0 / max(self.hz, 1e-6)
 
         self.act_root = str(self.get_parameter("act_root").value)
 
@@ -261,9 +297,14 @@ class ActCmdMotionInferNode(Node):
 
         self.smooth_alpha = float(self.get_parameter("smooth_alpha").value)
 
+        self.warmup_sec = float(self.get_parameter("warmup_sec").value)
+        self.anchor_to_current = bool(self.get_parameter("anchor_to_current").value)
+
         self.max_pos_step_mm = float(self.get_parameter("max_pos_step_mm").value)
         self.max_rot_step_rad = float(self.get_parameter("max_rot_step_rad").value)
         self.max_fz_step = float(self.get_parameter("max_fz_step").value)
+
+        self.use_norm_step_cap = bool(self.get_parameter("use_norm_step_cap").value)
 
         self.fz_min = float(self.get_parameter("fz_min").value)
         self.fz_max = float(self.get_parameter("fz_max").value)
@@ -281,7 +322,7 @@ class ActCmdMotionInferNode(Node):
 
         self._have_pose = False
         self._have_force = False
-        self._pose6 = np.zeros(6, dtype=np.float32)      # [x y z wx wy wz]
+        self._pose6 = np.zeros(6, dtype=np.float32)      # [x y z r p y] (or your 6D pose)
         self._force3 = np.zeros(3, dtype=np.float32)     # [fx fy fz] but fx,fy will be forced 0
 
         self._img_top_bgr = None
@@ -313,12 +354,12 @@ class ActCmdMotionInferNode(Node):
         # dataset stats (action denorm)
         self.action_mean, self.action_std = _load_dataset_stats(self.ckpt_dir)
         if self.action_mean is None:
-            self.get_logger().warn("[WARN] dataset_stats.pkl missing or invalid -> denormalization disabled.")
+            self.get_logger().warn("[WARN] dataset_stats.pkl/action_mean.npy not found -> denormalization disabled.")
         else:
             self.get_logger().info(f"[INFO] Loaded action_mean/std (len={len(self.action_mean)})")
 
         # policy load
-        self.get_logger().info("[INFO] Loading policy (programmatic, no argparse)...")
+        self.get_logger().info("[INFO] Loading policy (programmatic, NO training argparse import)...")
         self.policy, missing, unexpected = build_policy_and_load_ckpt_programmatic(
             ckpt_dir=self.ckpt_dir,
             act_root=self.act_root,
@@ -332,14 +373,31 @@ class ActCmdMotionInferNode(Node):
         self.get_logger().info(f"[INFO] Loaded policy. missing={len(missing)}, unexpected={len(unexpected)}")
 
         # smoothing in normalized space
-        self.prev_action_norm = None  # (D,)
+        self.prev_action_norm: Optional[np.ndarray] = None
+
+        # ===== 요구사항 핵심 상태 =====
+        self._t0: Optional[float] = None
+        self._first_published = False
+
+        self._latched_current_cmd9: Optional[np.ndarray] = None  # 첫 current cmd (pose6 + 0,0,fz)
+        self._last_published_cmd9: Optional[np.ndarray] = None   # last cmd (안정적으로 step 제한 기준으로 사용)
+
+        # anchor offset (current - pred) applied to pose/fz
+        self._anchor_ready = False
+        self._anchor_pose6_off = np.zeros(6, dtype=np.float32)
+        self._anchor_fz_off = 0.0
 
         # timer
         self.timer = self.create_timer(1.0 / self.hz, self._on_timer)
 
-        # throttle
+        # throttle log
         self._last_info_t = time.time()
 
+        self.get_logger().info(
+            f"[PARAM] warmup_sec={self.warmup_sec}, anchor_to_current={self.anchor_to_current}, "
+            f"max_step(pos,rot,fz)=({self.max_pos_step_mm},{self.max_rot_step_rad},{self.max_fz_step}), "
+            f"use_norm_step_cap={self.use_norm_step_cap}"
+        )
         self.get_logger().info("✅ Model ready for inference! (publishing /cmdMotion)")
 
     # -------------------------
@@ -382,14 +440,29 @@ class ActCmdMotionInferNode(Node):
             self.get_logger().error(f"EE image convert error: {e}")
 
     # -------------------------
-    # Inference helpers
+    # Helpers
     # -------------------------
+    def _make_current_cmd9(self) -> np.ndarray:
+        """
+        currentP/currentF로부터 cmd9 생성 (첫 publish 요구사항에 사용)
+        cmd = [pose6, fx, fy, fz], fx=fy=0 고정
+        """
+        with self._lock:
+            pose6 = self._pose6.copy()
+            force3 = self._force3.copy()
+
+        cmd = np.zeros(9, dtype=np.float32)
+        cmd[:6] = pose6
+        cmd[6] = 0.0
+        cmd[7] = 0.0
+        cmd[8] = float(np.clip(force3[2], self.fz_min, self.fz_max))
+        return cmd
+
     def _denorm_action(self, a_norm: np.ndarray) -> np.ndarray:
         if self.action_mean is None or self.action_std is None:
             return a_norm
         D = a_norm.shape[0]
         if len(self.action_mean) != D:
-            # 차원 불일치면 denorm 비활성화
             return a_norm
         return a_norm * self.action_std + self.action_mean
 
@@ -398,7 +471,7 @@ class ActCmdMotionInferNode(Node):
         return:
           imgs_tensor: (1,2,3,H,W)
           qpos_tensor: (1,9)
-          current_qpos_np: (9,)  (for safety clamp reference)
+          current_qpos_np: (9,)  (for policy input only)
         """
         with self._lock:
             if not (self._have_pose and self._have_force and self._have_img_top and self._have_img_ee):
@@ -430,13 +503,11 @@ class ActCmdMotionInferNode(Node):
         imgs = cams.unsqueeze(0).to(self.device)  # (1,2,3,H,W)
 
         if self.use_imnet:
-            # apply per-camera ImageNet norm
             imgs = imgs.clone()
             imgs[:, 0] = _imagenet_norm(imgs[:, 0])
             imgs[:, 1] = _imagenet_norm(imgs[:, 1])
 
         qpos = torch.from_numpy(qpos_np).unsqueeze(0).to(self.device)  # (1,9)
-
         return imgs, qpos, qpos_np
 
     def _policy_forward_one(self, imgs: torch.Tensor, qpos: torch.Tensor) -> np.ndarray:
@@ -450,24 +521,16 @@ class ActCmdMotionInferNode(Node):
             else:
                 action_t = out
 
-        # 다양한 shape 대응
-        # - (B,H,D) -> take [0,0]
-        # - (B,D)   -> take [0]
-        # - (H,D)   -> take [0]
-        # - (flat)  -> reshape
         action_t = action_t.detach()
 
         if action_t.ndim == 3:
             a = action_t[0, 0, :]
         elif action_t.ndim == 2:
-            # could be (B,D) or (H,D)
             a = action_t[0, :]
         elif action_t.ndim == 1:
             a = action_t
         else:
-            # fallback: flatten then try reshape as (H,D)
             flat = action_t.reshape(-1)
-            # try infer D=9 by default
             D_guess = 9
             if flat.numel() % D_guess == 0:
                 a = flat.view(-1, D_guess)[0]
@@ -476,6 +539,11 @@ class ActCmdMotionInferNode(Node):
 
         return a.cpu().numpy().astype(np.float32)
 
+    def _publish_cmd(self, cmd9: np.ndarray) -> None:
+        m = Float64MultiArray()
+        m.data = [float(v) for v in cmd9.tolist()]
+        self.pub_cmd.publish(m)
+
     # -------------------------
     # Main timer loop
     # -------------------------
@@ -483,7 +551,44 @@ class ActCmdMotionInferNode(Node):
         pack = self._prepare_inputs()
         if pack is None:
             return
-        imgs, qpos, current_qpos = pack
+
+        if self._t0 is None:
+            self._t0 = time.time()
+
+        # ======================================================
+        # (1) 첫 publish = current 값과 "완전 동일"
+        #     + warmup 동안에도 latched current만 publish (노이즈로 흔들리지 않게)
+        # ======================================================
+        if not self._first_published:
+            cur_cmd = self._make_current_cmd9()
+            self._latched_current_cmd9 = cur_cmd.copy()
+            self._last_published_cmd9 = cur_cmd.copy()
+
+            # 첫 publish
+            self._publish_cmd(self._latched_current_cmd9)
+
+            self._first_published = True
+            self._anchor_ready = False
+            self.prev_action_norm = None
+
+            self.get_logger().info(
+                f"[START] First publish = current (latched). "
+                f"cmd=[{cur_cmd[0]:.3f},{cur_cmd[1]:.3f},{cur_cmd[2]:.3f},"
+                f"{cur_cmd[3]:.4f},{cur_cmd[4]:.4f},{cur_cmd[5]:.4f},0,0,{cur_cmd[8]:.3f}]"
+            )
+            return
+
+        # warmup: latched current만 계속 publish
+        if self.warmup_sec > 0.0 and (time.time() - self._t0) < self.warmup_sec:
+            self._publish_cmd(self._latched_current_cmd9)
+            return
+
+        # ======================================================
+        # 이후부터 inference + 매우 천천히 (step 제한)
+        #  - step 제한 기준은 "current"가 아니라 "last_published_cmd" (QP 안정/노이즈 억제)
+        #  - 가속도/저크 프로파일 생성 없음 (순수 1차 업데이트)
+        # ======================================================
+        imgs, qpos, _ = pack
 
         # forward
         try:
@@ -492,7 +597,7 @@ class ActCmdMotionInferNode(Node):
             self.get_logger().error(f"Policy forward failed: {e}")
             return
 
-        # smoothing in norm space
+        # smoothing in norm space (EMA)
         if self.prev_action_norm is None:
             smoothed_norm = action_norm
         else:
@@ -501,8 +606,7 @@ class ActCmdMotionInferNode(Node):
         self.prev_action_norm = smoothed_norm
 
         # denorm
-        action = self._denorm_action(smoothed_norm)  # (D,)
-        action = np.asarray(action, dtype=np.float32)
+        action = self._denorm_action(smoothed_norm).astype(np.float32)
 
         # ensure length >= 9
         if action.shape[0] < 9:
@@ -512,48 +616,72 @@ class ActCmdMotionInferNode(Node):
         else:
             action = action[:9]
 
-        # command = [x,y,z,wx,wy,wz,fx,fy,fz]
-        cmd = action.copy()
+        # desired cmd from policy
+        des = action.copy()
+        des[6] = 0.0
+        des[7] = 0.0
+        des[8] = float(np.clip(des[8], self.fz_min, self.fz_max))
 
-        # fx, fy always 0
-        cmd[6] = 0.0
-        cmd[7] = 0.0
+        # ======================================================
+        # Anchor: 첫 inference에서 current와 맞추기 (초기 차이 폭발 방지)
+        # ======================================================
+        if self.anchor_to_current and (not self._anchor_ready):
+            # anchor 기준: "latched current"
+            cur0 = self._latched_current_cmd9
+            self._anchor_pose6_off = (cur0[:6] - des[:6]).astype(np.float32)
+            self._anchor_fz_off = float(cur0[8] - des[8])
+            self._anchor_ready = True
+            self.get_logger().info("[ANCHOR] initialized (latched_current - first_pred)")
 
-        # clamp fz range
-        cmd[8] = float(np.clip(cmd[8], self.fz_min, self.fz_max))
+        if self.anchor_to_current and self._anchor_ready:
+            des[:6] = des[:6] + self._anchor_pose6_off
+            des[8] = float(des[8] + self._anchor_fz_off)
+            des[8] = float(np.clip(des[8], self.fz_min, self.fz_max))
 
-        # -------------------------
-        # Safety: clamp step vs current
-        # current_qpos: [pose6, force3] where force3 already fx=fy=0, fz=measured
-        # We clamp pose and fz only (fx/fy forced 0)
-        # -------------------------
-        cur_x, cur_y, cur_z = float(current_qpos[0]), float(current_qpos[1]), float(current_qpos[2])
-        cur_wx, cur_wy, cur_wz = float(current_qpos[3]), float(current_qpos[4]), float(current_qpos[5])
-        cur_fz = float(current_qpos[8])
+        # ======================================================
+        # (2) 매우 천천히 움직이기: step 제한 (txt 간격 수준)
+        #     기준 = last published cmd (노이즈 억제 + 안정)
+        #
+        #     - pose xyz: ||Δp|| <= max_pos_step_mm  (or axis-wise)
+        #     - pose rpy: ||Δr|| <= max_rot_step_rad
+        #     - fz: |Δfz| <= max_fz_step
+        # ======================================================
+        last_cmd = self._last_published_cmd9.copy()
 
-        cmd[0] = _clip_step(cmd[0], cur_x, self.max_pos_step_mm)
-        cmd[1] = _clip_step(cmd[1], cur_y, self.max_pos_step_mm)
-        cmd[2] = _clip_step(cmd[2], cur_z, self.max_pos_step_mm)
+        cmd_next = last_cmd.copy()
+        cmd_next[6] = 0.0
+        cmd_next[7] = 0.0
 
-        cmd[3] = _clip_step(cmd[3], cur_wx, self.max_rot_step_rad)
-        cmd[4] = _clip_step(cmd[4], cur_wy, self.max_rot_step_rad)
-        cmd[5] = _clip_step(cmd[5], cur_wz, self.max_rot_step_rad)
+        if self.use_norm_step_cap:
+            # xyz norm cap
+            cmd_next[0:3] = _clip_norm_step(des[0:3], last_cmd[0:3], self.max_pos_step_mm)
+            # rpy norm cap
+            cmd_next[3:6] = _clip_norm_step(des[3:6], last_cmd[3:6], self.max_rot_step_rad)
+        else:
+            # axis-wise cap
+            cmd_next[0] = _clip_step(des[0], last_cmd[0], self.max_pos_step_mm)
+            cmd_next[1] = _clip_step(des[1], last_cmd[1], self.max_pos_step_mm)
+            cmd_next[2] = _clip_step(des[2], last_cmd[2], self.max_pos_step_mm)
 
-        cmd[8] = _clip_step(cmd[8], cur_fz, self.max_fz_step)
-        cmd[8] = float(np.clip(cmd[8], self.fz_min, self.fz_max))
+            cmd_next[3] = _clip_step(des[3], last_cmd[3], self.max_rot_step_rad)
+            cmd_next[4] = _clip_step(des[4], last_cmd[4], self.max_rot_step_rad)
+            cmd_next[5] = _clip_step(des[5], last_cmd[5], self.max_rot_step_rad)
 
-        # publish
-        m = Float64MultiArray()
-        m.data = [float(v) for v in cmd.tolist()]
-        self.pub_cmd.publish(m)
+        # fz cap (scalar)
+        cmd_next[8] = _clip_step(des[8], last_cmd[8], self.max_fz_step)
+        cmd_next[8] = float(np.clip(cmd_next[8], self.fz_min, self.fz_max))
+
+        # publish + update last
+        self._publish_cmd(cmd_next)
+        self._last_published_cmd9 = cmd_next
 
         # throttled info log
         t = time.time()
         if t - self._last_info_t > 1.0:
             self._last_info_t = t
             self.get_logger().info(
-                f"cmd=[{cmd[0]:.3f},{cmd[1]:.3f},{cmd[2]:.3f},"
-                f"{cmd[3]:.4f},{cmd[4]:.4f},{cmd[5]:.4f},0,0,{cmd[8]:.3f}]"
+                f"cmd=[{cmd_next[0]:.3f},{cmd_next[1]:.3f},{cmd_next[2]:.3f},"
+                f"{cmd_next[3]:.4f},{cmd_next[4]:.4f},{cmd_next[5]:.4f},0,0,{cmd_next[8]:.3f}]"
             )
 
 
