@@ -38,6 +38,7 @@ setup(
             'act_keyboard_infer_node = nrs_imitation.act_keyboard_infer_node:main',
             'act_txt_postprocessor = nrs_imitation.act_txt_postprocessor:main',
             'vr_demo_txt_wo_filter = nrs_imitation.vr_demo_txt_wo_filter:main',
+            'node_act_cmdmotion_infer = nrs_imitation.node_act_cmdmotion_infer:main',
         ],
     },
 )
