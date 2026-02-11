@@ -39,6 +39,7 @@ setup(
             'act_txt_postprocessor = nrs_imitation.act_txt_postprocessor:main',
             'vr_demo_txt_wo_filter = nrs_imitation.vr_demo_txt_wo_filter:main',
             'node_act_cmdmotion_infer = nrs_imitation.node_act_cmdmotion_infer:main',
+            'node_check_inference = nrs_imitation.node_check_inference:main',
         ],
     },
 )

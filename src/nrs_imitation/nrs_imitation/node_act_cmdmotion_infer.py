@@ -25,10 +25,6 @@ from cv_bridge import CvBridge
 # ============================================================
 
 def _ensure_act_paths(act_root: str) -> None:
-    """
-    act_root 예: /home/eunseop/nrs_lab2/nrs_act
-    이 경로를 sys.path에 넣어서 `from act.detr.models.detr_vae import build`가 되게 만든다.
-    """
     if not act_root or not os.path.isdir(act_root):
         raise FileNotFoundError(f"act_root not found: {act_root}")
 
@@ -46,9 +42,6 @@ def _ensure_act_paths(act_root: str) -> None:
 
 
 def _load_dataset_stats(ckpt_dir: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """
-    ckpt_dir/dataset_stats.pkl에서 action_mean, action_std 로드
-    """
     stats_path = os.path.join(ckpt_dir, "dataset_stats.pkl")
     if not os.path.exists(stats_path):
         return None, None
@@ -66,19 +59,12 @@ def _load_dataset_stats(ckpt_dir: str) -> Tuple[Optional[np.ndarray], Optional[n
 
 
 def _imagenet_norm(t: torch.Tensor) -> torch.Tensor:
-    """
-    t: (3,H,W), range [0,1], RGB
-    """
     mean = torch.tensor([0.485, 0.456, 0.406], dtype=t.dtype, device=t.device)[:, None, None]
     std  = torch.tensor([0.229, 0.224, 0.225], dtype=t.dtype, device=t.device)[:, None, None]
     return (t - mean) / std
 
 
 def _safe_resize_rgb(img_bgr: np.ndarray, out_hw: Tuple[int, int]) -> Optional[np.ndarray]:
-    """
-    img_bgr -> RGB uint8, resize to (H,W)
-    out_hw: (H,W)
-    """
     if img_bgr is None:
         return None
     if img_bgr.dtype != np.uint8:
@@ -110,8 +96,22 @@ def _sign(x: float) -> float:
     return 0.0
 
 
+def _find_first_linear_in_features(model: torch.nn.Module) -> Optional[int]:
+    """
+    ACT 코드 구조가 버전에 따라 달라질 수 있어서,
+    "qpos가 들어가는 첫 Linear"을 100% 특정하긴 어렵지만,
+    실무적으로는 '가장 먼저 나오는 Linear 중 in_features가 9 또는 12인 것'을
+    qpos embedding으로 보는 게 안전하다.
+    """
+    for m in model.modules():
+        if isinstance(m, torch.nn.Linear):
+            if m.in_features in (9, 12):
+                return int(m.in_features)
+    return None
+
+
 # ============================================================
-# Policy Loader (NO argparse CLI / NO training script)
+# Policy Loader
 # ============================================================
 
 def build_policy_and_load_ckpt_programmatic(
@@ -124,11 +124,6 @@ def build_policy_and_load_ckpt_programmatic(
     kl_weight: float,
     camera_names: Tuple[str, str] = ("cam_top", "cam_ee"),
 ):
-    """
-    - act_root를 sys.path에 올린 후
-    - act.detr.models.detr_vae.build()로 모델을 구성하고
-    - ckpt_dir/policy_best.ckpt의 state_dict를 로드한다.
-    """
     _ensure_act_paths(act_root)
 
     try:
@@ -163,7 +158,7 @@ def build_policy_and_load_ckpt_programmatic(
 
         hidden_dim=int(hidden_dim),
         dim_feedforward=int(dim_feedforward),
-        num_queries=int(chunk_size),     # == H
+        num_queries=int(chunk_size),
         camera_names=list(camera_names),
 
         kl_weight=float(kl_weight),
@@ -177,8 +172,11 @@ def build_policy_and_load_ckpt_programmatic(
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"policy_best.ckpt not found: {ckpt_path}")
 
+    # security warning 대응: 네가 "내가 만든 ckpt"면 현 상태도 OK.
+    # 그래도 경고 없애려면 weights_only=True + state_dict 형태로 저장되어 있어야 함.
     ckpt = torch.load(ckpt_path, map_location=device)
     state_dict = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
+
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
     return model, missing, unexpected
 
@@ -188,14 +186,6 @@ def build_policy_and_load_ckpt_programmatic(
 # ============================================================
 
 class ActCmdMotionInferNode(Node):
-    """
-    요구사항:
-      1) 첫 publish 값은 current 값과 동일
-      2) 이후는 temporal-agg + 매우 느린 이동 (QP-safe)
-      3) 이동 과정에서 (구간 내) 가속도/저크 = 0  => step(=속도) 고정 유지, 일정 주기마다만 갱신
-         - target_update_every ticks 동안은 "속도(step)"를 고정
-    """
-
     def __init__(self):
         super().__init__("act_cmdmotion_infer_node")
 
@@ -207,45 +197,50 @@ class ActCmdMotionInferNode(Node):
         self.declare_parameter("hz", 25.0)
         self.declare_parameter("act_root", "/home/eunseop/nrs_lab2/nrs_act")
 
-        # topics
-        self.declare_parameter("pose_topic", "")     # default: /<robot_name>/currentP
-        self.declare_parameter("force_topic", "")    # default: /<robot_name>/currentF
-        self.declare_parameter("cmd_topic", "")      # default: /<robot_name>/cmdMotion
+        self.declare_parameter("pose_topic", "")
+        self.declare_parameter("force_topic", "")
+        self.declare_parameter("cmd_topic", "")
         self.declare_parameter("image_topic_top", "/realsense/top/color/image_raw")
         self.declare_parameter("image_topic_ee",  "/realsense/ee/color/image_raw")
 
-        # model hyperparams
         self.declare_parameter("hidden_dim", 512)
         self.declare_parameter("dim_feedforward", 3200)
         self.declare_parameter("chunk_size", 100)
         self.declare_parameter("kl_weight", 10.0)
 
-        # image preprocess
         self.declare_parameter("img_h", 480)
         self.declare_parameter("img_w", 640)
         self.declare_parameter("use_imagenet_norm", True)
 
-        # startup behavior
-        self.declare_parameter("warmup_sec", 1.0)          # first cmd=current 이후 홀드 시간
-        self.declare_parameter("startup_ramp_sec", 2.0)    # step cap scale 0->1 램프
-        self.declare_parameter("anchor_to_current", True)  # 첫 inference에서 current-pred 오프셋 고정
+        self.declare_parameter("warmup_sec", 1.0)
+        self.declare_parameter("startup_ramp_sec", 2.0)
+        self.declare_parameter("anchor_to_current", True)
 
-        # temporal aggregation
         self.declare_parameter("use_temporal_agg", True)
-        self.declare_parameter("temporal_agg_maxlen", 60)  # 버퍼 최대 엔트리 수 (tick 기준)
+        self.declare_parameter("temporal_agg_maxlen", 60)
 
-        # smoothing in norm space (추가 안정화)
-        self.declare_parameter("smooth_alpha", 0.4)  # 0~1 (1=노스무딩)
+        self.declare_parameter("smooth_alpha", 0.6)
 
-        # step caps (QP-safe, "아주 느리게")
-        self.declare_parameter("pos_step_cap_mm", 0.31)     # mm / tick
-        self.declare_parameter("ang_step_cap_rad", 0.0004)  # rad / tick
-        self.declare_parameter("fz_step_cap", 0.2)          # N / tick
+        self.declare_parameter("pos_step_cap_mm", 0.31)
+        self.declare_parameter("ang_step_cap_rad", 0.0004)
+        self.declare_parameter("fz_step_cap", 0.2)
+        self.declare_parameter("target_update_every", 10)
 
-        # "가속도/저크 0"을 위해 step(속도) 고정 유지 주기
-        self.declare_parameter("target_update_every", 10)   # ticks (>=2 권장). 이 구간 내 step 고정.
+        self.declare_parameter("inference_every", 1)
+        self.declare_parameter("step_ema_beta", 0.25)
 
-        # force clamp
+        self.declare_parameter("contact_fz_on", 5.0)
+        self.declare_parameter("contact_fz_off", 3.0)
+        self.declare_parameter("contact_cap_scale", 0.5)
+        self.declare_parameter("contact_update_mult", 2.0)
+
+        # 이 파라미터는 남겨두되, "모델 입력 차원"이 9면 자동으로 무시됨.
+        self.declare_parameter("use_wrench_obs", True)
+
+        self.declare_parameter("wrench_clip_fxy", 20.0)
+        self.declare_parameter("wrench_clip_m", 2.0)
+        self.declare_parameter("wrench_obs_ema", 0.2)
+
         self.declare_parameter("fz_min", 0.0)
         self.declare_parameter("fz_max", 30.0)
 
@@ -289,14 +284,27 @@ class ActCmdMotionInferNode(Node):
         self.ang_step_cap_rad = float(self.get_parameter("ang_step_cap_rad").value)
         self.fz_step_cap = float(self.get_parameter("fz_step_cap").value)
 
-        self.target_update_every = int(self.get_parameter("target_update_every").value)
-        self.target_update_every = max(1, self.target_update_every)
+        self.target_update_every = max(1, int(self.get_parameter("target_update_every").value))
+        self.inference_every = max(1, int(self.get_parameter("inference_every").value))
+
+        self.step_ema_beta = float(np.clip(float(self.get_parameter("step_ema_beta").value), 0.0, 1.0))
+
+        self.contact_fz_on = float(self.get_parameter("contact_fz_on").value)
+        self.contact_fz_off = float(self.get_parameter("contact_fz_off").value)
+        self.contact_cap_scale = float(self.get_parameter("contact_cap_scale").value)
+        self.contact_update_mult = float(self.get_parameter("contact_update_mult").value)
+
+        self.use_wrench_obs_param = bool(self.get_parameter("use_wrench_obs").value)
+
+        self.wrench_clip_fxy = float(self.get_parameter("wrench_clip_fxy").value)
+        self.wrench_clip_m = float(self.get_parameter("wrench_clip_m").value)
+        self.wrench_obs_ema = float(np.clip(float(self.get_parameter("wrench_obs_ema").value), 0.0, 1.0))
 
         self.fz_min = float(self.get_parameter("fz_min").value)
         self.fz_max = float(self.get_parameter("fz_max").value)
 
         if not self.ckpt_dir:
-            raise RuntimeError("ckpt_dir is empty. Example: -p ckpt_dir:=/home/eunseop/.../20260208_1536")
+            raise RuntimeError("ckpt_dir is empty.")
         if not os.path.isdir(self.ckpt_dir):
             raise FileNotFoundError(f"ckpt_dir not found: {self.ckpt_dir}")
 
@@ -308,27 +316,25 @@ class ActCmdMotionInferNode(Node):
 
         self._have_pose = False
         self._have_force = False
-        self._pose6 = np.zeros(6, dtype=np.float32)      # [x y z rx ry rz] (네 currentP 형태 그대로)
-        self._force3 = np.zeros(3, dtype=np.float32)     # [fx fy fz], fx/fy는 0으로 강제
+        self._pose6 = np.zeros(6, dtype=np.float32)      # [x y z rx ry rz]  (mm / rad)
+        self._wrench6 = np.zeros(6, dtype=np.float32)    # [Fx Fy Fz Mx My Mz]
+        self._wrench6_filt = None                        # EMA filtered
 
         self._img_top_bgr = None
         self._img_ee_bgr = None
         self._have_img_top = False
         self._have_img_ee = False
 
-        # -------------------------
+        self._contact = False
+
         # ROS I/O
-        # -------------------------
         self.sub_pose = self.create_subscription(Float64MultiArray, self.pose_topic, self._cb_pose, 10)
         self.sub_force = self.create_subscription(Float64MultiArray, self.force_topic, self._cb_force, 10)
         self.sub_img_top = self.create_subscription(Image, self.image_topic_top, self._cb_img_top, 10)
         self.sub_img_ee  = self.create_subscription(Image, self.image_topic_ee,  self._cb_img_ee,  10)
-
         self.pub_cmd = self.create_publisher(Float64MultiArray, self.cmd_topic, 10)
 
-        # -------------------------
-        # Device / policy / stats
-        # -------------------------
+        # Device / policy
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.get_logger().info(f"[INFO] Using device: {self.device}")
         self.get_logger().info(f"[INFO] ckpt_dir={self.ckpt_dir}")
@@ -336,17 +342,13 @@ class ActCmdMotionInferNode(Node):
         self.get_logger().info(f"[INFO] pose_topic={self.pose_topic}, force_topic={self.force_topic}")
         self.get_logger().info(f"[INFO] image_topics=[{self.image_topic_top}, {self.image_topic_ee}]")
         self.get_logger().info(f"[INFO] cmd_topic={self.cmd_topic} @ {self.hz} Hz (dt={1.0/self.hz:.4f}s)")
-        self.get_logger().info(f"[SAFE] step caps: pos={self.pos_step_cap_mm}mm, ang={self.ang_step_cap_rad}rad, fz={self.fz_step_cap}N")
-        self.get_logger().info(f"[SAFE] target_update_every={self.target_update_every} ticks (step fixed in-between)")
 
-        # dataset stats (action denorm)
         self.action_mean, self.action_std = _load_dataset_stats(self.ckpt_dir)
         if self.action_mean is None:
             self.get_logger().warn("[WARN] dataset_stats.pkl missing/invalid -> denormalization disabled (mean=0,std=1).")
         else:
             self.get_logger().info(f"[INFO] Loaded action_mean/std (len={len(self.action_mean)})")
 
-        # policy load
         self.get_logger().info("[INFO] Loading policy (programmatic, no argparse CLI)...")
         self.policy, missing, unexpected = build_policy_and_load_ckpt_programmatic(
             ckpt_dir=self.ckpt_dir,
@@ -359,33 +361,41 @@ class ActCmdMotionInferNode(Node):
             camera_names=("cam_top", "cam_ee"),
         )
         self.get_logger().info(f"[INFO] Loaded policy. missing={len(missing)}, unexpected={len(unexpected)}")
+        if len(missing) > 0:
+            self.get_logger().warn("[WARN] Non-empty missing keys. Verify checkpoint/model config match if behavior is odd.")
 
-        # -------------------------
-        # Temporal agg buffer: store (t0, pred_seq_norm(H,D))
-        # -------------------------
+        # ✅ model이 기대하는 qpos 차원 자동 감지
+        in_dim = _find_first_linear_in_features(self.policy)
+        if in_dim is None:
+            # 그래도 ACT 기본은 9가 많으니 fallback 9
+            in_dim = 9
+            self.get_logger().warn("[WARN] Could not detect qpos dim from model. Fallback qpos_in_dim=9.")
+        self.qpos_in_dim = int(in_dim)
+
+        # 파라미터 요청(use_wrench_obs)과 모델 입력이 다르면 자동으로 강제
+        self.use_wrench_obs = bool(self.use_wrench_obs_param and self.qpos_in_dim == 12)
+
+        self.get_logger().info(f"[INFO] Detected qpos_in_dim={self.qpos_in_dim} -> use_wrench_obs_effective={self.use_wrench_obs}")
+
+        # buffers
         self.pred_buffer = deque(maxlen=max(1, self.temporal_agg_maxlen))
+        self.prev_action_norm = None
+        self._last_seq_norm = None
+        self._last_seq_start_tick = 0
 
-        # smoothing in norm space (after temporal agg)
-        self.prev_action_norm = None  # (D,)
-
-        # -------------------------
-        # Command state (핵심!)
-        # -------------------------
+        # command state
         self._sent_first_cmd = False
         self._first_cmd_time = None
+        self.prev_cmd = None
+        self._vel_step = None
+        self._vel_step_ema = None
+        self._tick = 0
 
-        self.prev_cmd = None          # (9,) last published cmd
-        self._vel_step = None         # (9,) fixed step vector for "0-acc/0-jerk within segment"
-        self._tick = 0                # inference tick count (after warmup)
-
-        # anchor offset (pose6 only)
         self._anchor_ready = False
         self._anchor_offset6 = np.zeros(6, dtype=np.float32)
 
-        # throttle log
         self._last_info_t = time.time()
 
-        # timer
         self.timer = self.create_timer(1.0 / self.hz, self._on_timer)
         self.get_logger().info("✅ Model ready. Waiting for topics...")
 
@@ -400,13 +410,25 @@ class ActCmdMotionInferNode(Node):
             self._have_pose = True
 
     def _cb_force(self, msg: Float64MultiArray):
-        if len(msg.data) < 3:
+        if len(msg.data) < 6:
             return
-        # fx,fy는 0으로 강제, fz만 사용
-        fz = float(msg.data[2])
+        w = np.asarray(msg.data[:6], dtype=np.float32)
+        w[0] = float(np.clip(w[0], -self.wrench_clip_fxy, self.wrench_clip_fxy))
+        w[1] = float(np.clip(w[1], -self.wrench_clip_fxy, self.wrench_clip_fxy))
+        w[2] = float(w[2])  # fz raw
+        w[3] = float(np.clip(w[3], -self.wrench_clip_m, self.wrench_clip_m))
+        w[4] = float(np.clip(w[4], -self.wrench_clip_m, self.wrench_clip_m))
+        w[5] = float(np.clip(w[5], -self.wrench_clip_m, self.wrench_clip_m))
+
         with self._lock:
-            self._force3[:] = np.asarray([0.0, 0.0, fz], dtype=np.float32)
+            self._wrench6[:] = w
             self._have_force = True
+
+            if self._wrench6_filt is None:
+                self._wrench6_filt = w.copy()
+            else:
+                a = self.wrench_obs_ema
+                self._wrench6_filt = a * w + (1.0 - a) * self._wrench6_filt
 
     def _cb_img_top(self, msg: Image):
         try:
@@ -437,25 +459,27 @@ class ActCmdMotionInferNode(Node):
             return a_norm
         return a_norm * self.action_std + self.action_mean
 
-    def _prepare_inputs(self) -> Optional[Tuple[torch.Tensor, torch.Tensor, np.ndarray]]:
-        """
-        return:
-          imgs_tensor: (1,2,3,H,W)
-          qpos_tensor: (1,9)
-          current_qpos_np: (9,)
-        """
+    def _prepare_inputs(self) -> Optional[Tuple[torch.Tensor, torch.Tensor, np.ndarray, float]]:
         with self._lock:
             if not (self._have_pose and self._have_force and self._have_img_top and self._have_img_ee):
                 return None
             pose6 = self._pose6.copy()
-            force3 = self._force3.copy()
+            w6 = self._wrench6_filt.copy() if self._wrench6_filt is not None else self._wrench6.copy()
             top_bgr = None if self._img_top_bgr is None else self._img_top_bgr.copy()
             ee_bgr  = None if self._img_ee_bgr  is None else self._img_ee_bgr.copy()
 
         if top_bgr is None or ee_bgr is None:
             return None
 
-        qpos_np = np.concatenate([pose6, force3], axis=0).astype(np.float32)  # (9,)
+        fx, fy, fz, mx, my, mz = [float(v) for v in w6.tolist()]
+
+        # ✅ 핵심: 모델 입력 차원에 맞춰 qpos 구성
+        # - qpos_in_dim==9  : [pose6, 0,0,fz]  (기존 학습과 동일)
+        # - qpos_in_dim==12 : [pose6, fx,fy,fz,mx,my,mz] (이렇게 학습된 ckpt에서만)
+        if self.qpos_in_dim == 12 and self.use_wrench_obs:
+            qpos_np = np.concatenate([pose6, np.asarray([fx, fy, fz, mx, my, mz], dtype=np.float32)], axis=0)  # (12,)
+        else:
+            qpos_np = np.concatenate([pose6, np.asarray([0.0, 0.0, fz], dtype=np.float32)], axis=0)            # (9,)
 
         top_rgb = _safe_resize_rgb(top_bgr, (self.img_h, self.img_w))
         ee_rgb  = _safe_resize_rgb(ee_bgr,  (self.img_h, self.img_w))
@@ -472,45 +496,26 @@ class ActCmdMotionInferNode(Node):
             imgs[:, 0] = _imagenet_norm(imgs[:, 0])
             imgs[:, 1] = _imagenet_norm(imgs[:, 1])
 
-        qpos = torch.from_numpy(qpos_np).unsqueeze(0).to(self.device)  # (1,9)
-        return imgs, qpos, qpos_np
+        qpos = torch.from_numpy(qpos_np).unsqueeze(0).to(self.device)
+        return imgs, qpos, pose6, fz
 
     def _policy_forward_seq(self, imgs: torch.Tensor, qpos: torch.Tensor) -> np.ndarray:
-        """
-        return pred_seq_norm: (H, D)  (D>=9 가정)
-        """
         with torch.no_grad():
             out = self.policy(qpos, imgs)
             action_t = out[0] if isinstance(out, (tuple, list)) else out
         action_t = action_t.detach()
 
-        # 가능한 shape들 처리:
-        # (B,H,D) / (H,D) / (B,D) / (flat)
         if action_t.ndim == 3:
             seq = action_t[0]                  # (H,D)
         elif action_t.ndim == 2:
-            # (H,D) or (B,D)
-            # 여기서는 chunk가 나오면 H가 100 같은 값이므로 H로 해석
             seq = action_t
-        elif action_t.ndim == 1:
-            flat = action_t.reshape(-1)
-            D_guess = 9
-            if flat.numel() % D_guess == 0:
-                seq = flat.view(-1, D_guess)   # (H,D_guess)
-            else:
-                seq = flat[:D_guess].view(1, -1)
         else:
             flat = action_t.reshape(-1)
             seq = flat[:9].view(1, -1)
 
-        seq_np = seq.cpu().numpy().astype(np.float32)
-        return seq_np
+        return seq.cpu().numpy().astype(np.float32)
 
-    def _temporal_aggregate(self, t_now: int) -> np.ndarray:
-        """
-        pred_buffer에 쌓인 (t0, seq(H,D)) 에서
-        현재 시점 t_now의 action을 겹치는 예측들 평균으로 만든다.
-        """
+    def _temporal_aggregate(self, t_now: int) -> Optional[np.ndarray]:
         if not self.pred_buffer:
             return None
 
@@ -520,16 +525,18 @@ class ActCmdMotionInferNode(Node):
             if 0 <= k < seq.shape[0]:
                 acc.append(seq[k])
 
-        if not acc:
-            # fallback: 가장 최신 seq의 0번
-            return self.pred_buffer[-1][1][0]
+        if acc:
+            return np.mean(np.stack(acc, axis=0), axis=0).astype(np.float32)
 
-        return np.mean(np.stack(acc, axis=0), axis=0).astype(np.float32)
+        # fallback: last seq
+        if self._last_seq_norm is not None:
+            k = t_now - self._last_seq_start_tick
+            k = int(np.clip(k, 0, self._last_seq_norm.shape[0]-1))
+            return self._last_seq_norm[k].astype(np.float32)
+
+        return self.pred_buffer[-1][1][0].astype(np.float32)
 
     def _ramp_scale(self, t_now: int) -> float:
-        """
-        startup_ramp_sec 동안 step cap을 0->1로 선형 스케일.
-        """
         if self.startup_ramp_sec <= 1e-6:
             return 1.0
         total_ticks = max(1, int(self.startup_ramp_sec * self.hz))
@@ -540,6 +547,12 @@ class ActCmdMotionInferNode(Node):
         m.data = [float(v) for v in cmd9.tolist()]
         self.pub_cmd.publish(m)
 
+    def _update_contact(self, fz: float):
+        if (not self._contact) and (fz >= self.contact_fz_on):
+            self._contact = True
+        elif self._contact and (fz <= self.contact_fz_off):
+            self._contact = False
+
     # -------------------------
     # Main timer loop
     # -------------------------
@@ -547,14 +560,11 @@ class ActCmdMotionInferNode(Node):
         pack = self._prepare_inputs()
         if pack is None:
             return
-        imgs, qpos, current_qpos = pack
+        imgs, qpos, current_pose6, current_fz = pack
 
-        current_pose6 = current_qpos[:6].copy()
-        current_fz = float(current_qpos[8])
+        self._update_contact(current_fz)
 
-        # ======================================================
-        # (1) FIRST PUBLISH = CURRENT (요구사항 #1)
-        # ======================================================
+        # FIRST PUBLISH
         if not self._sent_first_cmd:
             cmd0 = np.zeros(9, dtype=np.float32)
             cmd0[:6] = current_pose6
@@ -564,9 +574,14 @@ class ActCmdMotionInferNode(Node):
 
             self.prev_cmd = cmd0.copy()
             self._vel_step = np.zeros(9, dtype=np.float32)
+            self._vel_step_ema = np.zeros(9, dtype=np.float32)
             self._tick = 0
+
             self.pred_buffer.clear()
             self.prev_action_norm = None
+            self._last_seq_norm = None
+            self._last_seq_start_tick = 0
+
             self._anchor_ready = False
             self._anchor_offset6[:] = 0.0
 
@@ -575,57 +590,51 @@ class ActCmdMotionInferNode(Node):
 
             self._publish_cmd(cmd0)
             self.get_logger().info(
-                f"[START] First cmd = current (pose6 + fz). "
-                f"cmd=[{cmd0[0]:.3f},{cmd0[1]:.3f},{cmd0[2]:.3f},"
+                f"[START] First cmd=current. cmd=[{cmd0[0]:.3f},{cmd0[1]:.3f},{cmd0[2]:.3f},"
                 f"{cmd0[3]:.4f},{cmd0[4]:.4f},{cmd0[5]:.4f},0,0,{cmd0[8]:.3f}]"
             )
             return
 
-        # ======================================================
-        # Warmup hold (첫 cmd 유지)
-        # ======================================================
+        # warmup hold
         if self.warmup_sec > 1e-6 and (time.time() - self._first_cmd_time) < self.warmup_sec:
             self._publish_cmd(self.prev_cmd)
             return
 
-        # ======================================================
-        # (2) Inference: get sequence (H,D)
-        # ======================================================
-        try:
-            pred_seq_norm = self._policy_forward_seq(imgs, qpos)  # (H,D)
-        except Exception as e:
-            self.get_logger().error(f"Policy forward failed: {e}")
-            return
+        # inference
+        do_infer = (self._tick % self.inference_every == 0) or (self._last_seq_norm is None)
+        if do_infer:
+            try:
+                pred_seq_norm = self._policy_forward_seq(imgs, qpos)
+            except Exception as e:
+                self.get_logger().error(f"Policy forward failed: {e}")
+                return
 
-        if pred_seq_norm.ndim != 2 or pred_seq_norm.shape[0] < 1:
-            self.get_logger().warn("[WARN] pred_seq_norm has invalid shape.")
-            return
+            if pred_seq_norm.ndim != 2 or pred_seq_norm.shape[0] < 1:
+                self.get_logger().warn("[WARN] pred_seq_norm invalid.")
+                return
 
-        # ensure D>=9
-        D = pred_seq_norm.shape[1]
-        if D < 9:
-            pad = np.zeros((pred_seq_norm.shape[0], 9), dtype=np.float32)
-            pad[:, :D] = pred_seq_norm
-            pred_seq_norm = pad
-            D = 9
+            D = pred_seq_norm.shape[1]
+            if D < 9:
+                pad = np.zeros((pred_seq_norm.shape[0], 9), dtype=np.float32)
+                pad[:, :D] = pred_seq_norm
+                pred_seq_norm = pad
 
-        # buffer push
-        self.pred_buffer.append((self._tick, pred_seq_norm))
+            self.pred_buffer.append((self._tick, pred_seq_norm))
+            self._last_seq_norm = pred_seq_norm
+            self._last_seq_start_tick = self._tick
 
-        # ======================================================
-        # (temporal agg) aggregated action in norm space
-        # ======================================================
+        # choose action at tick
         if self.use_temporal_agg:
             agg_norm = self._temporal_aggregate(self._tick)
         else:
-            agg_norm = pred_seq_norm[0]
+            k = self._tick - self._last_seq_start_tick
+            k = int(np.clip(k, 0, self._last_seq_norm.shape[0]-1))
+            agg_norm = self._last_seq_norm[k]
 
         if agg_norm is None:
             return
 
-        # ======================================================
-        # extra smoothing (EMA) in norm space
-        # ======================================================
+        # light norm smoothing
         if self.prev_action_norm is None:
             smooth_norm = agg_norm
         else:
@@ -633,9 +642,6 @@ class ActCmdMotionInferNode(Node):
             smooth_norm = a * agg_norm + (1.0 - a) * self.prev_action_norm
         self.prev_action_norm = smooth_norm
 
-        # ======================================================
-        # denorm -> target action (9,)
-        # ======================================================
         action = self._denorm(smooth_norm.astype(np.float32))
         action = np.asarray(action, dtype=np.float32).reshape(-1)
         if action.shape[0] < 9:
@@ -645,16 +651,13 @@ class ActCmdMotionInferNode(Node):
         else:
             action = action[:9]
 
-        # cmd_target = [pose6, 0,0,fz]
         cmd_target = np.zeros(9, dtype=np.float32)
         cmd_target[:6] = action[:6]
         cmd_target[6] = 0.0
         cmd_target[7] = 0.0
         cmd_target[8] = _clip(float(action[8]), self.fz_min, self.fz_max)
 
-        # ======================================================
-        # (anchor) 첫 inference에서 current - pred 고정
-        # ======================================================
+        # anchor
         if self.anchor_to_current and (not self._anchor_ready):
             self._anchor_offset6 = (current_pose6 - cmd_target[:6]).astype(np.float32)
             self._anchor_ready = True
@@ -663,97 +666,70 @@ class ActCmdMotionInferNode(Node):
         if self.anchor_to_current and self._anchor_ready:
             cmd_target[:6] = cmd_target[:6] + self._anchor_offset6
 
-        # ======================================================
-        # (3) 매우 느리게, 그리고 "구간 내 accel/jerk=0"
-        #     => step(=속도) 벡터를 target_update_every tick 동안 고정
-        # ======================================================
+        # caps + contact scaling
         ramp = self._ramp_scale(self._tick)
-        cap_pos = self.pos_step_cap_mm * ramp
-        cap_ang = self.ang_step_cap_rad * ramp
-        cap_fz  = self.fz_step_cap * ramp
+        cap_pos = max(1e-6, self.pos_step_cap_mm * ramp)
+        cap_ang = max(1e-8, self.ang_step_cap_rad * ramp)
+        cap_fz  = max(1e-6, self.fz_step_cap * ramp)
 
-        # 너무 작은 cap으로 0이 되는 경우 방지(초반 완전 정지 방지용)
-        cap_pos = max(1e-6, cap_pos)
-        cap_ang = max(1e-8, cap_ang)
-        cap_fz  = max(1e-6, cap_fz)
+        update_every = self.target_update_every
+        if self._contact:
+            cap_pos *= self.contact_cap_scale
+            cap_ang *= self.contact_cap_scale
+            cap_fz  *= self.contact_cap_scale
+            update_every = int(max(1, round(update_every * self.contact_update_mult)))
 
         prev = self.prev_cmd.copy()
-
-        # 속도(step) 갱신 조건:
-        need_update = (self._vel_step is None) or (self.target_update_every <= 1) or (self._tick % self.target_update_every == 0)
+        need_update = (self._vel_step is None) or (update_every <= 1) or (self._tick % update_every == 0)
 
         if need_update:
-            step = np.zeros(9, dtype=np.float32)
-
-            # pos: "상수 속도"를 위해 보통은 ±cap로 고정 (남은 거리가 cap보다 작으면 그만큼)
+            step_raw = np.zeros(9, dtype=np.float32)
             for i in range(3):
                 d = float(cmd_target[i] - prev[i])
-                if abs(d) <= cap_pos:
-                    step[i] = d
-                else:
-                    step[i] = _sign(d) * cap_pos
-
-            # rot
+                step_raw[i] = d if abs(d) <= cap_pos else (_sign(d) * cap_pos)
             for i in range(3, 6):
                 d = float(cmd_target[i] - prev[i])
-                if abs(d) <= cap_ang:
-                    step[i] = d
-                else:
-                    step[i] = _sign(d) * cap_ang
-
-            # fx, fy: 0 고정
-            step[6] = 0.0
-            step[7] = 0.0
-
-            # fz
+                step_raw[i] = d if abs(d) <= cap_ang else (_sign(d) * cap_ang)
+            step_raw[6] = 0.0
+            step_raw[7] = 0.0
             d = float(cmd_target[8] - prev[8])
-            if abs(d) <= cap_fz:
-                step[8] = d
+            step_raw[8] = d if abs(d) <= cap_fz else (_sign(d) * cap_fz)
+
+            if self._vel_step_ema is None:
+                self._vel_step_ema = step_raw.copy()
             else:
-                step[8] = _sign(d) * cap_fz
+                b = self.step_ema_beta
+                self._vel_step_ema = b * step_raw + (1.0 - b) * self._vel_step_ema
 
-            self._vel_step = step
+            self._vel_step = self._vel_step_ema.copy()
 
-        # "고정 속도"로 한 tick 전진
         cmd_next = prev + self._vel_step
 
-        # overshoot 방지: 목표를 지나치면 목표로 스냅
+        # overshoot snap
         for i in range(9):
             if i in (6, 7):
                 cmd_next[i] = 0.0
                 continue
-            a0 = float(prev[i])
-            a1 = float(cmd_next[i])
-            tg = float(cmd_target[i])
-            # 같은 방향으로 가다가 목표를 넘으면 tg로
-            if (a0 - tg) * (a1 - tg) <= 0.0 and abs(a1 - tg) <= abs(a0 - tg):
-                # ok
-                pass
-            # 목표를 넘어섰다(방향 바뀜)면 tg로 스냅
+            a0, a1, tg = float(prev[i]), float(cmd_next[i]), float(cmd_target[i])
             if (a0 - tg) * (a1 - tg) < 0.0:
                 cmd_next[i] = tg
 
-        # fz clamp
         cmd_next[8] = _clip(float(cmd_next[8]), self.fz_min, self.fz_max)
 
-        # publish + update
         self._publish_cmd(cmd_next)
         self.prev_cmd = cmd_next
         self._tick += 1
 
-        # throttled log
+        # log 1Hz
         t = time.time()
         if t - self._last_info_t > 1.0:
             self._last_info_t = t
             self.get_logger().info(
+                f"contact={1 if self._contact else 0} | infer={'Y' if do_infer else 'N'} | "
                 f"cmd=[{cmd_next[0]:.3f},{cmd_next[1]:.3f},{cmd_next[2]:.3f},"
                 f"{cmd_next[3]:.4f},{cmd_next[4]:.4f},{cmd_next[5]:.4f},0,0,{cmd_next[8]:.3f}]"
             )
 
-
-# ============================================================
-# Main
-# ============================================================
 
 def main(args=None):
     rclpy.init(args=args)
