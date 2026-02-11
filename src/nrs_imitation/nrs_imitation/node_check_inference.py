@@ -1,970 +1,490 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-node_check_inference.py
+node_check_inference.py (FIXED / MINIMAL)
 
-Purpose
-- Debug ACT inference by generating a rollout trajectory (default 100 steps)
-  from the current ROS topics (pose/force/images), saving plots + csv.
-- Additionally runs a minimal "validation-style" sanity check if dataset_stats.pkl
-  contains usable samples/paths (best-effort, optional).
+Goal:
+- Subscribe ONLY 4 topics:
+    /ur10skku/currentP                  (Float64MultiArray)  -> pose 6D
+    /ur10skku/currentF                  (Float64MultiArray)  -> force 6D (use first 3 by default)
+    /realsense/ee/color/image_raw       (sensor_msgs/Image)  -> ee cam
+    /realsense/top/color/image_raw      (sensor_msgs/Image)  -> top cam
+- Build ACT input exactly like training:
+    qpos = [pose6 + force3] => (9,)
+    image = stack([top, ee]) => (K=2,3,H,W) ; batch => (1,2,3,H,W) ; float in [0,1]
+    camera_names MUST be ["cam_top","cam_ee"] (same order)
+- Load ckpt_dir/policy_best.ckpt (model-only state_dict) using training-time policy.py in act_root
+- When first (pose+force+both images) arrives, run one forward -> dump 100-step trajectory -> exit (default)
 
-Fixes included
-- Load normalization stats from ckpt_dir/dataset_stats.pkl
-- Avoid DETR argparse errors by never calling act/detr/main.py build_*_and_optimizer()
-- Robust ACTPolicy instantiation via introspection and safe checkpoint loading
+Why previous crash happened:
+- all_cam_features empty => camera_names missing/empty in model construction OR wrong image format.
+  This file hard-fixes both.
+
+Usage:
+ros2 run nrs_imitation node_check_inference --ros-args \
+  -p ckpt_dir:=/home/eunseop/nrs_lab2/checkpoints/ur10e_swing/20260208_1536 \
+  -p act_root:=/home/eunseop/nrs_lab2/nrs_act \
+  -p chunk_size:=100 \
+  -p image_qos:=reliable \
+  -p dump_full:=False \
+  -p dump_head_n:=10 \
+  -p dump_tail_n:=10
 """
 
 import os
 import sys
 import time
-import json
 import pickle
-import random
-import inspect
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Optional, Tuple
 
 import numpy as np
+import torch
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from std_msgs.msg import Float64MultiArray
-
-try:
-    from sensor_msgs.msg import Image
-    HAVE_IMAGE_MSG = True
-except Exception:
-    HAVE_IMAGE_MSG = False
-
-try:
-    import torch
-    HAVE_TORCH = True
-except Exception:
-    HAVE_TORCH = False
-
-# Headless plotting
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from sensor_msgs.msg import Image
 
 
 # -----------------------------
-# Data classes / utilities
+# Helpers
 # -----------------------------
-@dataclass
-class NormStats:
-    mean: np.ndarray
-    std: np.ndarray
-
-    def normalize(self, x: np.ndarray) -> np.ndarray:
-        return (x - self.mean) / (self.std + 1e-8)
-
-    def denormalize(self, x: np.ndarray) -> np.ndarray:
-        return x * (self.std + 1e-8) + self.mean
+def _reliability_from_str(s: str) -> ReliabilityPolicy:
+    s = (s or "").strip().lower()
+    if s in ["reliable", "rel"]:
+        return ReliabilityPolicy.RELIABLE
+    if s in ["best_effort", "besteffort", "best"]:
+        return ReliabilityPolicy.BEST_EFFORT
+    return ReliabilityPolicy.BEST_EFFORT
 
 
-def _as_np(x: Any) -> np.ndarray:
-    if isinstance(x, np.ndarray):
-        return x
-    if HAVE_TORCH and torch.is_tensor(x):
-        return x.detach().cpu().numpy()
-    return np.asarray(x, dtype=np.float64)
-
-
-def _safe_mkdir(p: str) -> None:
-    Path(p).mkdir(parents=True, exist_ok=True)
-
-
-def _now_string() -> str:
-    return time.strftime("%Y%m%d_%H%M%S", time.localtime())
-
-
-def _clip_std(std: np.ndarray, min_std: float = 1e-6) -> np.ndarray:
-    std = np.asarray(std, dtype=np.float64)
-    std = np.where(np.abs(std) < min_std, min_std, std)
-    return std
-
-
-# -----------------------------
-# Stats loader (dataset_stats.pkl)
-# -----------------------------
-def load_dataset_stats_pkl(ckpt_dir: str) -> Tuple[NormStats, NormStats, Dict[str, Any]]:
-    """
-    Loads normalization stats from ckpt_dir/dataset_stats.pkl
-
-    Expected (common) keys (best-effort):
-      - qpos_mean, qpos_std, act_mean, act_std
-    Other possible keys:
-      - state_mean/state_std, action_mean/action_std
-      - obs_mean/obs_std, action_mean/action_std
-      - mean/std dicts nested
-    """
-    ckpt = Path(ckpt_dir)
-    pkl_path = ckpt / "dataset_stats.pkl"
-    if not pkl_path.is_file():
-        raise FileNotFoundError(f"dataset_stats.pkl not found in ckpt_dir: {pkl_path}")
-
-    with open(pkl_path, "rb") as f:
-        obj = pickle.load(f)
-
-    if not isinstance(obj, dict):
-        raise RuntimeError(f"dataset_stats.pkl content is not a dict. type={type(obj)}")
-
-    # Helper: try candidate key pairs
-    def pick_pair(mean_keys: List[str], std_keys: List[str]) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-        for mk in mean_keys:
-            for sk in std_keys:
-                if mk in obj and sk in obj:
-                    m = _as_np(obj[mk]).astype(np.float64)
-                    s = _clip_std(_as_np(obj[sk]).astype(np.float64))
-                    return m, s
-        return None
-
-    # qpos/state/obs
-    qpos_pair = pick_pair(
-        mean_keys=["qpos_mean", "state_mean", "obs_mean", "qpos_mu", "state_mu", "obs_mu"],
-        std_keys=["qpos_std", "state_std", "obs_std", "qpos_sigma", "state_sigma", "obs_sigma"],
+def _qos(depth: int, reliability: ReliabilityPolicy) -> QoSProfile:
+    return QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=depth,
+        reliability=reliability,
+        durability=DurabilityPolicy.VOLATILE,
     )
 
-    # action
-    act_pair = pick_pair(
-        mean_keys=["act_mean", "action_mean", "target_mean", "act_mu", "action_mu", "target_mu"],
-        std_keys=["act_std", "action_std", "target_std", "act_sigma", "action_sigma", "target_sigma"],
-    )
 
-    # Nested dict fallback: obj["qpos"]["mean"], ...
-    if qpos_pair is None and "qpos" in obj and isinstance(obj["qpos"], dict):
-        d = obj["qpos"]
-        if "mean" in d and "std" in d:
-            qpos_pair = (_as_np(d["mean"]).astype(np.float64), _clip_std(_as_np(d["std"]).astype(np.float64)))
-
-    if act_pair is None and "action" in obj and isinstance(obj["action"], dict):
-        d = obj["action"]
-        if "mean" in d and "std" in d:
-            act_pair = (_as_np(d["mean"]).astype(np.float64), _clip_std(_as_np(d["std"]).astype(np.float64)))
-
-    if act_pair is None and "act" in obj and isinstance(obj["act"], dict):
-        d = obj["act"]
-        if "mean" in d and "std" in d:
-            act_pair = (_as_np(d["mean"]).astype(np.float64), _clip_std(_as_np(d["std"]).astype(np.float64)))
-
-    if qpos_pair is None or act_pair is None:
-        keys = sorted(list(obj.keys()))
-        raise RuntimeError(
-            "Failed to find normalization stats in dataset_stats.pkl.\n"
-            f"Found keys={keys}\n"
-            "Expected qpos_mean/qpos_std + act_mean/act_std (or similar)."
-        )
-
-    qpos_mean, qpos_std = qpos_pair
-    act_mean, act_std = act_pair
-
-    qpos_stats = NormStats(mean=qpos_mean, std=qpos_std)
-    act_stats = NormStats(mean=act_mean, std=act_std)
-    return qpos_stats, act_stats, obj
-
-
-# -----------------------------
-# Policy loader (safe, no argparse)
-# -----------------------------
-def _import_policy_module(act_root: str):
+def _img_to_rgb_numpy(msg: Image) -> np.ndarray:
     """
-    Import act_root/policy.py as module "policy".
-    """
-    act_root = str(Path(act_root).resolve())
-    if act_root not in sys.path:
-        sys.path.insert(0, act_root)
+    Convert sensor_msgs/Image to np.uint8 (H,W,3) in RGB order.
 
+    Supports:
+    - rgb8
+    - bgr8
+    - rgba8 / bgra8 (alpha dropped)
+    """
+    h, w = int(msg.height), int(msg.width)
+    enc = (msg.encoding or "").lower()
+
+    # data is bytes-like
+    buf = np.frombuffer(msg.data, dtype=np.uint8)
+
+    if enc == "rgb8":
+        img = buf.reshape((h, w, 3))
+        return img
+    if enc == "bgr8":
+        img = buf.reshape((h, w, 3))
+        return img[..., ::-1].copy()
+    if enc == "rgba8":
+        img = buf.reshape((h, w, 4))[..., :3]
+        return img
+    if enc == "bgra8":
+        img = buf.reshape((h, w, 4))[..., :3]
+        return img[..., ::-1].copy()
+
+    # fallback attempt: assume 3-channel
+    # (If your camera publishes something else, fix encoding upstream)
     try:
-        import policy  # type: ignore
-        return policy
+        img = buf.reshape((h, w, 3))
+        return img
     except Exception as e:
-        raise RuntimeError(f"Failed to import policy.py from act_root={act_root}. err={e}")
+        raise RuntimeError(f"Unsupported image encoding={msg.encoding}, size=({h},{w}), err={e}")
 
 
-def _select_ckpt_file(ckpt_dir: str) -> str:
-    ckpt = Path(ckpt_dir)
-    cands = [
-        ckpt / "policy_best.ckpt",
-        ckpt / "policy_last.ckpt",
-        ckpt / "policy.ckpt",
-        ckpt / "model_best.ckpt",
-        ckpt / "model.ckpt",
-    ]
-    for p in cands:
-        if p.is_file():
-            return str(p)
-    # fallback: any .ckpt
-    any_ckpt = list(ckpt.glob("*.ckpt"))
-    if len(any_ckpt) > 0:
-        return str(any_ckpt[0])
-    raise FileNotFoundError(f"No checkpoint file found in ckpt_dir={ckpt_dir}")
-
-
-def _extract_state_dict(ckpt_obj: Any) -> Dict[str, Any]:
+def _to_tensor_image_stack(top_rgb: np.ndarray, ee_rgb: np.ndarray, device: torch.device) -> torch.Tensor:
     """
-    Best-effort extraction of state_dict from various checkpoint formats.
+    Make (B=1,K=2,3,H,W) float tensor in [0,1].
+    Order MUST match training camera_names=["cam_top","cam_ee"] => [top, ee]
     """
-    if isinstance(ckpt_obj, dict):
-        # Common keys
-        for k in ["state_dict", "model", "policy", "ema", "net", "actor"]:
-            if k in ckpt_obj and isinstance(ckpt_obj[k], (dict,)):
-                # Sometimes nested: ckpt["model"]["state_dict"]
-                if "state_dict" in ckpt_obj[k] and isinstance(ckpt_obj[k]["state_dict"], dict):
-                    return ckpt_obj[k]["state_dict"]
-                return ckpt_obj[k]
-        # If dict itself looks like state_dict (tensor values)
-        tensor_like = 0
-        for v in ckpt_obj.values():
-            if HAVE_TORCH and torch.is_tensor(v):
-                tensor_like += 1
-        if tensor_like > 0:
-            return ckpt_obj
-    raise RuntimeError("Unrecognized checkpoint format: cannot extract state_dict.")
+    if top_rgb.shape != ee_rgb.shape:
+        # You can resize here if needed, but training likely used same resolution.
+        raise RuntimeError(f"Top/Ee image size mismatch: top={top_rgb.shape} ee={ee_rgb.shape}")
+
+    # (H,W,3) -> (3,H,W)
+    top = np.transpose(top_rgb, (2, 0, 1))
+    ee = np.transpose(ee_rgb, (2, 0, 1))
+
+    # stack (K,3,H,W)
+    img = np.stack([top, ee], axis=0).astype(np.float32) / 255.0
+
+    # (1,K,3,H,W)
+    img_t = torch.from_numpy(img).unsqueeze(0).to(device=device, dtype=torch.float32)
+    return img_t
 
 
-def instantiate_act_policy(
-    act_root: str,
-    ckpt_dir: str,
-    device: str,
-    state_dim: int,
-    action_dim: int,
-    camera_names: Optional[List[str]] = None,
-) -> Any:
+def _to_tensor_qpos(pose6: np.ndarray, force6: np.ndarray, force_indices=(0, 1, 2),
+                    device: torch.device = torch.device("cpu")) -> torch.Tensor:
     """
-    Robustly instantiate ACTPolicy without touching DETR argparse code.
-
-    Strategy:
-    1) Import policy.py from act_root
-    2) Try helper factory functions if they exist:
-       - load_policy / make_policy / create_policy / get_policy / load_act_policy
-    3) Else instantiate ACTPolicy class via signature inspection.
+    qpos = [pose6 + force3] => (1,9)
     """
-    if not HAVE_TORCH:
-        raise RuntimeError("PyTorch not available in this environment.")
+    pose6 = np.asarray(pose6, dtype=np.float32).reshape(-1)
+    force6 = np.asarray(force6, dtype=np.float32).reshape(-1)
+    if pose6.size < 6:
+        raise RuntimeError(f"pose6 size < 6: {pose6.size}")
+    if force6.size < max(force_indices) + 1:
+        raise RuntimeError(f"force6 size < needed idx: force size={force6.size}, idx={force_indices}")
 
-    polmod = _import_policy_module(act_root)
-
-    # 1) Prefer a factory helper if provided
-    helper_names = [
-        "load_policy",
-        "load_act_policy",
-        "make_policy",
-        "make_act_policy",
-        "create_policy",
-        "get_policy",
-    ]
-    for hn in helper_names:
-        if hasattr(polmod, hn):
-            fn = getattr(polmod, hn)
-            if callable(fn):
-                try:
-                    # Try keyword-based call (most robust)
-                    return fn(
-                        ckpt_dir=ckpt_dir,
-                        device=device,
-                        state_dim=state_dim,
-                        action_dim=action_dim,
-                        camera_names=camera_names or [],
-                    )
-                except TypeError:
-                    # Try minimal
-                    try:
-                        return fn(ckpt_dir=ckpt_dir, device=device)
-                    except TypeError:
-                        # Try positional
-                        try:
-                            return fn(ckpt_dir, device)
-                        except Exception as e:
-                            raise RuntimeError(f"Factory {hn} exists but failed to run. err={e}")
-                except Exception as e:
-                    raise RuntimeError(f"Factory {hn} exists but failed. err={e}")
-
-    # 2) ACTPolicy class fallback
-    if not hasattr(polmod, "ACTPolicy"):
-        raise RuntimeError(f"policy.py has no ACTPolicy and no usable factory. act_root={act_root}")
-
-    ACTPolicyCls = getattr(polmod, "ACTPolicy")
-
-    sig = inspect.signature(ACTPolicyCls.__init__)
-    params = list(sig.parameters.values())  # includes self
-    # Remove self
-    params = [p for p in params if p.name != "self"]
-
-    # Build candidate kwargs
-    kwargs = {}
-    if camera_names is not None:
-        kwargs["camera_names"] = camera_names
-    kwargs["device"] = device
-    kwargs["ckpt_dir"] = ckpt_dir
-    kwargs["state_dim"] = state_dim
-    kwargs["action_dim"] = action_dim
-
-    # Instantiate by matching parameter names
-    try_orders = []
-
-    # (a) __init__(self, ckpt_dir=..., device=...)
-    if any(p.name == "ckpt_dir" for p in params) or any(p.name == "device" for p in params):
-        try_orders.append(("kw_ckpt_device", {"ckpt_dir": ckpt_dir, "device": device}))
-
-    # (b) __init__(self, args_override_dict)
-    if len(params) == 1:
-        try_orders.append(("single_dict", {"args": {"ckpt_dir": ckpt_dir, "device": device, "camera_names": camera_names or []}}))
-
-    # (c) __init__(self, state_dim, action_dim, ...)
-    if any(p.name in ["state_dim", "action_dim"] for p in params) or len(params) >= 2:
-        try_orders.append(("kw_dims", {"state_dim": state_dim, "action_dim": action_dim, "device": device, "camera_names": camera_names or []}))
-
-    # (d) empty init
-    try_orders.append(("empty", {}))
-
-    last_err = None
-    for tag, cand in try_orders:
-        try:
-            if tag == "single_dict":
-                # If ACTPolicy expects a single positional "args_override"
-                policy = ACTPolicyCls(cand["args"])
-            else:
-                # Only pass kwargs that exist in signature, if it doesn't accept **kwargs
-                has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-                if has_var_kw:
-                    policy = ACTPolicyCls(**cand)
-                else:
-                    filtered = {k: v for k, v in cand.items() if k in sig.parameters}
-                    policy = ACTPolicyCls(**filtered)
-            return policy
-        except Exception as e:
-            last_err = e
-
-    raise RuntimeError(f"Failed to instantiate ACTPolicy. last_err={last_err}")
+    f3 = force6[list(force_indices)].astype(np.float32)
+    q = np.concatenate([pose6[:6], f3], axis=0).astype(np.float32)  # (9,)
+    q_t = torch.from_numpy(q).unsqueeze(0).to(device=device, dtype=torch.float32)  # (1,9)
+    return q_t
 
 
-def load_policy_weights(policy: Any, ckpt_file: str, device: str) -> Tuple[List[str], List[str]]:
-    """
-    Loads checkpoint weights into policy with strict=False.
-    """
-    if not HAVE_TORCH:
-        raise RuntimeError("PyTorch not available.")
-
-    ckpt_obj = torch.load(ckpt_file, map_location=device)
-    state_dict = _extract_state_dict(ckpt_obj)
-
-    # Some checkpoints have module prefixes
-    # We keep as-is and rely on strict=False.
-    missing, unexpected = [], []
-    if hasattr(policy, "load_state_dict"):
-        ret = policy.load_state_dict(state_dict, strict=False)
-        if hasattr(ret, "missing_keys"):
-            missing = list(ret.missing_keys)
-            unexpected = list(ret.unexpected_keys)
-    else:
-        raise RuntimeError("Policy object has no load_state_dict().")
-
-    if hasattr(policy, "to"):
-        policy.to(device)
-    if hasattr(policy, "eval"):
-        policy.eval()
-    return missing, unexpected
-
-
-# -----------------------------
-# Policy inference wrapper
-# -----------------------------
-def _to_torch(x: np.ndarray, device: str) -> "torch.Tensor":
-    t = torch.from_numpy(x).float()
-    return t.to(device)
-
-
-def _prep_images(images: List[np.ndarray], device: str) -> Optional["torch.Tensor"]:
-    """
-    Convert list of HxWxC uint8 images to torch tensor:
-      [1, num_cams, 3, H, W] float in [0,1]
-    """
-    if not HAVE_TORCH:
+def _load_stats_if_exists(ckpt_dir: str) -> Optional[dict]:
+    p = os.path.join(ckpt_dir, "dataset_stats.pkl")
+    if not os.path.exists(p):
         return None
-    if images is None or len(images) == 0:
-        return None
-
-    proc = []
-    for im in images:
-        if im is None:
-            continue
-        im = np.asarray(im)
-        if im.ndim == 2:
-            im = np.stack([im, im, im], axis=-1)
-        if im.shape[-1] == 4:
-            im = im[..., :3]
-        if im.shape[-1] != 3:
-            # best-effort
-            im = im[..., :3]
-        im_f = im.astype(np.float32) / 255.0
-        # HWC -> CHW
-        im_f = np.transpose(im_f, (2, 0, 1))
-        proc.append(im_f)
-
-    if len(proc) == 0:
-        return None
-
-    arr = np.stack(proc, axis=0)  # [num_cams, 3, H, W]
-    arr = arr[None, ...]          # [1, num_cams, 3, H, W]
-    return _to_torch(arr, device)
+    with open(p, "rb") as f:
+        stats = pickle.load(f)
+    return stats
 
 
-def run_policy_once(policy: Any, qpos_normed: np.ndarray, images_tensor: Optional["torch.Tensor"], device: str) -> np.ndarray:
+def _normalize_qpos(q_t: torch.Tensor, stats: dict) -> torch.Tensor:
+    mu = torch.tensor(stats["qpos_mean"], dtype=torch.float32, device=q_t.device).view(1, 9)
+    sd = torch.tensor(stats["qpos_std"], dtype=torch.float32, device=q_t.device).view(1, 9)
+    return (q_t - mu) / sd
+
+
+def _denormalize_action(a_t: torch.Tensor, stats: dict) -> torch.Tensor:
     """
-    Tries common call patterns. Returns action in normalized space (numpy).
+    a_t: (...,9) normalized
     """
-    if not HAVE_TORCH:
-        raise RuntimeError("PyTorch not available.")
+    mu = torch.tensor(stats["action_mean"], dtype=torch.float32, device=a_t.device).view(*(1,) * (a_t.dim() - 1), 9)
+    sd = torch.tensor(stats["action_std"], dtype=torch.float32, device=a_t.device).view(*(1,) * (a_t.dim() - 1), 9)
+    return a_t * sd + mu
 
-    q = _to_torch(qpos_normed[None, :], device)  # [1, D]
 
-    # Try methods in order
-    candidates = []
+def _fix_a_hat_shape(a_hat: torch.Tensor, chunk_size: int) -> torch.Tensor:
+    """
+    Standardize output to (T,9) with T=chunk_size.
+    Handles common variants:
+      - (B,T,9)
+      - (T,B,9)
+      - (T,9) already
+    """
+    if a_hat.dim() == 2:
+        # (T,9) or (B,9) (unlikely)
+        return a_hat
 
-    # direct call
-    candidates.append(("__call__(q, images)", lambda: policy(q, images_tensor) if images_tensor is not None else policy(q)))
-    # forward
-    if hasattr(policy, "forward"):
-        candidates.append(("forward(q, images)", lambda: policy.forward(q, images_tensor) if images_tensor is not None else policy.forward(q)))
-    # act
-    if hasattr(policy, "act"):
-        candidates.append(("act(q, images)", lambda: policy.act(q, images_tensor) if images_tensor is not None else policy.act(q)))
-    # get_action
-    if hasattr(policy, "get_action"):
-        candidates.append(("get_action(q, images)", lambda: policy.get_action(q, images_tensor) if images_tensor is not None else policy.get_action(q)))
-    # predict
-    if hasattr(policy, "predict"):
-        candidates.append(("predict(q, images)", lambda: policy.predict(q, images_tensor) if images_tensor is not None else policy.predict(q)))
+    if a_hat.dim() != 3:
+        raise RuntimeError(f"Unexpected a_hat dim: {a_hat.shape}")
 
-    last_err = None
-    out = None
-    for name, fn in candidates:
-        try:
-            out = fn()
-            break
-        except Exception as e:
-            last_err = (name, e)
+    B0, B1, B2 = a_hat.shape
 
-    if out is None:
-        raise RuntimeError(f"All policy call patterns failed. last_err={last_err}")
+    # case (B,T,9)
+    if B0 == 1 and B1 == chunk_size and B2 == 9:
+        return a_hat[0]  # (T,9)
 
-    # If output is tuple/list, take first
-    if isinstance(out, (tuple, list)):
-        out = out[0]
+    # case (T,B,9)
+    if B0 == chunk_size and B1 == 1 and B2 == 9:
+        return a_hat[:, 0, :]  # (T,9)
 
-    # If dict, try known keys
-    if isinstance(out, dict):
-        for k in ["action", "actions", "a", "pred_action"]:
-            if k in out:
-                out = out[k]
-                break
+    # case (B,T,9) but other B
+    if B2 == 9 and B1 == chunk_size:
+        return a_hat[0]
 
-    if not (HAVE_TORCH and torch.is_tensor(out)):
-        out = torch.as_tensor(out)
-
-    out_np = out.detach().cpu().numpy()
-    # ensure shape [D]
-    out_np = np.squeeze(out_np)
-    return out_np.astype(np.float64)
+    # last resort
+    raise RuntimeError(f"Cannot interpret a_hat shape={a_hat.shape} with chunk_size={chunk_size}")
 
 
 # -----------------------------
-# ROS Node
+# Node
 # -----------------------------
-class ActCheckInferenceNode(Node):
+class NodeCheckInference(Node):
     def __init__(self):
-        super().__init__("act_check_inference_node")
+        super().__init__("node_check_inference")
 
-        # ---- params ----
+        # ---- parameters (minimal) ----
         self.declare_parameter("ckpt_dir", "")
         self.declare_parameter("act_root", "")
-        self.declare_parameter("out_dir", str(Path.home() / "debug_check_inference"))
-        self.declare_parameter("device", "cuda")
+        self.declare_parameter("chunk_size", 100)
+
         self.declare_parameter("pose_topic", "/ur10skku/currentP")
         self.declare_parameter("force_topic", "/ur10skku/currentF")
-        self.declare_parameter("image_topics", ["/realsense/top/color/image_raw", "/realsense/ee/color/image_raw"])
-        self.declare_parameter("camera_names", ["top", "ee"])
+        self.declare_parameter("ee_img_topic", "/realsense/ee/color/image_raw")
+        self.declare_parameter("top_img_topic", "/realsense/top/color/image_raw")
 
-        self.declare_parameter("do_rollout", True)
-        self.declare_parameter("rollout_horizon", 100)
-        self.declare_parameter("action_is_delta", True)
-        self.declare_parameter("sleep_between_steps_sec", 0.0)  # offline rollout, default 0
+        self.declare_parameter("image_qos", "best_effort")  # reliable | best_effort
+        self.declare_parameter("dump_full", False)
+        self.declare_parameter("dump_head_n", 10)
+        self.declare_parameter("dump_tail_n", 10)
+        self.declare_parameter("exit_after_dump", True)
 
-        self.declare_parameter("wait_timeout_sec", 10.0)  # wait for first msgs
-        self.declare_parameter("seed", 0)
+        # model hyperparams (must match training)
+        self.declare_parameter("kl_weight", 10.0)
+        self.declare_parameter("hidden_dim", 512)
+        self.declare_parameter("dim_feedforward", 3200)
+        self.declare_parameter("nheads", 8)
+        self.declare_parameter("enc_layers", 4)
+        self.declare_parameter("dec_layers", 7)
+        self.declare_parameter("backbone", "resnet18")
+        self.declare_parameter("lr_backbone", 1e-5)
+        self.declare_parameter("no_pretrained", False)
+        self.declare_parameter("image_resize_hw", 256)
+        self.declare_parameter("image_pool_hw", 4)
 
-        # minimal dataset sanity check
-        self.declare_parameter("do_min_dataset_check", True)
-        self.declare_parameter("dataset_check_samples", 16)
+        # normalization handling
+        self.declare_parameter("normalize_qpos", True)
+        self.declare_parameter("denorm_action", True)
+        self.declare_parameter("force_indices", [0, 1, 2])  # pick 3 from 6D currentF
 
-        self.ckpt_dir = self.get_parameter("ckpt_dir").value
-        self.act_root = self.get_parameter("act_root").value
-        self.out_dir = self.get_parameter("out_dir").value
-        self.device = self.get_parameter("device").value
+        # ---- read params ----
+        self.ckpt_dir = str(self.get_parameter("ckpt_dir").value)
+        self.act_root = str(self.get_parameter("act_root").value)
+        self.chunk_size = int(self.get_parameter("chunk_size").value)
 
-        self.pose_topic = self.get_parameter("pose_topic").value
-        self.force_topic = self.get_parameter("force_topic").value
-        self.image_topics = list(self.get_parameter("image_topics").value)
-        self.camera_names = list(self.get_parameter("camera_names").value)
+        self.pose_topic = str(self.get_parameter("pose_topic").value)
+        self.force_topic = str(self.get_parameter("force_topic").value)
+        self.ee_img_topic = str(self.get_parameter("ee_img_topic").value)
+        self.top_img_topic = str(self.get_parameter("top_img_topic").value)
 
-        self.do_rollout = bool(self.get_parameter("do_rollout").value)
-        self.rollout_horizon = int(self.get_parameter("rollout_horizon").value)
-        self.action_is_delta = bool(self.get_parameter("action_is_delta").value)
-        self.sleep_between_steps_sec = float(self.get_parameter("sleep_between_steps_sec").value)
+        self.image_qos_str = str(self.get_parameter("image_qos").value)
+        self.dump_full = bool(self.get_parameter("dump_full").value)
+        self.dump_head_n = int(self.get_parameter("dump_head_n").value)
+        self.dump_tail_n = int(self.get_parameter("dump_tail_n").value)
+        self.exit_after_dump = bool(self.get_parameter("exit_after_dump").value)
 
-        self.wait_timeout_sec = float(self.get_parameter("wait_timeout_sec").value)
-        self.seed = int(self.get_parameter("seed").value)
+        self.normalize_qpos_enabled = bool(self.get_parameter("normalize_qpos").value)
+        self.denorm_action_enabled = bool(self.get_parameter("denorm_action").value)
+        self.force_indices = tuple(int(x) for x in self.get_parameter("force_indices").value)
 
-        self.do_min_dataset_check = bool(self.get_parameter("do_min_dataset_check").value)
-        self.dataset_check_samples = int(self.get_parameter("dataset_check_samples").value)
+        # ---- device ----
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.get_logger().info(f"[INFO] Using device: {self.device}")
 
-        if self.ckpt_dir == "" or not Path(self.ckpt_dir).is_dir():
-            raise FileNotFoundError(f"ckpt_dir not found: {self.ckpt_dir}")
-        if self.act_root == "" or not Path(self.act_root).is_dir():
-            raise FileNotFoundError(f"act_root not found: {self.act_root}")
+        # ---- validate paths ----
+        if not self.ckpt_dir or not os.path.isdir(self.ckpt_dir):
+            raise RuntimeError(f"ckpt_dir invalid: {self.ckpt_dir}")
+        if not self.act_root or not os.path.isdir(self.act_root):
+            raise RuntimeError(f"act_root invalid: {self.act_root}")
 
-        _safe_mkdir(self.out_dir)
-
-        random.seed(self.seed)
-        np.random.seed(self.seed)
-        if HAVE_TORCH:
-            torch.manual_seed(self.seed)
-
-        self.get_logger().info(f"[INFO] ckpt_dir={self.ckpt_dir}")
-        self.get_logger().info(f"[INFO] act_root={self.act_root}")
-        self.get_logger().info(f"[INFO] out_dir={self.out_dir}")
-        self.get_logger().info(f"[INFO] device={self.device}")
-        self.get_logger().info(f"[INFO] do_rollout={self.do_rollout} horizon={self.rollout_horizon} action_is_delta={self.action_is_delta}")
-
-        # ---- load stats ----
-        self.qpos_stats, self.act_stats, self.stats_obj = load_dataset_stats_pkl(self.ckpt_dir)
-        self.state_dim = int(self.qpos_stats.mean.shape[0])
-        self.action_dim = int(self.act_stats.mean.shape[0])
-
-        self.get_logger().info(f"[STATS] state_dim={self.state_dim}, action_dim={self.action_dim}")
-        self.get_logger().info(f"[STATS] qpos_mean[:5]={self.qpos_stats.mean[:5]}  qpos_std[:5]={self.qpos_stats.std[:5]}")
-        self.get_logger().info(f"[STATS] act_mean[:5]={self.act_stats.mean[:5]}    act_std[:5]={self.act_stats.std[:5]}")
-        self.get_logger().info(f"[STATS] loaded from ckpt_dir/dataset_stats.pkl")
+        # ---- load stats (optional but recommended) ----
+        self.stats = _load_stats_if_exists(self.ckpt_dir)
+        if self.stats is None:
+            self.get_logger().warn("[STATS] dataset_stats.pkl not found. normalize_qpos/denorm_action will be disabled.")
+            self.normalize_qpos_enabled = False
+            self.denorm_action_enabled = False
+        else:
+            self.get_logger().info(f"[STATS] Loaded dataset stats: {os.path.join(self.ckpt_dir, 'dataset_stats.pkl')}")
 
         # ---- load policy ----
-        if not HAVE_TORCH:
-            raise RuntimeError("PyTorch is required.")
+        self.policy = self._load_policy_and_ckpt()
 
-        ckpt_file = _select_ckpt_file(self.ckpt_dir)
-        self.get_logger().info(f"[INFO] ckpt_file={ckpt_file}")
-        self.get_logger().info(f"[INFO] ACTPolicy file={Path(self.act_root)/'policy.py'}")
+        # ---- buffers for latest messages ----
+        self._pose6: Optional[np.ndarray] = None
+        self._force6: Optional[np.ndarray] = None
+        self._img_top: Optional[np.ndarray] = None
+        self._img_ee: Optional[np.ndarray] = None
 
-        self.policy = instantiate_act_policy(
-            act_root=self.act_root,
-            ckpt_dir=self.ckpt_dir,
-            device=self.device,
-            state_dim=self.state_dim,
-            action_dim=self.action_dim,
-            camera_names=self.camera_names,
+        self._dumped_once = False
+
+        # ---- QoS ----
+        img_rel = _reliability_from_str(self.image_qos_str)
+        img_qos = _qos(depth=1, reliability=img_rel)
+        vec_qos = _qos(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+
+        # ---- subs ----
+        self.create_subscription(Float64MultiArray, self.pose_topic, self._on_pose, vec_qos)
+        self.create_subscription(Float64MultiArray, self.force_topic, self._on_force, vec_qos)
+        self.create_subscription(Image, self.top_img_topic, self._on_top_img, img_qos)
+        self.create_subscription(Image, self.ee_img_topic, self._on_ee_img, img_qos)
+
+        self.get_logger().info(
+            "[INFO] ✅ Ready. Waiting for pose+force+images...\n"
+            f"  pose_topic={self.pose_topic}\n"
+            f"  force_topic={self.force_topic}\n"
+            f"  ee_img_topic={self.ee_img_topic}\n"
+            f"  top_img_topic={self.top_img_topic}\n"
+            f"  image_qos={self.image_qos_str}\n"
+            f"  force_indices={self.force_indices}\n"
         )
 
-        missing, unexpected = load_policy_weights(self.policy, ckpt_file, self.device)
-        self.get_logger().info(f"[INFO] Loaded policy. missing={len(missing)}, unexpected={len(unexpected)}")
-        if len(missing) > 0:
-            self.get_logger().warn("[WARN] Non-empty missing keys. If behavior is odd, checkpoint/config may not match the model definition.")
-
-        # ---- subscribers (online check) ----
-        self.latest_pose = None  # np.ndarray
-        self.latest_force = None # np.ndarray
-        self.latest_images: Dict[str, Any] = {}
-
-        self.pose_sub = self.create_subscription(Float64MultiArray, self.pose_topic, self._cb_pose, 10)
-        self.force_sub = self.create_subscription(Float64MultiArray, self.force_topic, self._cb_force, 10)
-
-        self.img_subs = []
-        if HAVE_IMAGE_MSG:
-            for t in self.image_topics:
-                sub = self.create_subscription(Image, t, lambda msg, topic=t: self._cb_image(msg, topic), 5)
-                self.img_subs.append(sub)
-        else:
-            self.get_logger().warn("[WARN] sensor_msgs/Image not available. Image topics will be ignored.")
-
-        # do minimal dataset check once (optional)
-        if self.do_min_dataset_check:
-            try:
-                self._run_min_dataset_check()
-            except Exception as e:
-                self.get_logger().warn(f"[WARN] Minimal dataset check skipped/failed: {e}")
-
-        # start main timer
-        self.timer = self.create_timer(0.2, self._tick)
-        self.did_run = False
-
-        self.get_logger().info("✅ Node ready. Waiting for topics (pose/force/images)...")
+        # ---- loop timer ----
+        self.timer = self.create_timer(0.05, self._loop)  # 20 Hz
 
 
-    # -----------------
-    # Callbacks
-    # -----------------
-    def _cb_pose(self, msg: Float64MultiArray):
-        arr = np.asarray(msg.data, dtype=np.float64)
-        self.latest_pose = arr
+    def _load_policy_and_ckpt(self):
+        # Make sure act_root is importable
+        if self.act_root not in sys.path:
+            sys.path.insert(0, self.act_root)
 
-    def _cb_force(self, msg: Float64MultiArray):
-        arr = np.asarray(msg.data, dtype=np.float64)
-        self.latest_force = arr
-
-    def _cb_image(self, msg: "Image", topic: str):
-        # best-effort: decode rgb8/bgr8
-        # We'll avoid cv_bridge dependency and decode raw bytes if possible.
+        # Import training-time policy.py
         try:
-            h = int(msg.height)
-            w = int(msg.width)
-            enc = str(msg.encoding).lower()
-            data = np.frombuffer(msg.data, dtype=np.uint8)
-
-            if "rgb8" in enc or "bgr8" in enc:
-                im = data.reshape((h, w, 3))
-                if "bgr8" in enc:
-                    # convert to rgb for consistency
-                    im = im[..., ::-1]
-            elif "rgba8" in enc or "bgra8" in enc:
-                im = data.reshape((h, w, 4))
-                if "bgra8" in enc:
-                    im = im[..., [2, 1, 0, 3]]
-            else:
-                # fallback: try 3-channel
-                im = data.reshape((h, w, -1))
-                if im.shape[-1] >= 3:
-                    im = im[..., :3]
-            self.latest_images[topic] = im
-        except Exception:
-            # ignore
-            pass
-
-
-    # -----------------
-    # Minimal dataset sanity check (best-effort)
-    # -----------------
-    def _run_min_dataset_check(self):
-        """
-        Best-effort sanity check:
-        If dataset_stats.pkl includes small arrays or references, try a tiny eval.
-        This is not guaranteed; we keep it minimal and never crash the node.
-        """
-        out_dir = Path(self.out_dir) / f"min_dataset_check_{_now_string()}"
-        _safe_mkdir(str(out_dir))
-
-        obj = self.stats_obj
-
-        # Heuristic: if stats pkl contains sample arrays
-        # e.g., "qpos_samples", "act_samples"
-        qpos_samples = None
-        act_samples = None
-
-        for k in ["qpos_samples", "state_samples", "obs_samples"]:
-            if k in obj:
-                qpos_samples = _as_np(obj[k])
-                break
-        for k in ["act_samples", "action_samples", "target_samples"]:
-            if k in obj:
-                act_samples = _as_np(obj[k])
-                break
-
-        if qpos_samples is None or act_samples is None:
-            # If it contains paths, we could load them, but format is unknown.
-            # Keep it minimal: skip if samples aren't directly in the pkl.
-            raise RuntimeError("No direct sample arrays found in dataset_stats.pkl (qpos_samples/act_samples).")
-
-        n = min(self.dataset_check_samples, qpos_samples.shape[0], act_samples.shape[0])
-        idx = np.random.choice(qpos_samples.shape[0], size=n, replace=False)
-
-        pred_list = []
-        gt_list = []
-        for i in idx:
-            qpos = qpos_samples[i].astype(np.float64)
-            gt_act = act_samples[i].astype(np.float64)
-
-            qn = self.qpos_stats.normalize(qpos)
-            # no images in this mini-check
-            pred_act_norm = run_policy_once(self.policy, qn, None, self.device)
-            pred_act = self.act_stats.denormalize(pred_act_norm)
-
-            pred_list.append(pred_act)
-            gt_list.append(gt_act)
-
-        pred = np.stack(pred_list, axis=0)
-        gt = np.stack(gt_list, axis=0)
-
-        mse = np.mean((pred - gt) ** 2, axis=0)
-        rmse = np.sqrt(mse)
-
-        report = {
-            "n": int(n),
-            "mse_per_dim": mse.tolist(),
-            "rmse_per_dim": rmse.tolist(),
-        }
-        with open(out_dir / "min_dataset_check.json", "w") as f:
-            json.dump(report, f, indent=2)
-
-        # plot rmse
-        plt.figure()
-        plt.plot(rmse)
-        plt.title("RMSE per dim (min dataset check)")
-        plt.xlabel("dim")
-        plt.ylabel("rmse")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(out_dir / "rmse_per_dim.png", dpi=160)
-        plt.close()
-
-        self.get_logger().info(f"[MIN_CHECK] saved: {out_dir}")
-
-
-    # -----------------
-    # Main tick
-    # -----------------
-    def _tick(self):
-        if self.did_run:
-            return
-
-        t0 = time.time()
-        ok = self._wait_for_first_msgs(timeout=self.wait_timeout_sec)
-        if not ok:
-            self.get_logger().warn("[WARN] Timeout waiting for pose/force/images. Still trying...")
-            return
-
-        # Run once
-        try:
-            self._run_online_rollout()
-            self.did_run = True
-            self.get_logger().info("✅ Done. (node will keep alive; Ctrl+C to exit)")
+            from policy import ACTPolicy
         except Exception as e:
-            self.get_logger().error(f"[ERROR] rollout failed: {e}")
+            raise RuntimeError(f"Failed to import ACTPolicy from {self.act_root}/policy.py : {e}")
 
+        # Build args_override EXACTLY like training expects (dict, not namespace)
+        args_override = {
+            "lr": 1e-4,  # not used for inference but build function expects it
+            "num_queries": int(self.chunk_size),
+            "kl_weight": float(self.get_parameter("kl_weight").value),
+            "hidden_dim": int(self.get_parameter("hidden_dim").value),
+            "dim_feedforward": int(self.get_parameter("dim_feedforward").value),
+            "lr_backbone": float(self.get_parameter("lr_backbone").value),
+            "backbone": str(self.get_parameter("backbone").value),
+            "enc_layers": int(self.get_parameter("enc_layers").value),
+            "dec_layers": int(self.get_parameter("dec_layers").value),
+            "nheads": int(self.get_parameter("nheads").value),
 
-    def _wait_for_first_msgs(self, timeout: float) -> bool:
-        """
-        Wait for at least pose+force.
-        Images are optional (but recommended).
-        """
-        start = time.time()
-        while time.time() - start < timeout:
-            if self.latest_pose is not None and self.latest_force is not None:
-                return True
-            rclpy.spin_once(self, timeout_sec=0.05)
-        return False
+            # *** CRITICAL: must match training ***
+            "camera_names": ["cam_top", "cam_ee"],
 
+            # dims
+            "state_dim": 9,
+            "action_dim": 9,
 
-    def _compose_qpos(self) -> np.ndarray:
-        """
-        Compose qpos vector expected by model (len=state_dim).
-        Default assumption:
-          qpos = [x,y,z, rx,ry,rz, fx,fy,fz]  (len=9)
-        """
-        pose = np.asarray(self.latest_pose, dtype=np.float64).copy()
-        force = np.asarray(self.latest_force, dtype=np.float64).copy()
-
-        # Best-effort: if pose has >=6 and force has >=3
-        if pose.shape[0] < 6 or force.shape[0] < 3:
-            raise RuntimeError(f"pose/force size too small. pose_len={pose.shape[0]}, force_len={force.shape[0]}")
-
-        x, y, z, rx, ry, rz = pose[:6]
-        fx, fy, fz = force[:3]
-
-        qpos = np.array([x, y, z, rx, ry, rz, fx, fy, fz], dtype=np.float64)
-
-        if qpos.shape[0] != self.state_dim:
-            # If your model uses different dim, pad/trim best-effort
-            if qpos.shape[0] > self.state_dim:
-                qpos = qpos[: self.state_dim]
-            else:
-                qpos = np.pad(qpos, (0, self.state_dim - qpos.shape[0]), mode="constant", constant_values=0.0)
-        return qpos
-
-
-    def _get_images_ordered(self) -> List[np.ndarray]:
-        """
-        Return images in the order of self.image_topics (best-effort).
-        """
-        imgs = []
-        for t in self.image_topics:
-            imgs.append(self.latest_images.get(t, None))
-        return imgs
-
-
-    def _run_online_rollout(self):
-        """
-        Main debug: take current obs, run rollout_horizon steps.
-        Save:
-          - rollout.csv (qpos, pred_action, denorm_action, etc.)
-          - plots (per-dim trajectories)
-        """
-        run_dir = Path(self.out_dir) / f"rollout_{_now_string()}"
-        _safe_mkdir(str(run_dir))
-
-        qpos0 = self._compose_qpos()
-        imgs = self._get_images_ordered()
-        img_tensor = _prep_images(imgs, self.device)
-
-        # Normalize initial
-        qpos_curr = qpos0.copy()
-        qpos_traj = [qpos_curr.copy()]
-
-        act_norm_traj = []
-        act_denorm_traj = []
-
-        # For delta mode: interpret denorm action as delta or absolute?
-        # We provide both interpretations in outputs.
-        qpos_acc_delta = qpos_curr.copy()
-        qpos_traj_delta = [qpos_acc_delta.copy()]
-
-        for t in range(self.rollout_horizon):
-            qn = self.qpos_stats.normalize(qpos_curr)
-            act_norm = run_policy_once(self.policy, qn, img_tensor, self.device)
-            act_denorm = self.act_stats.denormalize(act_norm)
-
-            act_norm_traj.append(act_norm.copy())
-            act_denorm_traj.append(act_denorm.copy())
-
-            # Interpretation A: action is absolute "next qpos"
-            qpos_next_abs = act_denorm.copy()
-            if qpos_next_abs.shape[0] != self.state_dim:
-                if qpos_next_abs.shape[0] > self.state_dim:
-                    qpos_next_abs = qpos_next_abs[: self.state_dim]
-                else:
-                    qpos_next_abs = np.pad(qpos_next_abs, (0, self.state_dim - qpos_next_abs.shape[0]), mode="constant")
-
-            # Interpretation B: action is delta in qpos space
-            qpos_next_delta = qpos_acc_delta + act_denorm
-            qpos_acc_delta = qpos_next_delta
-            qpos_traj_delta.append(qpos_acc_delta.copy())
-
-            # Choose rollout update based on param
-            if self.action_is_delta:
-                qpos_curr = qpos_next_delta
-            else:
-                qpos_curr = qpos_next_abs
-
-            qpos_traj.append(qpos_curr.copy())
-
-            if self.sleep_between_steps_sec > 0.0:
-                time.sleep(self.sleep_between_steps_sec)
-
-        qpos_traj = np.stack(qpos_traj, axis=0)                       # [T+1, D]
-        qpos_traj_delta = np.stack(qpos_traj_delta, axis=0)           # [T+1, D]
-        act_norm_traj = np.stack(act_norm_traj, axis=0)               # [T, A]
-        act_denorm_traj = np.stack(act_denorm_traj, axis=0)           # [T, A]
-
-        # Save csv
-        csv_path = run_dir / "rollout.csv"
-        with open(csv_path, "w") as f:
-            header = []
-            for i in range(self.state_dim):
-                header.append(f"qpos_{i}")
-            for i in range(self.state_dim):
-                header.append(f"qpos_delta_interp_{i}")
-            for i in range(self.action_dim):
-                header.append(f"act_norm_{i}")
-            for i in range(self.action_dim):
-                header.append(f"act_denorm_{i}")
-            f.write(",".join(header) + "\n")
-
-            T = self.rollout_horizon
-            for t in range(T):
-                row = []
-                row += qpos_traj[t].tolist()
-                row += qpos_traj_delta[t].tolist()
-                row += act_norm_traj[t].tolist()
-                row += act_denorm_traj[t].tolist()
-                f.write(",".join([f"{x:.8f}" for x in row]) + "\n")
-
-        # Save summary json
-        summary = {
-            "ckpt_dir": self.ckpt_dir,
-            "act_root": self.act_root,
-            "device": self.device,
-            "state_dim": self.state_dim,
-            "action_dim": self.action_dim,
-            "action_is_delta_param": bool(self.action_is_delta),
-            "rollout_horizon": int(self.rollout_horizon),
-            "pose_topic": self.pose_topic,
-            "force_topic": self.force_topic,
-            "image_topics": self.image_topics,
-            "camera_names": self.camera_names,
-            "qpos0": qpos0.tolist(),
+            # perf knobs (safe defaults)
+            "image_resize_hw": int(self.get_parameter("image_resize_hw").value),
+            "image_pool_hw": int(self.get_parameter("image_pool_hw").value),
+            "pretrained_backbone": (not bool(self.get_parameter("no_pretrained").value)),
         }
-        with open(run_dir / "summary.json", "w") as f:
-            json.dump(summary, f, indent=2)
 
-        # Plots
-        self._plot_trajectories(run_dir, qpos_traj, qpos_traj_delta, act_denorm_traj)
+        self.get_logger().info("[INFO] Loading policy (training-time policy.py)...")
+        policy = ACTPolicy(args_override).to(self.device)
+        policy.eval()
 
-        self.get_logger().info(f"[SAVE] {run_dir}")
-        self.get_logger().info(f"[SAVE] csv={csv_path}")
+        # Load ckpt (model-only)
+        ckpt_path = os.path.join(self.ckpt_dir, "policy_best.ckpt")
+        if not os.path.exists(ckpt_path):
+            raise RuntimeError(f"policy_best.ckpt not found: {ckpt_path}")
+
+        ckpt = torch.load(ckpt_path, map_location=self.device)
+        missing, unexpected = policy.model.load_state_dict(ckpt, strict=False)
+        self.get_logger().info(f"[INFO] Loaded ckpt. missing={len(missing)}, unexpected={len(unexpected)}")
+
+        # sanity: camera_names must be non-empty
+        try:
+            cam_names = list(policy.model.camera_names)
+        except Exception:
+            cam_names = args_override["camera_names"]
+        self.get_logger().info(f"[INFO] camera_names in model = {cam_names}")
+
+        return policy
 
 
-    def _plot_trajectories(self, run_dir: Path, qpos_traj: np.ndarray, qpos_traj_delta: np.ndarray, act_denorm_traj: np.ndarray):
-        """
-        Create plots:
-          - qpos over time (using chosen action_is_delta)
-          - also plot delta-interp trajectory for comparison
-          - plot per-dim action (denorm)
-        """
-        T1 = qpos_traj.shape[0]   # T+1
-        T = act_denorm_traj.shape[0]
+    # -----------------------------
+    # Callbacks
+    # -----------------------------
+    def _on_pose(self, msg: Float64MultiArray):
+        arr = np.asarray(msg.data, dtype=np.float32).reshape(-1)
+        if arr.size >= 6:
+            self._pose6 = arr[:6].copy()
 
-        t_q = np.arange(T1)
-        t_a = np.arange(T)
+    def _on_force(self, msg: Float64MultiArray):
+        arr = np.asarray(msg.data, dtype=np.float32).reshape(-1)
+        if arr.size >= 3:
+            self._force6 = arr.copy()
 
-        # If typical 9D: label
-        labels = [f"dim{i}" for i in range(self.state_dim)]
-        if self.state_dim == 9:
-            labels = ["x", "y", "z", "rx", "ry", "rz", "fx", "fy", "fz"]
+    def _on_top_img(self, msg: Image):
+        try:
+            rgb = _img_to_rgb_numpy(msg)
+            self._img_top = rgb
+        except Exception as e:
+            self.get_logger().error(f"[TOP IMG] decode failed: {e}")
 
-        # qpos
-        for i in range(self.state_dim):
-            plt.figure()
-            plt.plot(t_q, qpos_traj[:, i], label="rollout(qpos)")
-            plt.plot(t_q, qpos_traj_delta[:, i], linestyle="--", label="delta-interp(qpos)")
-            plt.title(f"qpos trajectory: {labels[i]}")
-            plt.xlabel("step")
-            plt.ylabel(labels[i])
-            plt.grid(True)
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(run_dir / f"qpos_{i:02d}_{labels[i]}.png", dpi=160)
-            plt.close()
+    def _on_ee_img(self, msg: Image):
+        try:
+            rgb = _img_to_rgb_numpy(msg)
+            self._img_ee = rgb
+        except Exception as e:
+            self.get_logger().error(f"[EE IMG] decode failed: {e}")
 
-        # action denorm
-        for i in range(min(self.action_dim, self.state_dim)):
-            plt.figure()
-            plt.plot(t_a, act_denorm_traj[:, i], label="act_denorm")
-            plt.title(f"action (denorm): {labels[i]}")
-            plt.xlabel("step")
-            plt.ylabel(labels[i])
-            plt.grid(True)
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(run_dir / f"act_denorm_{i:02d}_{labels[i]}.png", dpi=160)
-            plt.close()
 
-        # magnitude summaries (helps detect "collapsed" outputs)
-        act_std = np.std(act_denorm_traj, axis=0)
-        qpos_delta = np.diff(qpos_traj, axis=0)
-        qpos_step_std = np.std(qpos_delta, axis=0)
+    # -----------------------------
+    # Main loop
+    # -----------------------------
+    def _have_all(self) -> bool:
+        return (self._pose6 is not None) and (self._force6 is not None) and (self._img_top is not None) and (self._img_ee is not None)
 
-        plt.figure()
-        plt.plot(act_std, label="std(act_denorm)")
-        plt.plot(qpos_step_std, label="std(step_delta_qpos)")
-        plt.title("Per-dim std: action vs step-delta(qpos)")
-        plt.xlabel("dim")
-        plt.ylabel("std")
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(run_dir / "std_summary.png", dpi=160)
-        plt.close()
+    def _loop(self):
+        if self._dumped_once and self.exit_after_dump:
+            return
+
+        if not self._have_all():
+            return
+
+        try:
+            # Build inputs
+            q_t = _to_tensor_qpos(self._pose6, self._force6, force_indices=self.force_indices, device=self.device)
+            img_t = _to_tensor_image_stack(self._img_top, self._img_ee, device=self.device)
+
+            # Optional normalization
+            if self.normalize_qpos_enabled and self.stats is not None:
+                q_t = _normalize_qpos(q_t, self.stats)
+
+            # Forward
+            with torch.inference_mode():
+                a_hat = self.policy(q_t, img_t)  # expected (1,T,9) or (T,1,9)
+
+            seq = _fix_a_hat_shape(a_hat, self.chunk_size)  # (T,9)
+
+            # Optional denormalize to real units
+            if self.denorm_action_enabled and self.stats is not None:
+                seq = _denormalize_action(seq, self.stats)
+
+            seq_np = seq.detach().cpu().numpy()
+
+            # Dump
+            self._dump_sequence(seq_np)
+
+            self._dumped_once = True
+            if self.exit_after_dump:
+                self.get_logger().info("[INFO] Done. Shutting down (exit_after_dump=True).")
+                rclpy.shutdown()
+
+        except Exception as e:
+            self.get_logger().error(f"[INFER] failed: {e}")
+            # if it keeps failing, you can shut down or keep retrying; keep retrying is more useful
+
+
+    def _dump_sequence(self, seq_np: np.ndarray):
+        T = seq_np.shape[0]
+        self.get_logger().info(f"[DUMP] inferred trajectory: shape={seq_np.shape} (T={T})")
+
+        dump_full = self.dump_full
+        hn = max(0, int(self.dump_head_n))
+        tn = max(0, int(self.dump_tail_n))
+
+        def fmt_row(i: int, row: np.ndarray) -> str:
+            # row is (9,)
+            return f"{i:03d}: " + " ".join([f"{x:+0.6f}" for x in row.tolist()])
+
+        if dump_full:
+            lines = [fmt_row(i, seq_np[i]) for i in range(T)]
+            self.get_logger().info("[DUMP] FULL\n" + "\n".join(lines))
+            return
+
+        # head/tail
+        head_idx = list(range(min(hn, T)))
+        tail_idx = list(range(max(0, T - tn), T))
+
+        lines = []
+        if len(head_idx) > 0:
+            lines.append("[HEAD]")
+            lines += [fmt_row(i, seq_np[i]) for i in head_idx]
+        if len(tail_idx) > 0:
+            if len(head_idx) > 0:
+                lines.append("...")
+            lines.append("[TAIL]")
+            lines += [fmt_row(i, seq_np[i]) for i in tail_idx]
+
+        self.get_logger().info("[DUMP]\n" + "\n".join(lines))
 
 
 # -----------------------------
@@ -972,16 +492,18 @@ class ActCheckInferenceNode(Node):
 # -----------------------------
 def main(args=None):
     rclpy.init(args=args)
-    node = None
+    node = NodeCheckInference()
     try:
-        node = ActCheckInferenceNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        if node is not None:
+        try:
             node.destroy_node()
-        rclpy.shutdown()
+        except Exception:
+            pass
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
