@@ -19,6 +19,11 @@ Patch focus:
     AND after touch_min_after_start_sec from first publish
 - During PRELOAD: stop inference(plan generation), hold XY/RPY, z-servo to raise meas_fz to preload target.
 - When preload achieved (within tol for ok_count) -> TRACK (resume inference).
+
+NEW PATCH (requested):
+- If robot stays still (pose change small) for stall_sec or longer,
+  inject cmd_fz = fz_kick_N for fz_kick_dur_sec, then clear plans to trigger replan.
+- No forced z decrease; only force kick to push contact/touch transition.
 """
 
 import os
@@ -255,34 +260,29 @@ def _try_load_state_dict_compat(model: torch.nn.Module, state_dict: dict):
     Returns: (missing, unexpected)
     """
     candidates = []
-    # original
     candidates.append(("orig", state_dict))
-    # common strips
     candidates.append(("strip_model.", _strip_prefix_from_state_dict(state_dict, ["model."])))
     candidates.append(("strip_module.", _strip_prefix_from_state_dict(state_dict, ["module."])))
     candidates.append(("strip_model+module", _strip_prefix_from_state_dict(state_dict, ["module.", "model."])))
     candidates.append(("strip_policy.", _strip_prefix_from_state_dict(state_dict, ["policy."])))
     candidates.append(("strip_model_module", _strip_prefix_from_state_dict(state_dict, ["model.", "module."])))
 
-    best = None
-    best_score = None
     best_missing = None
     best_unexpected = None
+    best_score = None
 
-    for name, sd in candidates:
+    for _, sd in candidates:
         try:
             missing, unexpected = model.load_state_dict(sd, strict=False)
             score = len(missing) + len(unexpected)
             if (best_score is None) or (score < best_score):
-                best = name
                 best_score = score
                 best_missing = missing
                 best_unexpected = unexpected
         except Exception:
             continue
 
-    if best is None:
-        # last resort (raise from original attempt)
+    if best_missing is None:
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
         return missing, unexpected
 
@@ -335,11 +335,11 @@ class NodeActCmdMotionInfer(Node):
         self.declare_parameter("clear_plans_on_contact_change", False)
 
         # touch detection (robust PRESS trigger)
-        self.declare_parameter("touch_fz_thr", 0.5)               # threshold on (meas_fz - baseline)
-        self.declare_parameter("touch_ok_count", 3)               # consecutive control ticks
-        self.declare_parameter("touch_min_after_start_sec", 1.0)  # block early false trigger
-        self.declare_parameter("touch_baseline_tau_sec", 0.5)     # EMA for baseline while APPROACH
-        self.declare_parameter("touch_use_delta", True)           # use (meas - baseline) else use meas directly
+        self.declare_parameter("touch_fz_thr", 0.5)
+        self.declare_parameter("touch_ok_count", 3)
+        self.declare_parameter("touch_min_after_start_sec", 1.0)
+        self.declare_parameter("touch_baseline_tau_sec", 0.5)
+        self.declare_parameter("touch_use_delta", True)
 
         # preload (PRESS) behavior
         self.declare_parameter("preload_target_source", "stats_mean")  # stats_mean | fixed
@@ -371,7 +371,7 @@ class NodeActCmdMotionInfer(Node):
         # force safety
         self.declare_parameter("fz_hard_limit", 25.0)
 
-        # policy config (must include kl_weight for your policy.py)
+        # policy config
         self.declare_parameter("kl_weight", 10.0)
         self.declare_parameter("hidden_dim", 512)
         self.declare_parameter("dim_feedforward", 3200)
@@ -383,6 +383,18 @@ class NodeActCmdMotionInfer(Node):
         self.declare_parameter("image_resize_hw", 256)
         self.declare_parameter("image_pool_hw", 4)
         self.declare_parameter("pretrained_backbone", True)
+
+        # -----------------------------
+        # NEW: Stall -> FZ KICK
+        # -----------------------------
+        self.declare_parameter("stall_sec", 0.8)
+        self.declare_parameter("stall_pos_eps_mm", 0.02)
+        self.declare_parameter("stall_ang_eps_rad", 0.0002)
+        self.declare_parameter("stall_min_after_start_sec", 1.0)
+        self.declare_parameter("fz_kick_N", 1.5)
+        self.declare_parameter("fz_kick_dur_sec", 0.35)
+        self.declare_parameter("fz_kick_cooldown_sec", 0.8)
+        self.declare_parameter("fz_kick_enable_in_track", False)
 
         # -----------------------------
         # Read params
@@ -451,6 +463,16 @@ class NodeActCmdMotionInfer(Node):
 
         self.fz_hard_limit = float(self.get_parameter("fz_hard_limit").value)
 
+        # NEW: stall/fz kick
+        self.stall_sec = float(self.get_parameter("stall_sec").value)
+        self.stall_pos_eps_mm = float(self.get_parameter("stall_pos_eps_mm").value)
+        self.stall_ang_eps_rad = float(self.get_parameter("stall_ang_eps_rad").value)
+        self.stall_min_after_start_sec = float(self.get_parameter("stall_min_after_start_sec").value)
+        self.fz_kick_N = float(self.get_parameter("fz_kick_N").value)
+        self.fz_kick_dur_sec = float(self.get_parameter("fz_kick_dur_sec").value)
+        self.fz_kick_cooldown_sec = float(self.get_parameter("fz_kick_cooldown_sec").value)
+        self.fz_kick_enable_in_track = bool(self.get_parameter("fz_kick_enable_in_track").value)
+
         # device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.get_logger().info(f"[INFO] Using device: {self.device}")
@@ -486,16 +508,16 @@ class NodeActCmdMotionInfer(Node):
         self._sent_first_cmd = False
         self.prev_cmd: Optional[np.ndarray] = None  # (9,)
         self._t_start = _monotonic()
-        self._t_first_pub = None  # set at first publish time
+        self._t_first_pub = None
 
-        # contact hysteresis state (for logging / optional release)
+        # contact hysteresis state
         self._contact = False
         self._last_contact = False
 
-        # stage (PATCH: start APPROACH no matter what)
+        # stage (start APPROACH)
         self.stage = Stage.APPROACH
 
-        # anchor offset to prevent jumps
+        # anchor offset
         self._anchor_ready = False
         self._anchor_offset6 = np.zeros(6, dtype=np.float32)
 
@@ -516,6 +538,15 @@ class NodeActCmdMotionInfer(Node):
         # release bookkeeping
         self._release_t0 = 0.0
         self._release_start_fz_cmd = 0.0
+
+        # -----------------------------
+        # NEW: Stall / FZ kick state
+        # -----------------------------
+        self._stall_last_pose6: Optional[np.ndarray] = None
+        self._stall_last_move_t: float = _monotonic()
+        self._fz_kick_active: bool = False
+        self._fz_kick_t0: float = 0.0
+        self._fz_kick_last_end_t: float = -1e9
 
         # -----------------------------
         # ROS I/O
@@ -554,6 +585,7 @@ class NodeActCmdMotionInfer(Node):
             f"  contact_gate(on={self.contact_on_thr}, off={self.contact_off_thr}) clear_on_change={int(self.clear_plans_on_contact_change)}\n"
             f"  touch(delta={int(self.touch_use_delta)}, thr={self.touch_fz_thr}, ok={self.touch_ok_count}, min_after={self.touch_min_after_start_sec}s, base_tau={self.touch_baseline_tau_sec}s)\n"
             f"  PRELOAD(src={self.preload_target_source}, min={self.preload_min_N}N, scale={self.preload_target_scale}, tol={self.preload_tol_N}N, ok={self.preload_ok_count}, timeout={self.preload_timeout_sec}s, kp={self.preload_kp_mm_per_N}mm/N, dz_max={self.preload_dz_max_mm}mm, fcmd={self.press_force_cmd_mode})\n"
+            f"  STALL(sec={self.stall_sec}, pos_eps_mm={self.stall_pos_eps_mm}, ang_eps_rad={self.stall_ang_eps_rad}, min_after={self.stall_min_after_start_sec}s, kick={self.fz_kick_N}N/{self.fz_kick_dur_sec}s, cooldown={self.fz_kick_cooldown_sec}s, enable_in_track={int(self.fz_kick_enable_in_track)})\n"
             f"  RELEASE(enable={int(self.release_assist_enable)}, ramp_sec={self.release_ramp_sec})\n"
         )
 
@@ -570,11 +602,9 @@ class NodeActCmdMotionInfer(Node):
             raise RuntimeError(f"Failed to import ACTPolicy from {self.act_root}/policy.py : {e}")
 
         args_override = {
-            # required by your policy.py
             "kl_weight": float(self.get_parameter("kl_weight").value),
             "num_queries": int(self.chunk_size),
 
-            # typical ACT params (keep same defaults you used)
             "lr": 1e-4,
             "hidden_dim": int(self.get_parameter("hidden_dim").value),
             "dim_feedforward": int(self.get_parameter("dim_feedforward").value),
@@ -604,7 +634,6 @@ class NodeActCmdMotionInfer(Node):
         ckpt_obj = torch.load(ckpt_path, map_location=self.device)
         state_dict = ckpt_obj["state_dict"] if isinstance(ckpt_obj, dict) and "state_dict" in ckpt_obj else ckpt_obj
 
-        # load into policy.model if exists else policy
         model = policy.model if hasattr(policy, "model") else policy
         missing, unexpected = _try_load_state_dict_compat(model, state_dict)
 
@@ -659,9 +688,7 @@ class NodeActCmdMotionInfer(Node):
     def _compute_preload_target(self) -> float:
         tgt = self.preload_fixed_N
         if (self.preload_target_source == "stats_mean") and (self.stats is not None):
-            # qpos = [pose6, force3] => fz is index 8
             mean_fz = float(self.stats.qpos_mean[8])
-            # your force is positive-only; still robustify
             tgt = abs(mean_fz) * float(self.preload_target_scale)
         tgt = max(float(self.preload_min_N), float(tgt))
         return float(tgt)
@@ -676,7 +703,6 @@ class NodeActCmdMotionInfer(Node):
         self._preload_hold_pose6 = pose6_now.astype(np.float32).copy()
         self._preload_target_N = self._compute_preload_target()
 
-        # stop using old plans / re-anchor later
         self.plans.clear()
         self._anchor_ready = False
 
@@ -684,7 +710,6 @@ class NodeActCmdMotionInfer(Node):
 
     def _enter_track(self):
         self.stage = Stage.TRACK
-        # re-anchor when new plans arrive after preload
         self.plans.clear()
         self._anchor_ready = False
         self.get_logger().warn("[STAGE] -> TRACK (resume inference)")
@@ -699,7 +724,6 @@ class NodeActCmdMotionInfer(Node):
     # Infer timer: generate plan and push (disabled during PRELOAD)
     # ------------------------------------------------------------
     def _on_infer_timer(self):
-        # inference OFF during PRELOAD (as requested)
         if self.stage == Stage.PRELOAD:
             return
 
@@ -714,26 +738,24 @@ class NodeActCmdMotionInfer(Node):
         if force.size < 3:
             return
 
-        # build qpos (1,9): [pose6 + force3]
         idx = list(self.force_indices)
         f3 = np.zeros(3, dtype=np.float32)
         for i, k in enumerate(idx):
             if k < force.size:
                 f3[i] = float(force[k])
+
         q_np = np.concatenate([pose6[:6], f3], axis=0).astype(np.float32)  # (9,)
         q_t = torch.from_numpy(q_np).unsqueeze(0).to(self.device, dtype=torch.float32)
 
         if self.normalize_qpos_enabled and self.stats is not None:
             q_t = _normalize_qpos(q_t, self.stats)
 
-        # imgs (1,2,3,H,W)
         try:
             img_t = _to_tensor_image_stack(top, ee, device=self.device, resize_hw=self.resize_hw)
         except Exception as e:
             self.get_logger().error(f"[INFER] image stack failed: {e}")
             return
 
-        # forward -> (T,9) -> denorm
         try:
             with torch.inference_mode():
                 a_hat = self.policy(q_t, img_t)
@@ -743,8 +765,6 @@ class NodeActCmdMotionInfer(Node):
                 seq = _denorm_action_seq(seq, self.stats)
 
             seq_den = seq.detach().cpu().numpy().astype(np.float32)
-
-            # safety clamp predicted fz in plan-space
             seq_den[:, 8] = np.clip(seq_den[:, 8], -self.fz_hard_limit, self.fz_hard_limit)
 
         except Exception as e:
@@ -808,17 +828,9 @@ class NodeActCmdMotionInfer(Node):
     # PRELOAD control (Z-servo + optional cmd_fz)
     # ------------------------------------------------------------
     def _preload_control_step(self, pose6_now: np.ndarray, meas_fz: float) -> np.ndarray:
-        """
-        PRELOAD:
-          - hold XY/RPY (optional)
-          - Z-servo: if meas_fz < target, move downward by dz = kp*(target - meas), capped
-          - optionally set cmd_fz to target (recommended)
-        Output is cmd_target (9,) before EMA/caps.
-        """
         hold = self._preload_hold_pose6 if self._preload_hold_pose6 is not None else pose6_now.astype(np.float32)
 
         cmd = np.zeros(9, dtype=np.float32)
-        # base: use current pose as reference (inference is OFF)
         cmd[0:6] = pose6_now.astype(np.float32)
         cmd[6] = 0.0
         cmd[7] = 0.0
@@ -835,7 +847,6 @@ class NodeActCmdMotionInfer(Node):
         target = float(self._preload_target_N)
         err = float(target - meas_fz)
 
-        # only press more when below target
         dz = self.preload_kp_mm_per_N * max(0.0, err)
         dz = float(np.clip(dz, 0.0, self.preload_dz_max_mm))
         cmd[2] = float(cmd[2] - dz)
@@ -846,7 +857,6 @@ class NodeActCmdMotionInfer(Node):
         elif mode == "target":
             cmd[8] = float(target)
         else:
-            # keep: keep previous command fz (more stable than predicted here)
             prev_fz = float(self.prev_cmd[8]) if (self.prev_cmd is not None) else 0.0
             cmd[8] = float(prev_fz)
 
@@ -884,7 +894,7 @@ class NodeActCmdMotionInfer(Node):
 
         meas_fz = 0.0
         if force is not None and force.size >= 3:
-            meas_fz = float(force[2])  # you said normal force is definitely fz, positive-only
+            meas_fz = float(force[2])  # normal force
 
         # (1) FIRST publish = current pose hold
         if not self._sent_first_cmd:
@@ -897,15 +907,19 @@ class NodeActCmdMotionInfer(Node):
             self.prev_cmd = cmd0.copy()
             self._sent_first_cmd = True
             self._t_first_pub = now_t
-            self._t_start = now_t  # startup ramp 기준 재설정(안전)
+            self._t_start = now_t
 
-            # PATCH: stage must start APPROACH
             self.stage = Stage.APPROACH
 
-            # init touch baseline with current meas_fz
             self._fz_base = max(0.0, meas_fz)
             self._fz_base_init = True
             self._touch_ok = 0
+
+            # NEW: init stall trackers
+            self._stall_last_pose6 = pose6.astype(np.float32).copy()
+            self._stall_last_move_t = now_t
+            self._fz_kick_active = False
+            self._fz_kick_last_end_t = -1e9
 
             self._publish_cmd(cmd0)
             self.get_logger().info("[START] First publish = current pose. stage=APPROACH")
@@ -914,7 +928,7 @@ class NodeActCmdMotionInfer(Node):
         if self.prev_cmd is None:
             return
 
-        # contact hysteresis (for logging / optional release)
+        # contact hysteresis (logging / optional release)
         changed = self._update_contact(meas_fz)
         if changed:
             if self.clear_plans_on_contact_change:
@@ -922,7 +936,6 @@ class NodeActCmdMotionInfer(Node):
                 self._anchor_ready = False
             self.get_logger().warn(f"[CONTACT] changed -> {int(self._contact)} | meas_fz={meas_fz:.3f} | stage={self.stage.name}")
 
-            # optional RELEASE assist
             if self.release_assist_enable:
                 if (not self._contact) and self._last_contact and (self.stage == Stage.TRACK):
                     fz_start = float(self.prev_cmd[8]) if self.prev_cmd is not None else 0.0
@@ -931,34 +944,72 @@ class NodeActCmdMotionInfer(Node):
         self._last_contact = self._contact
 
         # -----------------------------
-        # Touch detector (PATCH 핵심)
+        # Stall detect -> FZ KICK (NEW)
         # -----------------------------
-        # Update baseline only in APPROACH (pre-touch)
-        if self.stage == Stage.APPROACH:
+        if self._t_first_pub is not None:
+            elapsed_since_start = (now_t - self._t_first_pub)
+
+            # update last_move_t by pose change
+            if self._stall_last_pose6 is None:
+                self._stall_last_pose6 = pose6.astype(np.float32).copy()
+                self._stall_last_move_t = now_t
+            else:
+                dp = float(np.linalg.norm(pose6[:3] - self._stall_last_pose6[:3]))
+                da = float(np.linalg.norm(pose6[3:6] - self._stall_last_pose6[3:6]))
+                if (dp >= self.stall_pos_eps_mm) or (da >= self.stall_ang_eps_rad):
+                    self._stall_last_pose6 = pose6.astype(np.float32).copy()
+                    self._stall_last_move_t = now_t
+
+            kick_stage_ok = (self.stage == Stage.APPROACH) or (self.fz_kick_enable_in_track and self.stage == Stage.TRACK)
+
+            if (kick_stage_ok and (not self._contact) and (not self._fz_kick_active)
+                and (elapsed_since_start >= self.stall_min_after_start_sec)
+                and ((now_t - self._stall_last_move_t) >= self.stall_sec)
+                and ((now_t - self._fz_kick_last_end_t) >= self.fz_kick_cooldown_sec)):
+
+                stall_t = now_t - self._stall_last_move_t
+                self._fz_kick_active = True
+                self._fz_kick_t0 = now_t
+                self.get_logger().warn(
+                    f"[STALL] no motion for {stall_t:.2f}s -> FZ KICK start "
+                    f"(fz={self.fz_kick_N:.2f}N, dur={self.fz_kick_dur_sec:.2f}s)"
+                )
+
+            if self._fz_kick_active and ((now_t - self._fz_kick_t0) >= self.fz_kick_dur_sec):
+                self._fz_kick_active = False
+                self._fz_kick_last_end_t = now_t
+
+                # trigger fresh plan usage
+                self.plans.clear()
+                self._anchor_ready = False
+
+                self.get_logger().warn("[STALL] FZ KICK end -> replan requested")
+
+        # -----------------------------
+        # Touch detector
+        # -----------------------------
+        # baseline update only in APPROACH and NOT during kick
+        if self.stage == Stage.APPROACH and (not self._fz_kick_active):
             if not self._fz_base_init:
                 self._fz_base = max(0.0, meas_fz)
                 self._fz_base_init = True
             else:
                 beta_base = _beta_from_tau(self.dt_control, self.touch_baseline_tau_sec)
-                # baseline EMA follows the "non-contact-ish" force
                 self._fz_base = float((1.0 - beta_base) * self._fz_base + beta_base * max(0.0, meas_fz))
 
-            # compute touch signal
             if self.touch_use_delta:
                 touch_sig = max(0.0, meas_fz - self._fz_base)
             else:
                 touch_sig = max(0.0, meas_fz)
 
-            # enforce min time after start to avoid instant false PRESS
-            elapsed_since_start = (now_t - self._t_first_pub) if (self._t_first_pub is not None) else 0.0
-            allow_touch = (elapsed_since_start >= self.touch_min_after_start_sec)
+            elapsed = (now_t - self._t_first_pub) if (self._t_first_pub is not None) else 0.0
+            allow_touch = (elapsed >= self.touch_min_after_start_sec)
 
             if allow_touch and (touch_sig >= self.touch_fz_thr):
                 self._touch_ok += 1
             else:
                 self._touch_ok = 0
 
-            # transition APPROACH -> PRELOAD only here
             if self._touch_ok >= self.touch_ok_count:
                 self._touch_ok = 0
                 self._enter_preload(pose6.astype(np.float32))
@@ -971,7 +1022,6 @@ class NodeActCmdMotionInfer(Node):
         if self.stage == Stage.PRELOAD:
             cmd_target = self._preload_control_step(pose6.astype(np.float32), meas_fz)
 
-            # success condition: within tol for ok_count ticks
             if abs(meas_fz - self._preload_target_N) <= self.preload_tol_N:
                 self._preload_ok += 1
             else:
@@ -986,11 +1036,9 @@ class NodeActCmdMotionInfer(Node):
                     self._enter_track()
 
         else:
-            # APPROACH / TRACK / RELEASE: use inference plan if available
             cmd_pred = self._temporal_agg_cmd(now_t)
 
             if cmd_pred is None:
-                # no plan -> hold previous
                 self._publish_cmd(self.prev_cmd)
                 return
 
@@ -999,7 +1047,6 @@ class NodeActCmdMotionInfer(Node):
             if self.action_type == "delta":
                 cmd_target = (self.prev_cmd + cmd_target).astype(np.float32)
 
-            # anchor initialize once (prevents jump)
             if not self._anchor_ready:
                 self._anchor_offset6 = (pose6.astype(np.float32) - cmd_target[0:6]).astype(np.float32)
                 self._anchor_ready = True
@@ -1008,7 +1055,6 @@ class NodeActCmdMotionInfer(Node):
             cmd_target[0:6] = (cmd_target[0:6] + self._anchor_offset6).astype(np.float32)
 
             if self.stage == Stage.APPROACH:
-                # APPROACH: inference pose only, force cmd suppressed
                 cmd_target[6] = 0.0
                 cmd_target[7] = 0.0
                 cmd_target[8] = 0.0
@@ -1021,6 +1067,12 @@ class NodeActCmdMotionInfer(Node):
                     self._anchor_ready = False
                     self._touch_ok = 0
                     self.get_logger().warn("[STAGE] RELEASE done -> APPROACH")
+
+        # -----------------------------
+        # Apply FZ KICK (NEW): keep pose from model, inject cmd_fz
+        # -----------------------------
+        if self._fz_kick_active:
+            cmd_target[8] = float(max(cmd_target[8], self.fz_kick_N))
 
         # safety clamp
         cmd_target[8] = float(np.clip(cmd_target[8], 0.0, self.fz_hard_limit))
@@ -1039,7 +1091,6 @@ class NodeActCmdMotionInfer(Node):
         d = (cmd_target - self.prev_cmd).astype(np.float32)
         d = (beta * d).astype(np.float32)
 
-        # caps
         for i in range(3):
             di = float(d[i])
             if abs(di) > cap_pos:
@@ -1058,7 +1109,6 @@ class NodeActCmdMotionInfer(Node):
 
         cmd_next = (self.prev_cmd + d).astype(np.float32)
 
-        # overshoot snap
         for i in range(9):
             a0 = float(self.prev_cmd[i])
             a1 = float(cmd_next[i])
@@ -1073,9 +1123,11 @@ class NodeActCmdMotionInfer(Node):
         if (int(now_t * self.control_hz) % self.debug_every_n) == 0:
             base = self._fz_base if self._fz_base_init else 0.0
             touch_sig = max(0.0, meas_fz - base) if self.touch_use_delta else max(0.0, meas_fz)
+            stall_t = now_t - self._stall_last_move_t if self._stall_last_move_t is not None else 0.0
             self.get_logger().info(
                 f"[CTRL] stage={self.stage.name} contact={int(self._contact)} meas_fz={meas_fz:.3f} "
                 f"fz_base={base:.3f} touch_sig={touch_sig:.3f} touch_ok={self._touch_ok} | "
+                f"stall={stall_t:.2f}s kick={int(self._fz_kick_active)} | "
                 f"beta={beta:.4f} ramp={ramp:.3f} cap(pos={cap_pos:.4f}, ang={cap_ang:.6f}, fz={cap_fz:.4f}) | "
                 f"cmd_xyz=[{cmd_next[0]:.3f},{cmd_next[1]:.3f},{cmd_next[2]:.3f}] cmd_fz={cmd_next[8]:.3f}"
             )
