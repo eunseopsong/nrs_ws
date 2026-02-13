@@ -40,6 +40,7 @@ setup(
             'vr_demo_txt_wo_filter = nrs_imitation.vr_demo_txt_wo_filter:main',
             'node_act_cmdmotion_infer = nrs_imitation.node_act_cmdmotion_infer:main',
             'node_check_inference = nrs_imitation.node_check_inference:main',
+            'ur10_keyboard_recorder = nrs_imitation.ur10_keyboard_recorder:main',
         ],
     },
 )
