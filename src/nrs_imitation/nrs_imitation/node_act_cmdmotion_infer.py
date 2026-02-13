@@ -1,22 +1,51 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-node_act_cmdmotion_infer.py (BASELINE + STATE MACHINE)
+node_act_cmdmotion_infer.py (BASELINE + STATE MACHINE + STALL WINDOW RECOVER + DITHER RECOVER)
 
-APPROACH -> PRELOAD(PRESS) -> TRACK -> (optional RELEASE)
+Stages:
+  APPROACH -> PRELOAD(PRESS) -> TRACK -> (optional RELEASE)
+  + RECOVER: If stalled/invalid-motion, go back to start pose and restart inference.
 
-✅ 유지(중요)
-- "실행되던 파일" 경로/구조 기준으로:
-  - policy.py 로딩: (1) ckpt_dir/policy.py 있으면 그걸 사용
-                    (2) 없으면 act_root/policy.py 사용 (fallback)
-  - ckpt 로딩: policy_best.ckpt 우선, 없으면 policy.ckpt fallback
-  - 토픽/파라미터 이름은 기존 호환 유지(press_* 등)
+Baseline guarantees kept:
+1) FIRST publish MUST equal current pose (/ur10skku/currentP) for pose6.
+2) After that, command follows inference output SLOWLY (QP-safe):
+   - Temporal aggregation across multiple plans (exp decay)
+   - Anchor offset (current_pose - pred_pose at first usage)
+   - EMA smoothing (tau_sec) + per-tick step caps + startup ramp
 
-✅ 추가(요청)
-- "어느 상태든(approach/preload/track) 표면에 붙은 채로 정지"가 stall_sec 이상 지속되면
-  fz_kick_N을 fz_kick_dur_sec 동안 강제 주입하고,
-  kick 종료 시 plans clear + anchor reset으로 replanning 유도.
-- 기본은 "contact 상태일 때만" kick 동작(fz_kick_contact_only=True).
+Touch->PRELOAD robustness kept:
+  touch = (meas_fz - fz_baseline) >= touch_fz_thr  (or abs meas_fz if touch_use_delta=False)
+  AND touch_ok_count consecutive
+  AND after touch_min_after_start_sec from first publish
+
+PRELOAD behavior kept:
+  - stop inference
+  - hold XY/RPY (optional), z-servo to reach preload target, optional cmd_fz target
+
+STALL logic (window + LPF) kept:
+  - Use low-pass filtered pose (stall_lpf_tau_sec)
+  - Maintain a "stall window" reference pose/time.
+  - If pose stays within (stall_window_net_pos_eps_mm, stall_window_net_ang_eps_rad)
+    from the window reference for stall_sec -> STALL trigger.
+
+On STALL trigger:
+  - if contact==1: FZ KICK (inject cmd_fz for fz_kick_dur_sec), then clear plans (replan)
+  - else (contact==0): RECOVER -> go back to start pose, clear plans, reset anchor, then resume APPROACH.
+
+NEW (Improved for vibration / invalid motion):
+  - DITHER detector: detect "small net progress but large back-and-forth motion" using:
+      net displacement + path length ratio + RMS vibration
+    -> If persists for dither_sec, treat as invalid motion.
+    Policy:
+      * if contact==1: try KICK up to kick_max_before_recover times
+      * otherwise: RECOVER
+  - RECOVER stability improved:
+      * completion check uses LPF (recover_check_lpf_tau_sec)
+      * ok counter has decay (not hard reset on tiny jitter)
+      * optional recover-specific tau/caps/ramp (default enabled with safe values)
+      * effective recover timeout auto-extended based on distance if needed
+
 """
 
 import os
@@ -25,7 +54,6 @@ import time
 import math
 import pickle
 import threading
-import importlib.util
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional, Deque, List
@@ -43,28 +71,11 @@ from sensor_msgs.msg import Image
 
 
 # ============================================================
-# Helpers (time / math)
+# Helpers (QoS / time / math)
 # ============================================================
 
 def _monotonic() -> float:
     return time.monotonic()
-
-def _exp_decay_weight(age_steps: int, tau_steps: float) -> float:
-    if tau_steps <= 1e-9:
-        return 1.0
-    age_steps = max(0, int(age_steps))
-    return float(math.exp(-float(age_steps) / float(tau_steps)))
-
-def _beta_from_tau(dt: float, tau: float) -> float:
-    # EMA beta: x <- x + beta*(target-x)
-    if tau <= 1e-9:
-        return 1.0
-    return float(1.0 - math.exp(-float(dt) / float(tau)))
-
-
-# ============================================================
-# Helpers (QoS)
-# ============================================================
 
 def _reliability_from_str(s: str) -> ReliabilityPolicy:
     s = (s or "").strip().lower()
@@ -81,6 +92,18 @@ def _qos(depth: int, reliability: ReliabilityPolicy) -> QoSProfile:
         reliability=reliability,
         durability=DurabilityPolicy.VOLATILE,
     )
+
+def _exp_decay_weight(age_steps: int, tau_steps: float) -> float:
+    if tau_steps <= 1e-9:
+        return 1.0
+    age_steps = max(0, int(age_steps))
+    return float(math.exp(-float(age_steps) / float(tau_steps)))
+
+def _beta_from_tau(dt: float, tau: float) -> float:
+    # EMA beta: x <- x + beta*(target-x)
+    if tau <= 1e-9:
+        return 1.0
+    return float(1.0 - math.exp(-float(dt) / float(tau)))
 
 
 # ============================================================
@@ -170,6 +193,7 @@ def _load_dataset_stats(ckpt_dir: str) -> Optional[StatsPack]:
         am = np.asarray(st["action_mean"], dtype=np.float32).reshape(9)
         astd = _sanitize_std(np.asarray(st["action_std"], dtype=np.float32).reshape(9))
         return StatsPack(qm, qs, am, astd)
+
     return None
 
 def _normalize_qpos(q: torch.Tensor, stats: StatsPack) -> torch.Tensor:
@@ -236,6 +260,7 @@ class Stage(Enum):
     PRELOAD  = 1
     TRACK    = 2
     RELEASE  = 3
+    RECOVER  = 4
 
 
 # ============================================================
@@ -288,26 +313,6 @@ def _try_load_state_dict_compat(model: torch.nn.Module, state_dict: dict):
 
 
 # ============================================================
-# Dynamic import for policy.py (경로 유지 + fallback)
-# ============================================================
-
-def _import_actpolicy_from_file(policy_py_path: str):
-    if not os.path.exists(policy_py_path):
-        raise FileNotFoundError(policy_py_path)
-
-    module_name = f"_act_policy_{abs(hash(policy_py_path))}"
-    spec = importlib.util.spec_from_file_location(module_name, policy_py_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to create spec from {policy_py_path}")
-
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore
-    if not hasattr(mod, "ACTPolicy"):
-        raise RuntimeError(f"ACTPolicy not found in {policy_py_path}")
-    return mod.ACTPolicy
-
-
-# ============================================================
 # ROS2 Node
 # ============================================================
 
@@ -322,7 +327,6 @@ class NodeActCmdMotionInfer(Node):
         self.declare_parameter("act_root", "")
         self.declare_parameter("chunk_size", 100)
 
-        # (실행되던 기본 토픽 유지)
         self.declare_parameter("pose_topic", "/ur10skku/currentP")
         self.declare_parameter("force_topic", "/ur10skku/currentF")
         self.declare_parameter("top_img_topic", "/realsense/top/color/image_raw")
@@ -351,10 +355,7 @@ class NodeActCmdMotionInfer(Node):
         # contact gating (hysteresis)
         self.declare_parameter("contact_on_thr", 2.0)
         self.declare_parameter("contact_off_thr", 1.0)
-
-        # 기존 호환: clear_pl (예전 런커맨드에서 쓰던 축약)
         self.declare_parameter("clear_plans_on_contact_change", False)
-        self.declare_parameter("clear_pl", False)  # alias
 
         # touch detection (robust PRESS trigger)
         self.declare_parameter("touch_fz_thr", 0.5)
@@ -363,27 +364,19 @@ class NodeActCmdMotionInfer(Node):
         self.declare_parameter("touch_baseline_tau_sec", 0.5)
         self.declare_parameter("touch_use_delta", True)
 
-        # -----------------------------
-        # PRESS/PRELOAD (기존 press_* 파라미터 이름 유지)
-        # -----------------------------
-        self.declare_parameter("press_fz_target", 10.0)
-        self.declare_parameter("press_ok_count", 15)
-        self.declare_parameter("press_timeout_sec", 4.0)
-        self.declare_parameter("press_kp_mm_per_N", 0.02)
-        self.declare_parameter("press_dz_max_mm", 0.08)
-        self.declare_parameter("press_tol_N", 0.2)
-        self.declare_parameter("press_send_fz_cmd", True)
-        self.declare_parameter("press_hold_xy", True)
-        self.declare_parameter("press_hold_rpy", True)
-
-        # (신규 이름도 받되, 내부는 press_*로만 씀)
+        # preload (PRESS) behavior
+        self.declare_parameter("preload_target_source", "stats_mean")  # stats_mean | fixed
         self.declare_parameter("preload_fixed_N", 10.0)
-        self.declare_parameter("preload_ok_count", 15)
-        self.declare_parameter("preload_timeout_sec", 4.0)
+        self.declare_parameter("preload_target_scale", 1.0)
+        self.declare_parameter("preload_min_N", 10.0)
+        self.declare_parameter("preload_timeout_sec", 5.0)
+        self.declare_parameter("preload_ok_count", 10)
         self.declare_parameter("preload_kp_mm_per_N", 0.02)
         self.declare_parameter("preload_dz_max_mm", 0.08)
         self.declare_parameter("preload_tol_N", 0.2)
-        self.declare_parameter("press_force_cmd_mode", "target")  # keep|zero|target (호환용)
+        self.declare_parameter("press_force_cmd_mode", "target")  # keep|zero|target
+        self.declare_parameter("press_hold_xy", True)
+        self.declare_parameter("press_hold_rpy", True)
 
         # optional release assist
         self.declare_parameter("release_assist_enable", False)
@@ -401,7 +394,7 @@ class NodeActCmdMotionInfer(Node):
         # force safety
         self.declare_parameter("fz_hard_limit", 25.0)
 
-        # policy config (실행되던 구조 유지)
+        # policy config
         self.declare_parameter("kl_weight", 10.0)
         self.declare_parameter("hidden_dim", 512)
         self.declare_parameter("dim_feedforward", 3200)
@@ -415,22 +408,60 @@ class NodeActCmdMotionInfer(Node):
         self.declare_parameter("pretrained_backbone", True)
 
         # -----------------------------
-        # NEW: Stall -> FZ KICK (요청 반영)
+        # Stall window + FZ kick + Recover (original)
         # -----------------------------
-        self.declare_parameter("stall_sec", 0.8)
-        self.declare_parameter("stall_pos_eps_mm", 0.02)
-        self.declare_parameter("stall_ang_eps_rad", 0.0002)
+        self.declare_parameter("stall_sec", 1.2)
         self.declare_parameter("stall_min_after_start_sec", 1.0)
+        self.declare_parameter("stall_lpf_tau_sec", 0.40)
 
+        self.declare_parameter("stall_window_net_pos_eps_mm", 0.25)
+        self.declare_parameter("stall_window_net_ang_eps_rad", 0.0006)
+
+        # FZ kick when contact==1 and stalled
         self.declare_parameter("fz_kick_N", 1.5)
         self.declare_parameter("fz_kick_dur_sec", 0.35)
         self.declare_parameter("fz_kick_cooldown_sec", 0.8)
 
-        # ✅ 핵심: 표면에 "붙은 채" 정지일 때만 kick (기본 True)
-        self.declare_parameter("fz_kick_contact_only", True)
+        # Recover when contact==0 and stalled
+        self.declare_parameter("recover_enable", True)
+        self.declare_parameter("recover_cooldown_sec", 2.0)
+        self.declare_parameter("recover_timeout_sec", 6.0)
+        self.declare_parameter("recover_pos_tol_mm", 0.35)
+        self.declare_parameter("recover_ang_tol_rad", 0.0008)
+        self.declare_parameter("recover_ok_count", 10)
 
-        # 기존 호환: track에서도 kick 허용 (기본 True로 바꿈)
-        self.declare_parameter("fz_kick_enable_in_track", True)
+        # -----------------------------
+        # NEW: DITHER detector (invalid oscillatory motion) + better recover
+        # -----------------------------
+        self.declare_parameter("dither_enable", True)
+        self.declare_parameter("dither_only_track", True)          # default: only during TRACK to avoid false positives
+        self.declare_parameter("dither_min_after_start_sec", 2.0)  # start delay
+        self.declare_parameter("dither_win_sec", 1.0)              # history window length
+        self.declare_parameter("dither_sec", 1.0)                  # must persist to trigger
+        self.declare_parameter("dither_net_pos_thr_mm", 0.8)       # net progress small
+        self.declare_parameter("dither_net_ang_thr_rad", 0.0015)
+        self.declare_parameter("dither_path_ratio_thr", 6.0)       # path/net large -> back-and-forth
+        self.declare_parameter("dither_rms_pos_thr_mm", 0.10)      # vibration RMS
+        self.declare_parameter("dither_rms_ang_thr_rad", 0.00025)
+        self.declare_parameter("dither_decay", 0.5)                # score decay speed when condition false
+
+        self.declare_parameter("kick_max_before_recover", 2)       # contact==1: try kick this many times then recover
+        self.declare_parameter("kick_reset_sec", 6.0)              # if stable progress for some time, reset kick count
+
+        # recover completion check LPF (prevents jitter from breaking ok_count)
+        self.declare_parameter("recover_check_lpf_tau_sec", 0.25)
+
+        # recover motion overrides (optional but enabled by default with safe values)
+        self.declare_parameter("recover_use_overrides", True)
+        self.declare_parameter("recover_tau_sec", 0.25)            # faster converge than normal, but still smooth
+        self.declare_parameter("recover_startup_ramp_sec", 0.6)
+        self.declare_parameter("recover_step_cap_pos_mm", 1.0)
+        self.declare_parameter("recover_step_cap_ang_rad", 0.0012)
+        self.declare_parameter("recover_step_cap_fz", 0.30)
+
+        # auto-extend timeout based on distance (prevents premature abort)
+        self.declare_parameter("recover_timeout_min_margin_sec", 1.0)
+        self.declare_parameter("recover_timeout_scale", 1.4)
 
         # -----------------------------
         # Read params
@@ -463,16 +494,29 @@ class NodeActCmdMotionInfer(Node):
 
         self.contact_on_thr = float(self.get_parameter("contact_on_thr").value)
         self.contact_off_thr = float(self.get_parameter("contact_off_thr").value)
-
-        # clear_pl alias 반영
-        clear_pl = bool(self.get_parameter("clear_pl").value)
-        self.clear_plans_on_contact_change = bool(self.get_parameter("clear_plans_on_contact_change").value) or clear_pl
+        self.clear_plans_on_contact_change = bool(self.get_parameter("clear_plans_on_contact_change").value)
 
         self.touch_fz_thr = float(self.get_parameter("touch_fz_thr").value)
         self.touch_ok_count = int(self.get_parameter("touch_ok_count").value)
         self.touch_min_after_start_sec = float(self.get_parameter("touch_min_after_start_sec").value)
         self.touch_baseline_tau_sec = float(self.get_parameter("touch_baseline_tau_sec").value)
         self.touch_use_delta = bool(self.get_parameter("touch_use_delta").value)
+
+        self.preload_target_source = str(self.get_parameter("preload_target_source").value).strip().lower()
+        self.preload_fixed_N = float(self.get_parameter("preload_fixed_N").value)
+        self.preload_target_scale = float(self.get_parameter("preload_target_scale").value)
+        self.preload_min_N = float(self.get_parameter("preload_min_N").value)
+        self.preload_timeout_sec = float(self.get_parameter("preload_timeout_sec").value)
+        self.preload_ok_count = int(self.get_parameter("preload_ok_count").value)
+        self.preload_kp_mm_per_N = float(self.get_parameter("preload_kp_mm_per_N").value)
+        self.preload_dz_max_mm = float(self.get_parameter("preload_dz_max_mm").value)
+        self.preload_tol_N = float(self.get_parameter("preload_tol_N").value)
+        self.press_force_cmd_mode = str(self.get_parameter("press_force_cmd_mode").value).strip().lower()
+        self.press_hold_xy = bool(self.get_parameter("press_hold_xy").value)
+        self.press_hold_rpy = bool(self.get_parameter("press_hold_rpy").value)
+
+        self.release_assist_enable = bool(self.get_parameter("release_assist_enable").value)
+        self.release_ramp_sec = float(self.get_parameter("release_ramp_sec").value)
 
         self.force_indices = tuple(int(x) for x in self.get_parameter("force_indices").value)
         self.first_cmd_fz = float(self.get_parameter("first_cmd_fz").value)
@@ -486,64 +530,49 @@ class NodeActCmdMotionInfer(Node):
 
         self.fz_hard_limit = float(self.get_parameter("fz_hard_limit").value)
 
-        # PRESS: old press_* 우선 + new preload_*도 허용
-        # (둘 다 들어오면 press_*가 우선이라고 생각하면 됨)
-        press_fz_target = float(self.get_parameter("press_fz_target").value)
-        press_ok_count = int(self.get_parameter("press_ok_count").value)
-        press_timeout = float(self.get_parameter("press_timeout_sec").value)
-        press_kp = float(self.get_parameter("press_kp_mm_per_N").value)
-        press_dz_max = float(self.get_parameter("press_dz_max_mm").value)
-        press_tol = float(self.get_parameter("press_tol_N").value)
-        press_send = bool(self.get_parameter("press_send_fz_cmd").value)
-
-        preload_fixed = float(self.get_parameter("preload_fixed_N").value)
-        preload_ok = int(self.get_parameter("preload_ok_count").value)
-        preload_timeout = float(self.get_parameter("preload_timeout_sec").value)
-        preload_kp = float(self.get_parameter("preload_kp_mm_per_N").value)
-        preload_dz_max = float(self.get_parameter("preload_dz_max_mm").value)
-        preload_tol = float(self.get_parameter("preload_tol_N").value)
-
-        # 만약 preload_*가 기본값과 달라졌고 press_*는 기본값 그대로면 preload_*를 반영
-        # (기존 실행 커맨드/런치 깨지지 않게 하면서 신규도 수용)
-        if abs(preload_fixed - 10.0) > 1e-9 and abs(press_fz_target - 10.0) < 1e-9:
-            press_fz_target = preload_fixed
-        if preload_ok != 15 and press_ok_count == 15:
-            press_ok_count = preload_ok
-        if abs(preload_timeout - 4.0) > 1e-9 and abs(press_timeout - 4.0) < 1e-9:
-            press_timeout = preload_timeout
-        if abs(preload_kp - 0.02) > 1e-9 and abs(press_kp - 0.02) < 1e-9:
-            press_kp = preload_kp
-        if abs(preload_dz_max - 0.08) > 1e-9 and abs(press_dz_max - 0.08) < 1e-9:
-            press_dz_max = preload_dz_max
-        if abs(preload_tol - 0.2) > 1e-9 and abs(press_tol - 0.2) < 1e-9:
-            press_tol = preload_tol
-
-        self.press_fz_target = float(max(0.0, press_fz_target))
-        self.press_ok_count = int(max(1, press_ok_count))
-        self.press_timeout_sec = float(max(0.1, press_timeout))
-        self.press_kp_mm_per_N = float(max(0.0, press_kp))
-        self.press_dz_max_mm = float(max(0.0, press_dz_max))
-        self.press_tol_N = float(max(0.0, press_tol))
-        self.press_send_fz_cmd = bool(press_send)
-
-        self.press_hold_xy = bool(self.get_parameter("press_hold_xy").value)
-        self.press_hold_rpy = bool(self.get_parameter("press_hold_rpy").value)
-
-        # release
-        self.release_assist_enable = bool(self.get_parameter("release_assist_enable").value)
-        self.release_ramp_sec = float(self.get_parameter("release_ramp_sec").value)
-
-        # stall/kick
+        # Stall + kick + recover
         self.stall_sec = float(self.get_parameter("stall_sec").value)
-        self.stall_pos_eps_mm = float(self.get_parameter("stall_pos_eps_mm").value)
-        self.stall_ang_eps_rad = float(self.get_parameter("stall_ang_eps_rad").value)
         self.stall_min_after_start_sec = float(self.get_parameter("stall_min_after_start_sec").value)
+        self.stall_lpf_tau_sec = float(self.get_parameter("stall_lpf_tau_sec").value)
+        self.stall_window_net_pos_eps_mm = float(self.get_parameter("stall_window_net_pos_eps_mm").value)
+        self.stall_window_net_ang_eps_rad = float(self.get_parameter("stall_window_net_ang_eps_rad").value)
 
         self.fz_kick_N = float(self.get_parameter("fz_kick_N").value)
         self.fz_kick_dur_sec = float(self.get_parameter("fz_kick_dur_sec").value)
         self.fz_kick_cooldown_sec = float(self.get_parameter("fz_kick_cooldown_sec").value)
-        self.fz_kick_contact_only = bool(self.get_parameter("fz_kick_contact_only").value)
-        self.fz_kick_enable_in_track = bool(self.get_parameter("fz_kick_enable_in_track").value)
+
+        self.recover_enable = bool(self.get_parameter("recover_enable").value)
+        self.recover_cooldown_sec = float(self.get_parameter("recover_cooldown_sec").value)
+        self.recover_timeout_sec = float(self.get_parameter("recover_timeout_sec").value)
+        self.recover_pos_tol_mm = float(self.get_parameter("recover_pos_tol_mm").value)
+        self.recover_ang_tol_rad = float(self.get_parameter("recover_ang_tol_rad").value)
+        self.recover_ok_count = int(self.get_parameter("recover_ok_count").value)
+
+        # NEW: dither + improved recover params
+        self.dither_enable = bool(self.get_parameter("dither_enable").value)
+        self.dither_only_track = bool(self.get_parameter("dither_only_track").value)
+        self.dither_min_after_start_sec = float(self.get_parameter("dither_min_after_start_sec").value)
+        self.dither_win_sec = float(self.get_parameter("dither_win_sec").value)
+        self.dither_sec = float(self.get_parameter("dither_sec").value)
+        self.dither_net_pos_thr_mm = float(self.get_parameter("dither_net_pos_thr_mm").value)
+        self.dither_net_ang_thr_rad = float(self.get_parameter("dither_net_ang_thr_rad").value)
+        self.dither_path_ratio_thr = float(self.get_parameter("dither_path_ratio_thr").value)
+        self.dither_rms_pos_thr_mm = float(self.get_parameter("dither_rms_pos_thr_mm").value)
+        self.dither_rms_ang_thr_rad = float(self.get_parameter("dither_rms_ang_thr_rad").value)
+        self.dither_decay = float(self.get_parameter("dither_decay").value)
+
+        self.kick_max_before_recover = int(self.get_parameter("kick_max_before_recover").value)
+        self.kick_reset_sec = float(self.get_parameter("kick_reset_sec").value)
+
+        self.recover_check_lpf_tau_sec = float(self.get_parameter("recover_check_lpf_tau_sec").value)
+        self.recover_use_overrides = bool(self.get_parameter("recover_use_overrides").value)
+        self.recover_tau_sec = float(self.get_parameter("recover_tau_sec").value)
+        self.recover_startup_ramp_sec = float(self.get_parameter("recover_startup_ramp_sec").value)
+        self.recover_step_cap_pos_mm = float(self.get_parameter("recover_step_cap_pos_mm").value)
+        self.recover_step_cap_ang_rad = float(self.get_parameter("recover_step_cap_ang_rad").value)
+        self.recover_step_cap_fz = float(self.get_parameter("recover_step_cap_fz").value)
+        self.recover_timeout_min_margin_sec = float(self.get_parameter("recover_timeout_min_margin_sec").value)
+        self.recover_timeout_scale = float(self.get_parameter("recover_timeout_scale").value)
 
         # device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -564,8 +593,8 @@ class NodeActCmdMotionInfer(Node):
         else:
             self.get_logger().info(f"[STATS] Loaded dataset_stats.pkl from {self.ckpt_dir}")
 
-        # policy (경로 유지 + fallback 포함)
-        self.policy = self._load_policy_and_ckpt()
+        # policy
+        self.policy = self._load_policy_and_ckpt_from_act_root()
 
         # -----------------------------
         # State buffers
@@ -581,6 +610,9 @@ class NodeActCmdMotionInfer(Node):
         self.prev_cmd: Optional[np.ndarray] = None  # (9,)
         self._t_start = _monotonic()
         self._t_first_pub = None
+
+        # "start pose" captured at first publish (for RECOVER target)
+        self._start_pose6: Optional[np.ndarray] = None  # (6,)
 
         # contact hysteresis state
         self._contact = False
@@ -601,23 +633,46 @@ class NodeActCmdMotionInfer(Node):
         self._fz_base_init = False
         self._touch_ok = 0
 
-        # press/preload bookkeeping
-        self._press_t0 = 0.0
-        self._press_ok = 0
-        self._press_hold_pose6 = None  # (6,)
+        # preload bookkeeping
+        self._preload_t0 = 0.0
+        self._preload_ok = 0
+        self._preload_hold_pose6 = None  # (6,)
+        self._preload_target_N = max(self.preload_min_N, 10.0)
 
         # release bookkeeping
         self._release_t0 = 0.0
         self._release_start_fz_cmd = 0.0
 
         # -----------------------------
-        # Stall / FZ kick state
+        # Stall window / LPF / FZ kick / Recover (original)
         # -----------------------------
-        self._stall_last_pose6: Optional[np.ndarray] = None
-        self._stall_last_move_t: float = _monotonic()
+        self._stall_pose6_lpf: Optional[np.ndarray] = None
+        self._stall_win_pose6: Optional[np.ndarray] = None
+        self._stall_win_t0: float = _monotonic()
+
         self._fz_kick_active: bool = False
         self._fz_kick_t0: float = 0.0
         self._fz_kick_last_end_t: float = -1e9
+
+        self._recover_t0: float = 0.0
+        self._recover_ok: int = 0
+        self._recover_last_end_t: float = -1e9
+        self._recover_timeout_eff: float = self.recover_timeout_sec
+
+        # improved recover completion check LPF
+        self._recover_pose6_lpf: Optional[np.ndarray] = None
+
+        # -----------------------------
+        # NEW: DITHER detector states
+        # -----------------------------
+        self.dt_control = 1.0 / max(1e-6, self.control_hz)
+        self.dt_infer = 1.0 / max(1e-6, self.infer_hz)
+
+        hist_len = max(4, int(max(0.2, self.dither_win_sec) * self.control_hz) + 2)
+        self._pose_hist6 = deque(maxlen=hist_len)
+        self._dither_score = 0.0  # accumulated seconds
+        self._kick_count = 0
+        self._kick_count_t0 = _monotonic()
 
         # -----------------------------
         # ROS I/O
@@ -634,9 +689,6 @@ class NodeActCmdMotionInfer(Node):
         self.pub_cmd = self.create_publisher(Float64MultiArray, self.cmd_topic, 10)
 
         # timers
-        self.dt_control = 1.0 / max(1e-6, self.control_hz)
-        self.dt_infer = 1.0 / max(1e-6, self.infer_hz)
-
         self.timer_control = self.create_timer(self.dt_control, self._on_control_timer)
         self.timer_infer   = self.create_timer(self.dt_infer,   self._on_infer_timer)
 
@@ -655,45 +707,25 @@ class NodeActCmdMotionInfer(Node):
             f"  temporal_agg={int(self.use_temporal_agg)} mode={self.temporal_agg_mode} tau_steps={self.temporal_agg_tau_steps} max_plans={self.max_plans}\n"
             f"  contact_gate(on={self.contact_on_thr}, off={self.contact_off_thr}) clear_on_change={int(self.clear_plans_on_contact_change)}\n"
             f"  touch(delta={int(self.touch_use_delta)}, thr={self.touch_fz_thr}, ok={self.touch_ok_count}, min_after={self.touch_min_after_start_sec}s, base_tau={self.touch_baseline_tau_sec}s)\n"
-            f"  PRESS(target={self.press_fz_target}N, ok={self.press_ok_count}, timeout={self.press_timeout_sec}s, kp={self.press_kp_mm_per_N}mm/N, dz_max={self.press_dz_max_mm}mm, tol={self.press_tol_N}N, send_fz_cmd={int(self.press_send_fz_cmd)})\n"
-            f"  STALL(sec={self.stall_sec}, pos_eps_mm={self.stall_pos_eps_mm}, ang_eps_rad={self.stall_ang_eps_rad}, min_after={self.stall_min_after_start_sec}s,\n"
-            f"        kick={self.fz_kick_N}N/{self.fz_kick_dur_sec}s, cooldown={self.fz_kick_cooldown_sec}s, contact_only={int(self.fz_kick_contact_only)}, enable_in_track={int(self.fz_kick_enable_in_track)})\n"
+            f"  PRELOAD(src={self.preload_target_source}, min={self.preload_min_N}N, scale={self.preload_target_scale}, tol={self.preload_tol_N}N, ok={self.preload_ok_count}, timeout={self.preload_timeout_sec}s, kp={self.preload_kp_mm_per_N}mm/N, dz_max={self.preload_dz_max_mm}mm, fcmd={self.press_force_cmd_mode})\n"
+            f"  STALL(win_sec={self.stall_sec}, min_after={self.stall_min_after_start_sec}s, lpf_tau={self.stall_lpf_tau_sec}s, net_eps_pos={self.stall_window_net_pos_eps_mm}mm, net_eps_ang={self.stall_window_net_ang_eps_rad}rad)\n"
+            f"  KICK(fz={self.fz_kick_N}N/{self.fz_kick_dur_sec}s, cooldown={self.fz_kick_cooldown_sec}s)\n"
+            f"  RECOVER(enable={int(self.recover_enable)}, cooldown={self.recover_cooldown_sec}s, timeout={self.recover_timeout_sec}s, tol_pos={self.recover_pos_tol_mm}mm, tol_ang={self.recover_ang_tol_rad}rad, ok={self.recover_ok_count})\n"
+            f"  DITHER(enable={int(self.dither_enable)}, only_track={int(self.dither_only_track)}, min_after={self.dither_min_after_start_sec}s, win={self.dither_win_sec}s, dur={self.dither_sec}s, net_pos_thr={self.dither_net_pos_thr_mm}mm, ratio_thr={self.dither_path_ratio_thr}, rms_pos_thr={self.dither_rms_pos_thr_mm}mm)\n"
             f"  RELEASE(enable={int(self.release_assist_enable)}, ramp_sec={self.release_ramp_sec})\n"
         )
 
     # ------------------------------------------------------------
-    # Load policy.py (ckpt_dir 우선, 없으면 act_root fallback) + ckpt
+    # Load policy (act_root/policy.py) + ckpt (policy_best.ckpt)
     # ------------------------------------------------------------
-    def _load_policy_and_ckpt(self):
-        # 1) policy.py 경로 선택 (실행되던 방식 유지 + fallback)
-        ckpt_policy_py = os.path.join(self.ckpt_dir, "policy.py")
-        act_policy_py  = os.path.join(self.act_root, "policy.py")
+    def _load_policy_and_ckpt_from_act_root(self):
+        if self.act_root not in sys.path:
+            sys.path.insert(0, self.act_root)
 
-        policy_py = None
-        if os.path.exists(ckpt_policy_py):
-            policy_py = ckpt_policy_py
-            self.get_logger().info(f"[POLICY] Using ckpt_dir policy.py: {policy_py}")
-        elif os.path.exists(act_policy_py):
-            policy_py = act_policy_py
-            self.get_logger().info(f"[POLICY] Using act_root policy.py (fallback): {policy_py}")
-        else:
-            # 마지막 fallback: act_root를 sys.path에 넣고 모듈 import 시도
-            self.get_logger().warn("[POLICY] policy.py not found in ckpt_dir or act_root. Trying `import policy` via sys.path...")
-            if self.act_root not in sys.path:
-                sys.path.insert(0, self.act_root)
-            try:
-                from policy import ACTPolicy  # type: ignore
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to import policy.ACTPolicy. "
-                    f"Expected policy.py at:\n"
-                    f"  - {ckpt_policy_py}\n"
-                    f"  - {act_policy_py}\n"
-                    f"and import failed: {e}"
-                )
-            ACTPolicy_cls = ACTPolicy
-        if policy_py is not None:
-            ACTPolicy_cls = _import_actpolicy_from_file(policy_py)
+        try:
+            from policy import ACTPolicy
+        except Exception as e:
+            raise RuntimeError(f"Failed to import ACTPolicy from {self.act_root}/policy.py : {e}")
 
         args_override = {
             "kl_weight": float(self.get_parameter("kl_weight").value),
@@ -717,27 +749,14 @@ class NodeActCmdMotionInfer(Node):
             "pretrained_backbone": bool(self.get_parameter("pretrained_backbone").value),
         }
 
-        self.get_logger().info("[INFO] Loading policy (ACTPolicy)...")
-        policy = ACTPolicy_cls(args_override).to(self.device)
+        self.get_logger().info("[INFO] Loading policy (training-time policy.py)...")
+        policy = ACTPolicy(args_override).to(self.device)
         policy.eval()
 
-        # 2) ckpt 파일 선택 (policy_best.ckpt 우선, 없으면 policy.ckpt)
-        ckpt_candidates = [
-            os.path.join(self.ckpt_dir, "policy_best.ckpt"),
-            os.path.join(self.ckpt_dir, "policy.ckpt"),
-        ]
-        ckpt_path = None
-        for p in ckpt_candidates:
-            if os.path.exists(p):
-                ckpt_path = p
-                break
-        if ckpt_path is None:
-            raise RuntimeError(
-                "No checkpoint found. Expected one of:\n"
-                + "\n".join([f"  - {p}" for p in ckpt_candidates])
-            )
+        ckpt_path = os.path.join(self.ckpt_dir, "policy_best.ckpt")
+        if not os.path.exists(ckpt_path):
+            raise RuntimeError(f"policy_best.ckpt not found: {ckpt_path}")
 
-        self.get_logger().info(f"[CKPT] Loading: {ckpt_path}")
         ckpt_obj = torch.load(ckpt_path, map_location=self.device)
         state_dict = ckpt_obj["state_dict"] if isinstance(ckpt_obj, dict) and "state_dict" in ckpt_obj else ckpt_obj
 
@@ -745,6 +764,7 @@ class NodeActCmdMotionInfer(Node):
         missing, unexpected = _try_load_state_dict_compat(model, state_dict)
 
         self.get_logger().info(f"[INFO] Loaded ckpt into policy. missing={len(missing)}, unexpected={len(unexpected)}")
+        self.get_logger().info("[INFO] camera_names = ['cam_top','cam_ee']")
         return policy
 
     # ------------------------------------------------------------
@@ -789,35 +809,111 @@ class NodeActCmdMotionInfer(Node):
         return (prev != self._contact)
 
     # ------------------------------------------------------------
+    # Compute preload target
+    # ------------------------------------------------------------
+    def _compute_preload_target(self) -> float:
+        tgt = self.preload_fixed_N
+        if (self.preload_target_source == "stats_mean") and (self.stats is not None):
+            mean_fz = float(self.stats.qpos_mean[8])
+            tgt = abs(mean_fz) * float(self.preload_target_scale)
+        tgt = max(float(self.preload_min_N), float(tgt))
+        return float(tgt)
+
+    # ------------------------------------------------------------
+    # Small helpers: reset dither / kick count
+    # ------------------------------------------------------------
+    def _reset_dither(self):
+        self._pose_hist6.clear()
+        self._dither_score = 0.0
+
+    def _reset_kick_count(self):
+        self._kick_count = 0
+        self._kick_count_t0 = _monotonic()
+
+    # ------------------------------------------------------------
     # Stage transitions
     # ------------------------------------------------------------
-    def _enter_press(self, pose6_now: np.ndarray):
+    def _enter_preload(self, pose6_now: np.ndarray):
         self.stage = Stage.PRELOAD
-        self._press_t0 = _monotonic()
-        self._press_ok = 0
-        self._press_hold_pose6 = pose6_now.astype(np.float32).copy()
+        self._preload_t0 = _monotonic()
+        self._preload_ok = 0
+        self._preload_hold_pose6 = pose6_now.astype(np.float32).copy()
+        self._preload_target_N = self._compute_preload_target()
 
         self.plans.clear()
         self._anchor_ready = False
-        self.get_logger().warn(f"[STAGE] -> PRELOAD(PRESS) target={self.press_fz_target:.2f}N")
+
+        self._reset_dither()
+        self._reset_kick_count()
+
+        self.get_logger().warn(f"[STAGE] -> PRELOAD(PRESS) target={self._preload_target_N:.2f}N (touch confirmed)")
 
     def _enter_track(self):
         self.stage = Stage.TRACK
         self.plans.clear()
         self._anchor_ready = False
+
+        self._reset_dither()
+        self._reset_kick_count()
+
         self.get_logger().warn("[STAGE] -> TRACK (resume inference)")
 
     def _enter_release(self, fz_cmd_start: float):
         self.stage = Stage.RELEASE
         self._release_t0 = _monotonic()
         self._release_start_fz_cmd = float(max(0.0, fz_cmd_start))
+
+        self._reset_dither()
+
         self.get_logger().warn(f"[STAGE] -> RELEASE (fz ramp {self._release_start_fz_cmd:.3f} -> 0 in {self.release_ramp_sec:.2f}s)")
 
+    def _enter_recover(self, pose6_now: Optional[np.ndarray] = None):
+        if self._start_pose6 is None:
+            return
+        self.stage = Stage.RECOVER
+        self._recover_t0 = _monotonic()
+        self._recover_ok = 0
+
+        self.plans.clear()
+        self._anchor_ready = False
+        self._touch_ok = 0
+        self._fz_kick_active = False
+
+        self._stall_win_pose6 = None
+        self._stall_win_t0 = _monotonic()
+        self._stall_pose6_lpf = None
+
+        self._recover_pose6_lpf = None
+
+        self._reset_dither()
+        self._reset_kick_count()
+
+        # effective recover timeout auto-extend (prevents early abort if far)
+        timeout_base = float(self.recover_timeout_sec)
+        timeout_eff = timeout_base
+        try:
+            if pose6_now is not None and self._start_pose6 is not None:
+                dist_mm = float(np.linalg.norm(pose6_now[:3] - self._start_pose6[:3]))
+                cap_mm = float(self.recover_step_cap_pos_mm if self.recover_use_overrides else self.step_cap_pos_mm)
+                # approx max speed ~ cap_mm * control_hz (mm/s)
+                v_mmps = max(1e-6, cap_mm * self.control_hz)
+                t_need = dist_mm / v_mmps
+                # add margin for ok_count accumulation + safety scale
+                timeout_eff = max(timeout_base, self.recover_timeout_scale * t_need + self.recover_timeout_min_margin_sec)
+        except Exception:
+            timeout_eff = timeout_base
+        self._recover_timeout_eff = float(timeout_eff)
+
+        self.get_logger().warn(
+            "[STAGE] -> RECOVER (go back to start pose, clear plans/anchor, restart inference)\n"
+            f"         recover_timeout_eff={self._recover_timeout_eff:.2f}s"
+        )
+
     # ------------------------------------------------------------
-    # Infer timer: generate plan and push (disabled during PRELOAD)
+    # Infer timer: generate plan and push (disabled during PRELOAD / RECOVER)
     # ------------------------------------------------------------
     def _on_infer_timer(self):
-        if self.stage == Stage.PRELOAD:
+        if self.stage in (Stage.PRELOAD, Stage.RECOVER):
             return
 
         with self._lock:
@@ -911,17 +1007,20 @@ class NodeActCmdMotionInfer(Node):
         m.data = [float(x) for x in cmd9.reshape(-1).tolist()]
         self.pub_cmd.publish(m)
 
-    def _startup_ramp(self) -> float:
-        if self.startup_ramp_sec <= 1e-6:
+    def _ramp_from(self, t0: float, ramp_sec: float) -> float:
+        if ramp_sec <= 1e-6:
             return 1.0
-        t = _monotonic() - self._t_start
-        return float(np.clip(t / self.startup_ramp_sec, 0.0, 1.0))
+        t = _monotonic() - float(t0)
+        return float(np.clip(t / float(ramp_sec), 0.0, 1.0))
+
+    def _startup_ramp(self) -> float:
+        return self._ramp_from(self._t_start, self.startup_ramp_sec)
 
     # ------------------------------------------------------------
-    # PRESS control (Z-servo + optional cmd_fz)
+    # PRELOAD control (Z-servo + optional cmd_fz)
     # ------------------------------------------------------------
-    def _press_control_step(self, pose6_now: np.ndarray, meas_fz: float) -> np.ndarray:
-        hold = self._press_hold_pose6 if self._press_hold_pose6 is not None else pose6_now.astype(np.float32)
+    def _preload_control_step(self, pose6_now: np.ndarray, meas_fz: float) -> np.ndarray:
+        hold = self._preload_hold_pose6 if self._preload_hold_pose6 is not None else pose6_now.astype(np.float32)
 
         cmd = np.zeros(9, dtype=np.float32)
         cmd[0:6] = pose6_now.astype(np.float32)
@@ -937,14 +1036,17 @@ class NodeActCmdMotionInfer(Node):
             cmd[4] = hold[4]
             cmd[5] = hold[5]
 
-        target = float(self.press_fz_target)
+        target = float(self._preload_target_N)
         err = float(target - meas_fz)
 
-        dz = self.press_kp_mm_per_N * max(0.0, err)
-        dz = float(np.clip(dz, 0.0, self.press_dz_max_mm))
+        dz = self.preload_kp_mm_per_N * max(0.0, err)
+        dz = float(np.clip(dz, 0.0, self.preload_dz_max_mm))
         cmd[2] = float(cmd[2] - dz)
 
-        if self.press_send_fz_cmd:
+        mode = self.press_force_cmd_mode
+        if mode == "zero":
+            cmd[8] = 0.0
+        elif mode == "target":
             cmd[8] = float(target)
         else:
             prev_fz = float(self.prev_cmd[8]) if (self.prev_cmd is not None) else 0.0
@@ -968,6 +1070,127 @@ class NodeActCmdMotionInfer(Node):
         cmd[7] = 0.0
         cmd[8] = float(max(0.0, fz))
         return cmd
+
+    # ------------------------------------------------------------
+    # Stall LPF + Window update
+    # ------------------------------------------------------------
+    def _stall_update(self, pose6_now: np.ndarray) -> float:
+        """
+        Returns stall_window_age_sec (how long we've stayed within net-eps around window ref).
+        """
+        dt = self.dt_control
+        beta = _beta_from_tau(dt, self.stall_lpf_tau_sec)
+
+        if self._stall_pose6_lpf is None:
+            self._stall_pose6_lpf = pose6_now.astype(np.float32).copy()
+        else:
+            self._stall_pose6_lpf = (self._stall_pose6_lpf + beta * (pose6_now.astype(np.float32) - self._stall_pose6_lpf)).astype(np.float32)
+
+        lp = self._stall_pose6_lpf
+
+        if self._stall_win_pose6 is None:
+            self._stall_win_pose6 = lp.copy()
+            self._stall_win_t0 = _monotonic()
+            return 0.0
+
+        net_dp = float(np.linalg.norm(lp[:3] - self._stall_win_pose6[:3]))
+        net_da = float(np.linalg.norm(lp[3:6] - self._stall_win_pose6[3:6]))
+
+        # If we escaped the small neighborhood, reset window reference
+        if (net_dp >= self.stall_window_net_pos_eps_mm) or (net_da >= self.stall_window_net_ang_eps_rad):
+            self._stall_win_pose6 = lp.copy()
+            self._stall_win_t0 = _monotonic()
+            return 0.0
+
+        return float(_monotonic() - self._stall_win_t0)
+
+    # ------------------------------------------------------------
+    # NEW: DITHER update (detect invalid oscillatory motion)
+    # ------------------------------------------------------------
+    def _dither_update(self, pose6_now: np.ndarray) -> float:
+        """
+        Accumulates time when:
+          - net displacement is small (no real progress)
+          - but path length / net displacement is large OR RMS vibration is large
+        Returns dither_score_sec (accumulated seconds).
+        """
+        self._pose_hist6.append(pose6_now.astype(np.float32).copy())
+        if len(self._pose_hist6) < 4:
+            return 0.0
+
+        arr = np.stack(self._pose_hist6, axis=0)  # (N,6)
+        P = arr[:, :3]
+        A = arr[:, 3:6]
+
+        net_p = float(np.linalg.norm(P[-1] - P[0]))
+        net_a = float(np.linalg.norm(A[-1] - A[0]))
+
+        dP = P[1:] - P[:-1]
+        dA = A[1:] - A[:-1]
+        path_p = float(np.sum(np.linalg.norm(dP, axis=1)))
+        path_a = float(np.sum(np.linalg.norm(dA, axis=1)))
+
+        ratio_p = path_p / max(net_p, 1e-9)
+        ratio_a = path_a / max(net_a, 1e-9)
+
+        Pm = np.mean(P, axis=0)
+        Am = np.mean(A, axis=0)
+        rms_p = float(np.sqrt(np.mean(np.sum((P - Pm) ** 2, axis=1))))
+        rms_a = float(np.sqrt(np.mean(np.sum((A - Am) ** 2, axis=1))))
+
+        small_net = (net_p <= self.dither_net_pos_thr_mm) and (net_a <= self.dither_net_ang_thr_rad)
+        oscill = (
+            (ratio_p >= self.dither_path_ratio_thr) or (ratio_a >= self.dither_path_ratio_thr) or
+            (rms_p >= self.dither_rms_pos_thr_mm) or (rms_a >= self.dither_rms_ang_thr_rad)
+        )
+
+        inside = bool(small_net and oscill)
+
+        if inside:
+            self._dither_score += self.dt_control
+        else:
+            # leak down (so intermittent spikes don't kill accumulation)
+            self._dither_score = max(0.0, self._dither_score - self.dt_control * float(self.dither_decay))
+
+        return float(self._dither_score)
+
+    # ------------------------------------------------------------
+    # Helper: decide whether to apply dither detector now
+    # ------------------------------------------------------------
+    def _dither_allowed(self, elapsed_since_start: float) -> bool:
+        if not self.dither_enable:
+            return False
+        if elapsed_since_start < self.dither_min_after_start_sec:
+            return False
+        if self.stage in (Stage.PRELOAD, Stage.RELEASE, Stage.RECOVER):
+            return False
+        if self.dither_only_track and (self.stage != Stage.TRACK):
+            return False
+        return True
+
+    # ------------------------------------------------------------
+    # Helper: start kick (with cooldown)
+    # ------------------------------------------------------------
+    def _try_start_kick(self, now_t: float, reason: str, age_sec: float):
+        if self._fz_kick_active:
+            return False
+        if (now_t - self._fz_kick_last_end_t) < self.fz_kick_cooldown_sec:
+            return False
+
+        self._fz_kick_active = True
+        self._fz_kick_t0 = now_t
+        self._kick_count += 1
+        self._kick_count_t0 = now_t
+
+        self.get_logger().warn(
+            f"[{reason}] (contact=1) age={age_sec:.2f}s -> FZ KICK start "
+            f"(#{self._kick_count}/{self.kick_max_before_recover}, fz={self.fz_kick_N:.2f}N, dur={self.fz_kick_dur_sec:.2f}s)"
+        )
+
+        # reset stall window so it doesn't immediately retrigger
+        self._stall_win_pose6 = None
+        self._stall_win_t0 = now_t
+        return True
 
     # ------------------------------------------------------------
     # Control timer
@@ -1001,15 +1224,24 @@ class NodeActCmdMotionInfer(Node):
 
             self.stage = Stage.APPROACH
 
+            self._start_pose6 = pose6.astype(np.float32).copy()
+
             self._fz_base = max(0.0, meas_fz)
             self._fz_base_init = True
             self._touch_ok = 0
 
-            # stall init
-            self._stall_last_pose6 = pose6.astype(np.float32).copy()
-            self._stall_last_move_t = now_t
+            # init stall window
+            self._stall_pose6_lpf = None
+            self._stall_win_pose6 = None
+            self._stall_win_t0 = now_t
+
             self._fz_kick_active = False
             self._fz_kick_last_end_t = -1e9
+            self._recover_last_end_t = -1e9
+            self._recover_pose6_lpf = None
+
+            self._reset_dither()
+            self._reset_kick_count()
 
             self._publish_cmd(cmd0)
             self.get_logger().info("[START] First publish = current pose. stage=APPROACH")
@@ -1026,6 +1258,9 @@ class NodeActCmdMotionInfer(Node):
                 self._anchor_ready = False
             self.get_logger().warn(f"[CONTACT] changed -> {int(self._contact)} | meas_fz={meas_fz:.3f} | stage={self.stage.name}")
 
+            # reset dither window on contact change (reduces false triggers)
+            self._reset_dither()
+
             if self.release_assist_enable:
                 if (not self._contact) and self._last_contact and (self.stage == Stage.TRACK):
                     fz_start = float(self.prev_cmd[8]) if self.prev_cmd is not None else 0.0
@@ -1033,109 +1268,93 @@ class NodeActCmdMotionInfer(Node):
 
         self._last_contact = self._contact
 
-        # -----------------------------
-        # Stall detect -> FZ KICK (요청 핵심)
-        #   - 기본: contact 상태(표면에 붙음)에서만 kick
-        #   - stage: RELEASE에서는 kick 금지
-        # -----------------------------
-        if self._t_first_pub is not None:
-            elapsed_since_start = (now_t - self._t_first_pub)
-
-            # update last_move_t by pose change
-            if self._stall_last_pose6 is None:
-                self._stall_last_pose6 = pose6.astype(np.float32).copy()
-                self._stall_last_move_t = now_t
-            else:
-                dp = float(np.linalg.norm(pose6[:3] - self._stall_last_pose6[:3]))
-                da = float(np.linalg.norm(pose6[3:6] - self._stall_last_pose6[3:6]))
-                if (dp >= self.stall_pos_eps_mm) or (da >= self.stall_ang_eps_rad):
-                    self._stall_last_pose6 = pose6.astype(np.float32).copy()
-                    self._stall_last_move_t = now_t
-
-            if self.stage == Stage.TRACK and (not self.fz_kick_enable_in_track):
-                kick_stage_ok = False
-            else:
-                kick_stage_ok = (self.stage != Stage.RELEASE)
-
-            if self.fz_kick_contact_only:
-                contact_ok = bool(self._contact)
-            else:
-                contact_ok = True
-
-            if (kick_stage_ok and contact_ok and (not self._fz_kick_active)
-                and (elapsed_since_start >= self.stall_min_after_start_sec)
-                and ((now_t - self._stall_last_move_t) >= self.stall_sec)
-                and ((now_t - self._fz_kick_last_end_t) >= self.fz_kick_cooldown_sec)):
-
-                stall_t = now_t - self._stall_last_move_t
-                self._fz_kick_active = True
-                self._fz_kick_t0 = now_t
-                self.get_logger().warn(
-                    f"[STALL] contact={int(self._contact)} no motion for {stall_t:.2f}s -> FZ KICK start "
-                    f"(fz={self.fz_kick_N:.2f}N, dur={self.fz_kick_dur_sec:.2f}s)"
-                )
-
-            if self._fz_kick_active and ((now_t - self._fz_kick_t0) >= self.fz_kick_dur_sec):
-                self._fz_kick_active = False
-                self._fz_kick_last_end_t = now_t
-
-                # replan trigger
-                self.plans.clear()
-                self._anchor_ready = False
-
-                # stall 기준도 갱신해서 연속 트리거 방지
-                self._stall_last_move_t = now_t
-
-                self.get_logger().warn("[STALL] FZ KICK end -> replan requested")
+        # If kick_count is old, reset (prevents “forever accumulating” across long successful motion)
+        if (now_t - self._kick_count_t0) >= self.kick_reset_sec:
+            self._reset_kick_count()
 
         # -----------------------------
-        # Touch detector (APPROACH에서만 PRESS 진입)
-        # -----------------------------
-        if self.stage == Stage.APPROACH and (not self._fz_kick_active):
-            if not self._fz_base_init:
-                self._fz_base = max(0.0, meas_fz)
-                self._fz_base_init = True
-            else:
-                beta_base = _beta_from_tau(self.dt_control, self.touch_baseline_tau_sec)
-                self._fz_base = float((1.0 - beta_base) * self._fz_base + beta_base * max(0.0, meas_fz))
-
-            if self.touch_use_delta:
-                touch_sig = max(0.0, meas_fz - self._fz_base)
-            else:
-                touch_sig = max(0.0, meas_fz)
-
-            elapsed = (now_t - self._t_first_pub) if (self._t_first_pub is not None) else 0.0
-            allow_touch = (elapsed >= self.touch_min_after_start_sec)
-
-            if allow_touch and (touch_sig >= self.touch_fz_thr):
-                self._touch_ok += 1
-            else:
-                self._touch_ok = 0
-
-            if self._touch_ok >= self.touch_ok_count:
-                self._touch_ok = 0
-                self._enter_press(pose6.astype(np.float32))
-
-        # -----------------------------
-        # Build cmd_target by stage
+        # Stage-dependent cmd_target
         # -----------------------------
         cmd_target = None
 
         if self.stage == Stage.PRELOAD:
-            cmd_target = self._press_control_step(pose6.astype(np.float32), meas_fz)
+            cmd_target = self._preload_control_step(pose6.astype(np.float32), meas_fz)
 
-            if abs(meas_fz - self.press_fz_target) <= self.press_tol_N:
-                self._press_ok += 1
+            if abs(meas_fz - self._preload_target_N) <= self.preload_tol_N:
+                self._preload_ok += 1
             else:
-                self._press_ok = 0
+                self._preload_ok = 0
 
-            if self._press_ok >= self.press_ok_count:
-                self.get_logger().warn(f"[PRESS] OK (meas_fz~{self.press_fz_target:.2f}N) for {self.press_ok_count} ticks -> TRACK")
+            if self._preload_ok >= self.preload_ok_count:
+                self.get_logger().warn(f"[PRELOAD] OK (meas_fz~{self._preload_target_N:.2f}N) for {self.preload_ok_count} ticks -> TRACK")
                 self._enter_track()
             else:
-                if (_monotonic() - self._press_t0) >= self.press_timeout_sec:
-                    self.get_logger().warn(f"[PRESS] TIMEOUT {self.press_timeout_sec:.2f}s (meas_fz={meas_fz:.2f}) -> TRACK anyway")
+                if (_monotonic() - self._preload_t0) >= self.preload_timeout_sec:
+                    self.get_logger().warn(f"[PRELOAD] TIMEOUT {self.preload_timeout_sec:.2f}s (meas_fz={meas_fz:.2f}) -> TRACK anyway")
                     self._enter_track()
+
+        elif self.stage == Stage.RECOVER:
+            # go back to start pose, keep fz=0
+            tgt6 = self._start_pose6 if self._start_pose6 is not None else pose6.astype(np.float32)
+            cmd_target = np.zeros(9, dtype=np.float32)
+            cmd_target[0:6] = tgt6.astype(np.float32)
+            cmd_target[6] = 0.0
+            cmd_target[7] = 0.0
+            cmd_target[8] = 0.0
+
+            # completion check uses LPF to avoid jitter
+            beta_chk = _beta_from_tau(self.dt_control, self.recover_check_lpf_tau_sec)
+            if self._recover_pose6_lpf is None:
+                self._recover_pose6_lpf = pose6.astype(np.float32).copy()
+            else:
+                self._recover_pose6_lpf = (self._recover_pose6_lpf + beta_chk * (pose6.astype(np.float32) - self._recover_pose6_lpf)).astype(np.float32)
+
+            pchk = self._recover_pose6_lpf
+
+            ep = float(np.linalg.norm(pchk[:3] - tgt6[:3]))
+            ea = float(np.linalg.norm(pchk[3:6] - tgt6[3:6]))
+
+            # ok_count with decay (more robust than hard reset)
+            if (ep <= self.recover_pos_tol_mm) and (ea <= self.recover_ang_tol_rad):
+                self._recover_ok += 1
+            else:
+                self._recover_ok = max(0, self._recover_ok - 1)
+
+            if self._recover_ok >= self.recover_ok_count:
+                self.stage = Stage.APPROACH
+                self.plans.clear()
+                self._anchor_ready = False
+                self._touch_ok = 0
+                self._fz_kick_active = False
+                self._recover_last_end_t = now_t
+
+                self._stall_pose6_lpf = None
+                self._stall_win_pose6 = None
+                self._stall_win_t0 = now_t
+
+                self._recover_pose6_lpf = None
+                self._reset_dither()
+                self._reset_kick_count()
+
+                self.get_logger().warn("[RECOVER] reached start pose -> APPROACH (resume inference)")
+            else:
+                if (now_t - self._recover_t0) >= self._recover_timeout_eff:
+                    self.stage = Stage.APPROACH
+                    self.plans.clear()
+                    self._anchor_ready = False
+                    self._touch_ok = 0
+                    self._fz_kick_active = False
+                    self._recover_last_end_t = now_t
+
+                    self._stall_pose6_lpf = None
+                    self._stall_win_pose6 = None
+                    self._stall_win_t0 = now_t
+
+                    self._recover_pose6_lpf = None
+                    self._reset_dither()
+                    self._reset_kick_count()
+
+                    self.get_logger().warn("[RECOVER] TIMEOUT -> APPROACH (resume inference)")
 
         else:
             cmd_pred = self._temporal_agg_cmd(now_t)
@@ -1168,27 +1387,126 @@ class NodeActCmdMotionInfer(Node):
                     self.plans.clear()
                     self._anchor_ready = False
                     self._touch_ok = 0
+                    self._reset_dither()
                     self.get_logger().warn("[STAGE] RELEASE done -> APPROACH")
-
-        # -----------------------------
-        # Apply FZ KICK: keep pose from model, inject cmd_fz
-        # -----------------------------
-        if self._fz_kick_active:
-            cmd_target[8] = float(max(cmd_target[8], self.fz_kick_N))
 
         # safety clamp
         cmd_target[8] = float(np.clip(cmd_target[8], 0.0, self.fz_hard_limit))
 
         # -----------------------------
+        # STALL window check (kept) + improved policy when contact==1 repeated
+        # -----------------------------
+        stall_win_age = 0.0
+        elapsed_since_start = (now_t - self._t_first_pub) if (self._t_first_pub is not None) else 0.0
+
+        if self._t_first_pub is not None:
+            stall_win_age = self._stall_update(pose6.astype(np.float32))
+
+            can_check_stall = (elapsed_since_start >= self.stall_min_after_start_sec)
+            stalled = can_check_stall and (stall_win_age >= self.stall_sec)
+
+            if stalled and (self.stage not in (Stage.PRELOAD, Stage.RELEASE, Stage.RECOVER)):
+                if self._contact:
+                    # If we already kicked too many times, recover instead (prevents endless jitter with contact)
+                    if self.recover_enable and (self._kick_count >= self.kick_max_before_recover) and ((now_t - self._recover_last_end_t) >= self.recover_cooldown_sec):
+                        self.get_logger().warn(f"[STALL] contact=1 but kick_count={self._kick_count} >= {self.kick_max_before_recover} -> RECOVER")
+                        self._enter_recover(pose6_now=pose6.astype(np.float32))
+                    else:
+                        self._try_start_kick(now_t, reason="STALL", age_sec=stall_win_age)
+                else:
+                    if self.recover_enable and ((now_t - self._recover_last_end_t) >= self.recover_cooldown_sec):
+                        self.get_logger().warn(f"[STALL] (contact=0) window_age={stall_win_age:.2f}s -> RECOVER start")
+                        self._enter_recover(pose6_now=pose6.astype(np.float32))
+
+            # End kick
+            if self._fz_kick_active and ((now_t - self._fz_kick_t0) >= self.fz_kick_dur_sec):
+                self._fz_kick_active = False
+                self._fz_kick_last_end_t = now_t
+                self.plans.clear()
+                self._anchor_ready = False
+                self.get_logger().warn("[STALL] FZ KICK end -> replan requested")
+
+        # -----------------------------
+        # NEW: DITHER invalid-motion check (vibration/back-and-forth)
+        # -----------------------------
+        dither_age = 0.0
+        if self._t_first_pub is not None and self._dither_allowed(elapsed_since_start):
+            dither_age = self._dither_update(pose6.astype(np.float32))
+
+            if dither_age >= self.dither_sec:
+                # same policy as stall, but this catches "not fully stopped" oscillations
+                if self._contact:
+                    if self.recover_enable and (self._kick_count >= self.kick_max_before_recover) and ((now_t - self._recover_last_end_t) >= self.recover_cooldown_sec):
+                        self.get_logger().warn(f"[DITHER] contact=1 and kick_count={self._kick_count} >= {self.kick_max_before_recover} -> RECOVER")
+                        self._enter_recover(pose6_now=pose6.astype(np.float32))
+                    else:
+                        started = self._try_start_kick(now_t, reason="DITHER", age_sec=dither_age)
+                        if not started and self.recover_enable and ((now_t - self._recover_last_end_t) >= self.recover_cooldown_sec) and (self._kick_count >= self.kick_max_before_recover):
+                            self.get_logger().warn("[DITHER] kick cooldown but kick limit reached -> RECOVER")
+                            self._enter_recover(pose6_now=pose6.astype(np.float32))
+                else:
+                    if self.recover_enable and ((now_t - self._recover_last_end_t) >= self.recover_cooldown_sec):
+                        self.get_logger().warn(f"[DITHER] contact=0 age={dither_age:.2f}s -> RECOVER start")
+                        self._enter_recover(pose6_now=pose6.astype(np.float32))
+
+                # reset to prevent repeated triggers
+                self._reset_dither()
+
+        # -----------------------------
+        # Touch detector (only in APPROACH, and not during kick/recover)
+        # -----------------------------
+        if self.stage == Stage.APPROACH and (not self._fz_kick_active):
+            if not self._fz_base_init:
+                self._fz_base = max(0.0, meas_fz)
+                self._fz_base_init = True
+            else:
+                beta_base = _beta_from_tau(self.dt_control, self.touch_baseline_tau_sec)
+                self._fz_base = float((1.0 - beta_base) * self._fz_base + beta_base * max(0.0, meas_fz))
+
+            if self.touch_use_delta:
+                touch_sig = max(0.0, meas_fz - self._fz_base)
+            else:
+                touch_sig = max(0.0, meas_fz)
+
+            elapsed = elapsed_since_start
+            allow_touch = (elapsed >= self.touch_min_after_start_sec)
+
+            if allow_touch and (touch_sig >= self.touch_fz_thr):
+                self._touch_ok += 1
+            else:
+                self._touch_ok = 0
+
+            if self._touch_ok >= self.touch_ok_count:
+                self._touch_ok = 0
+                self._enter_preload(pose6.astype(np.float32))
+
+        # -----------------------------
+        # Apply FZ KICK (when active): inject cmd_fz
+        # -----------------------------
+        if self._fz_kick_active:
+            cmd_target[8] = float(max(cmd_target[8], self.fz_kick_N))
+
+        cmd_target[8] = float(np.clip(cmd_target[8], 0.0, self.fz_hard_limit))
+
+        # -----------------------------
         # QP-safe slow-follow: EMA + step caps + startup ramp
+        # (RECOVER can optionally use overrides)
         # -----------------------------
         dt = self.dt_control
-        beta = _beta_from_tau(dt, self.tau_sec)
 
-        ramp = self._startup_ramp()
-        cap_pos = max(1e-9, self.step_cap_pos_mm * ramp)
-        cap_ang = max(1e-12, self.step_cap_ang_rad * ramp)
-        cap_fz  = max(1e-9, self.step_cap_fz * ramp)
+        if (self.stage == Stage.RECOVER) and self.recover_use_overrides:
+            tau = float(self.recover_tau_sec)
+            beta = _beta_from_tau(dt, tau)
+            ramp = self._ramp_from(self._recover_t0, self.recover_startup_ramp_sec)
+            cap_pos = max(1e-9, self.recover_step_cap_pos_mm * ramp)
+            cap_ang = max(1e-12, self.recover_step_cap_ang_rad * ramp)
+            cap_fz  = max(1e-9, self.recover_step_cap_fz * ramp)
+        else:
+            beta = _beta_from_tau(dt, self.tau_sec)
+            ramp = self._startup_ramp()
+            cap_pos = max(1e-9, self.step_cap_pos_mm * ramp)
+            cap_ang = max(1e-12, self.step_cap_ang_rad * ramp)
+            cap_fz  = max(1e-9, self.step_cap_fz * ramp)
 
         d = (cmd_target - self.prev_cmd).astype(np.float32)
         d = (beta * d).astype(np.float32)
@@ -1211,7 +1529,7 @@ class NodeActCmdMotionInfer(Node):
 
         cmd_next = (self.prev_cmd + d).astype(np.float32)
 
-        # overshoot guard
+        # avoid overshoot across target
         for i in range(9):
             a0 = float(self.prev_cmd[i])
             a1 = float(cmd_next[i])
@@ -1226,11 +1544,12 @@ class NodeActCmdMotionInfer(Node):
         if (int(now_t * self.control_hz) % self.debug_every_n) == 0:
             base = self._fz_base if self._fz_base_init else 0.0
             touch_sig = max(0.0, meas_fz - base) if self.touch_use_delta else max(0.0, meas_fz)
-            stall_t = now_t - self._stall_last_move_t if self._stall_last_move_t is not None else 0.0
+            recover_en = int(self.recover_enable)
+
             self.get_logger().info(
                 f"[CTRL] stage={self.stage.name} contact={int(self._contact)} meas_fz={meas_fz:.3f} "
                 f"fz_base={base:.3f} touch_sig={touch_sig:.3f} touch_ok={self._touch_ok} | "
-                f"stall={stall_t:.2f}s kick={int(self._fz_kick_active)} | "
+                f"stall_win={stall_win_age:.2f}s dither={dither_age:.2f}s kickN={int(self._fz_kick_active)} kickCnt={self._kick_count} recover_en={recover_en} | "
                 f"beta={beta:.4f} ramp={ramp:.3f} cap(pos={cap_pos:.4f}, ang={cap_ang:.6f}, fz={cap_fz:.4f}) | "
                 f"cmd_xyz=[{cmd_next[0]:.3f},{cmd_next[1]:.3f},{cmd_next[2]:.3f}] cmd_fz={cmd_next[8]:.3f}"
             )
