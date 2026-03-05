@@ -168,49 +168,129 @@ def _to_tensor_image_stack(top_rgb: np.ndarray, ee_rgb: np.ndarray, device: torc
 
 
 # ============================================================
-# Helpers (Stats)
+# Helpers (Stats)  ✅ UPDATED: supports per-dim MIN-MAX [0,1] and legacy mean/std
 # ============================================================
 
 @dataclass
 class StatsPack:
-    qpos_mean: np.ndarray
-    qpos_std:  np.ndarray
-    act_mean:  np.ndarray
-    act_std:   np.ndarray
+    # mode: "minmax" or "zscore"
+    qpos_mode: str
+    act_mode: str
+
+    # qpos params (shape (9,))
+    qpos_a: np.ndarray   # min or mean
+    qpos_b: np.ndarray   # max or std
+
+    # action params (shape (9,))
+    act_a: np.ndarray    # min or mean
+    act_b: np.ndarray    # max or std
+
 
 def _sanitize_std(x: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     x = np.asarray(x, dtype=np.float32).reshape(-1)
     return np.maximum(x, eps)
 
+
+def _sanitize_range_minmax(vmin: np.ndarray, vmax: np.ndarray, eps: float = 1e-6):
+    vmin = np.asarray(vmin, dtype=np.float32).reshape(-1)
+    vmax = np.asarray(vmax, dtype=np.float32).reshape(-1)
+    if vmin.size != 9 or vmax.size != 9:
+        raise ValueError(f"min/max size must be 9. got {vmin.size}, {vmax.size}")
+    rng = np.maximum(vmax - vmin, eps)
+    vmax_fix = vmin + rng
+    return vmin.astype(np.float32), vmax_fix.astype(np.float32)
+
+
 def _load_dataset_stats(ckpt_dir: str) -> Optional[StatsPack]:
+    """
+    Priority:
+      1) NEW per-dim min-max stats:
+         qpos_min/qpos_max/action_min/action_max
+      2) LEGACY z-score stats:
+         qpos_mean/qpos_std/action_mean/action_std
+    """
     p = os.path.join(ckpt_dir, "dataset_stats.pkl")
     if not os.path.exists(p):
         return None
+
     with open(p, "rb") as f:
         st = pickle.load(f)
 
+    # --- NEW: per-dim MIN-MAX ([0,1]) ---
+    if all(k in st for k in ["qpos_min", "qpos_max", "action_min", "action_max"]):
+        qmin = np.asarray(st["qpos_min"], dtype=np.float32).reshape(9)
+        qmax = np.asarray(st["qpos_max"], dtype=np.float32).reshape(9)
+        amin = np.asarray(st["action_min"], dtype=np.float32).reshape(9)
+        amax = np.asarray(st["action_max"], dtype=np.float32).reshape(9)
+
+        qmin, qmax = _sanitize_range_minmax(qmin, qmax)
+        amin, amax = _sanitize_range_minmax(amin, amax)
+
+        return StatsPack(
+            qpos_mode="minmax",
+            act_mode="minmax",
+            qpos_a=qmin, qpos_b=qmax,
+            act_a=amin, act_b=amax,
+        )
+
+    # --- LEGACY: mean/std ---
     if all(k in st for k in ["qpos_mean", "qpos_std", "action_mean", "action_std"]):
         qm = np.asarray(st["qpos_mean"], dtype=np.float32).reshape(9)
         qs = _sanitize_std(np.asarray(st["qpos_std"], dtype=np.float32).reshape(9))
         am = np.asarray(st["action_mean"], dtype=np.float32).reshape(9)
         astd = _sanitize_std(np.asarray(st["action_std"], dtype=np.float32).reshape(9))
-        return StatsPack(qm, qs, am, astd)
+
+        return StatsPack(
+            qpos_mode="zscore",
+            act_mode="zscore",
+            qpos_a=qm, qpos_b=qs,
+            act_a=am, act_b=astd,
+        )
 
     return None
 
+
 def _normalize_qpos(q: torch.Tensor, stats: StatsPack) -> torch.Tensor:
-    mu = torch.tensor(stats.qpos_mean, dtype=torch.float32, device=q.device).view(1, 9)
-    sd = torch.tensor(stats.qpos_std,  dtype=torch.float32, device=q.device).view(1, 9)
-    return (q - mu) / sd
+    """
+    q: (1,9)
+    Supports:
+      - minmax: (q - qmin) / (qmax - qmin), clamped to [0,1]
+      - zscore: (q - mean) / std
+    """
+    qa = torch.tensor(stats.qpos_a, dtype=torch.float32, device=q.device).view(1, 9)
+    qb = torch.tensor(stats.qpos_b, dtype=torch.float32, device=q.device).view(1, 9)
+
+    if stats.qpos_mode == "minmax":
+        den = torch.clamp(qb - qa, min=1e-6)
+        qn = (q - qa) / den
+        return torch.clamp(qn, 0.0, 1.0)
+
+    # legacy z-score
+    return (q - qa) / torch.clamp(qb, min=1e-6)
+
 
 def _denorm_action_seq(seq: torch.Tensor, stats: StatsPack) -> torch.Tensor:
-    mu = torch.tensor(stats.act_mean, dtype=torch.float32, device=seq.device)
-    sd = torch.tensor(stats.act_std,  dtype=torch.float32, device=seq.device)
+    """
+    seq: (T,9) or (1,T,9)
+    Supports:
+      - minmax: a = a_norm * (amax-amin) + amin
+      - zscore: a = a_norm * std + mean
+    """
     if seq.dim() == 2:
-        return seq * sd.view(1, 9) + mu.view(1, 9)
-    if seq.dim() == 3:
-        return seq * sd.view(1, 1, 9) + mu.view(1, 1, 9)
-    raise RuntimeError(f"unexpected seq dim: {seq.shape}")
+        aa = torch.tensor(stats.act_a, dtype=torch.float32, device=seq.device).view(1, 9)
+        ab = torch.tensor(stats.act_b, dtype=torch.float32, device=seq.device).view(1, 9)
+    elif seq.dim() == 3:
+        aa = torch.tensor(stats.act_a, dtype=torch.float32, device=seq.device).view(1, 1, 9)
+        ab = torch.tensor(stats.act_b, dtype=torch.float32, device=seq.device).view(1, 1, 9)
+    else:
+        raise RuntimeError(f"unexpected seq dim: {seq.shape}")
+
+    if stats.act_mode == "minmax":
+        den = torch.clamp(ab - aa, min=1e-6)
+        return seq * den + aa
+
+    # legacy z-score
+    return seq * torch.clamp(ab, min=1e-6) + aa
 
 
 # ============================================================
@@ -587,14 +667,26 @@ class NodeActCmdMotionInfer(Node):
             raise RuntimeError(f"act_root invalid: {self.act_root}")
 
         # stats
+        # stats
         self.stats = _load_dataset_stats(self.ckpt_dir)
         if self.stats is None:
             self.get_logger().warn("[STATS] dataset_stats.pkl missing/invalid -> disable normalize/denorm.")
             self.normalize_qpos_enabled = False
             self.denorm_action_enabled = False
         else:
-            self.get_logger().info(f"[STATS] Loaded dataset_stats.pkl from {self.ckpt_dir}")
+            self.get_logger().info(
+                f"[STATS] Loaded dataset_stats.pkl from {self.ckpt_dir} | "
+                f"qpos_mode={self.stats.qpos_mode}, act_mode={self.stats.act_mode}"
+            )
+            if self.stats.qpos_mode == "minmax":
+                self.get_logger().info(
+                    f"[STATS] qpos_z_range=[{float(self.stats.qpos_a[2]):.3f},{float(self.stats.qpos_b[2]):.3f}] "
+                    f"action_z_range=[{float(self.stats.act_a[2]):.3f},{float(self.stats.act_b[2]):.3f}] "
+                    f"action_fz_range=[{float(self.stats.act_a[8]):.3f},{float(self.stats.act_b[8]):.3f}]"
+                )
 
+        # policy
+        self.policy = self._load_policy_and_ckpt_from_act_root()
         # policy
         self.policy = self._load_policy_and_ckpt_from_act_root()
 
@@ -810,14 +902,20 @@ class NodeActCmdMotionInfer(Node):
             self._contact = False
         return (prev != self._contact)
 
-    # ------------------------------------------------------------
-    # Compute preload target
-    # ------------------------------------------------------------
     def _compute_preload_target(self) -> float:
         tgt = self.preload_fixed_N
+
         if (self.preload_target_source == "stats_mean") and (self.stats is not None):
-            mean_fz = float(self.stats.qpos_mean[8])
-            tgt = abs(mean_fz) * float(self.preload_target_scale)
+            # min-max stats에는 mean이 없으므로 중간값(midpoint)을 휴리스틱으로 사용
+            if getattr(self.stats, "qpos_mode", "zscore") == "zscore":
+                mean_fz = float(self.stats.qpos_a[8])  # qpos_a == mean
+                tgt = abs(mean_fz) * float(self.preload_target_scale)
+            elif getattr(self.stats, "qpos_mode", "zscore") == "minmax":
+                qmin_fz = float(self.stats.qpos_a[8])  # qpos_a == min
+                qmax_fz = float(self.stats.qpos_b[8])  # qpos_b == max
+                mid_fz = 0.5 * (qmin_fz + qmax_fz)
+                tgt = abs(mid_fz) * float(self.preload_target_scale)
+
         tgt = max(float(self.preload_min_N), float(tgt))
         return float(tgt)
 
