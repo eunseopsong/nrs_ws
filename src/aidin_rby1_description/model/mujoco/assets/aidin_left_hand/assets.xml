@@ -1,0 +1,11 @@
+<mujoco>
+  <mesh name="body_left_collision" content_type="model/stl" file="body_left_collision.STL"/>
+  <mesh name="left_link1_thumb_collision" content_type="model/stl" file="link1_thumb_collision.STL"/>
+  <mesh name="left_link2_thumb_collision" content_type="model/stl" file="link2_thumb_collision.STL"/>
+  <mesh name="left_link3_thumb_collision" content_type="model/stl" file="link3_thumb_collision.STL"/>
+  <mesh name="left_link4_thumb_collision" content_type="model/stl" file="link4_thumb_collision.STL"/>
+  <mesh name="left_link1_collision" content_type="model/stl" file="link1_collision.STL"/>
+  <mesh name="left_link2_collision" content_type="model/stl" file="link2_collision.STL"/>
+  <mesh name="left_link3_collision" content_type="model/stl" file="link3_collision.STL"/>
+  <mesh name="left_link4_collision" content_type="model/stl" file="link4_collision.STL"/>
+</mujoco>
