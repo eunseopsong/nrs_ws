@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'adaptation_node = contact_pkg.contact_adaptation_node:main'
+            'feasibility_test_node = contact_pkg.feasibility_test_node:main' ,
+            'feasibility_test_node2 = contact_pkg.feasibility_test_node2:main',
         ],
     },
 )
