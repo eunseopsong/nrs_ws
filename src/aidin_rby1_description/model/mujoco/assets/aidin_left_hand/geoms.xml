@@ -1,0 +1,23 @@
+<mujoco>
+  <geom type="mesh" rgba="0.22353 0.22353 0.22353 1" mesh="body_left_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link1_thumb_collision"/>      
+  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="left_link2_thumb_collision"/>
+  <geom type="mesh" rgba="0.79216 0.81961 0.93333 1" mesh="left_link3_thumb_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link4_thumb_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link1_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link2_collision"/>
+  <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="left_link3_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link4_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link1_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link2_collision"/>
+  <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="left_link3_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link4_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link1_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link2_collision"/>
+  <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="left_link3_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link4_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link1_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link2_collision"/>
+  <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="left_link3_collision"/>
+  <geom type="mesh" rgba="0.77647 0.75686 0.73725 1" mesh="left_link4_collision"/>        
+</mujoco>

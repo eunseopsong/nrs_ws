@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<robot name="aidin_rby1" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="use_right_hand" default="true" />
+  <xacro:arg name="use_left_hand" default="true" />
+  <xacro:arg name="use_torso" default="true" />
+  <xacro:arg name="use_head" default="true" />
+  <xacro:arg name="right_hand_prefix" default="right_" />
+  <xacro:arg name="left_hand_prefix" default="left_" />
+  <xacro:arg name="left_hand_position" default="0" />
+  <xacro:arg name="right_hand_position" default="5" />
+  <xacro:arg name="left_hand_alias" default="0" />
+  <xacro:arg name="right_hand_alias" default="0" />
+  <xacro:arg name="control_frequency" default="500" />
+  <xacro:arg name="virtual_mode" default="false" />
+  <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+  <xacro:arg name="robot_ip" default="" />
+
+   <!-- world base link -->
+   <link name="world" />
+   <gazebo reference="world">
+      <static>true</static>
+   </gazebo>
+
+    <!--            RBY1           -->
+    <xacro:include filename="$(find aidin_rby1_description)/model/urdf/rby1.urdf.xacro" />
+    <xacro:rby1 parent="world">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:rby1>
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="$(find aidin_rby1_description)/model/urdf/rby1.ros2_control.xacro" />
+    <xacro:rby1_ros2_control 
+        virtual_mode="$(arg virtual_mode)" 
+        initial_positions_file="$(arg initial_positions_file)"
+        robot_ip="$(arg robot_ip)" 
+    />
+
+    
+    <!--         Aidin hand    -->       
+    <xacro:include filename="$(find aidin_hand_description)/urdf/hand_left.urdf.xacro" />
+    <xacro:include filename="$(find aidin_hand_description)/urdf/hand_right.urdf.xacro" />
+
+    <xacro:left_hand parent="hand_connector_L_2">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+    </xacro:left_hand>
+
+    <xacro:right_hand parent="hand_connector_R_2">
+        <origin xyz="0 0 0" rpy="0 0 3.14159" />
+    </xacro:right_hand>
+
+    <xacro:include filename="$(find aidin_hand_description)/urdf/hand_control.xacro"/>
+    <xacro:if value="${'$(arg use_left_hand)'.lower() == 'true' or '$(arg use_right_hand)'.lower() == 'true'}">
+    <ros2_control name="hand" type="system">
+        <hardware>
+            <xacro:if value="$(arg virtual_mode)">
+                <plugin>aidin_hand_hardware/AidinHandVirtualHardware</plugin>
+            </xacro:if>
+            <xacro:unless value="$(arg virtual_mode)">
+            <plugin>aidin_hand_hardware/EtherlabDriver</plugin>
+                <param name="master_id">0</param>
+                <param name="control_frequency">$(arg control_frequency)</param>
+            </xacro:unless>
+        </hardware> 
+        <xacro:if value="$(arg use_left_hand)">
+          <xacro:hand_control 
+                  hand_prefix="$(arg left_hand_prefix)" hand_alias="$(arg left_hand_alias)" 
+                  hand_position="$(arg left_hand_position)"
+                  control_frequency="$(arg control_frequency)" />
+        </xacro:if>
+        <xacro:if value="$(arg use_right_hand)">
+          <xacro:hand_control 
+                  hand_prefix="$(arg right_hand_prefix)" hand_alias="$(arg right_hand_alias)" 
+                  hand_position="$(arg right_hand_position)"
+                  control_frequency="$(arg control_frequency)" />
+        </xacro:if>
+    </ros2_control>
+    </xacro:if>
+</robot>
