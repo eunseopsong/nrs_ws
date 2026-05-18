@@ -42,7 +42,8 @@ class FeasibilityTestNode2(Node):
         self.target_wy = 0.0
         self.target_wz = 1.57
         self.start_z = 0.0 
-
+        # [핵심 추가] 닿는 순간의 위치와 자세를 영구 고정할 변수
+        self.locked_pos = None
         # 무한 루프로 입력을 받는 스레드
         self.input_thread = threading.Thread(target=self.wait_for_user_input)
         self.input_thread.daemon = True
@@ -103,6 +104,7 @@ class FeasibilityTestNode2(Node):
                     self.fixed_wx = self.target_wx
                     self.fixed_wy = self.target_wy
                     self.fixed_wz = self.target_wz
+                    self.locked_pos = None
 
                     print(f"\n[명령 접수] X:{self.target_x}, Y:{self.target_y} 로 이동 후 하강합니다.")
                     self.state = 1 # 테스트 시작
@@ -155,7 +157,10 @@ class FeasibilityTestNode2(Node):
 
         elif self.state == 2:
             if abs(fz) > contact_threshold:
-                self.get_logger().info(f"표면 접촉 감지! (Fz: {fz:.2f}N). 탐지 알고리즘으로 전환합니다.")
+                self.get_logger().info(f"표면 접촉 감지! (Fz: {fz:.2f}N). 로봇 위치를 고정합니다.")
+                
+                # [핵심 변경] 닿는 순간의 6D 포즈(위치+자세) 전체 배열을 '박제'합니다.
+                self.locked_pos = self.current_pos[:]
                 self.state = 3 
             else:
                 target_z = z - self.z_step_mm
@@ -167,13 +172,17 @@ class FeasibilityTestNode2(Node):
                 self.cmd_motion_pub.publish(cmd_msg)
 
         elif self.state == 3:
-            target_x, target_y, target_z = self.contact_point_detection_algorithm(self.current_pos, self.current_ft)
+            # [핵심 변경] 로봇이 떠오르거나 미끄러지지 못하도록, 
+            # 어드미턴스 제어기가 밀어내든 말든 무조건 닿았던 순간의 위치(locked_pos)만을 목표치로 계속 쏩니다.
             cmd_msg.data = [
-                target_x, target_y, target_z, 
-                self.fixed_wx, self.fixed_wy, self.fixed_wz, 
+                self.locked_pos[0], self.locked_pos[1], self.locked_pos[2], 
+                self.locked_pos[3], self.locked_pos[4], self.locked_pos[5], 
                 self.fixed_fx, self.fixed_fy, self.fixed_fz
             ]
             self.cmd_motion_pub.publish(cmd_msg)
+            
+            # (옵션) 2초마다 정지 중임을 알림
+            self.get_logger().info("로봇 정지 및 접촉 유지 중... (원위치 복귀는 터미널에 h 입력)", throttle_duration_sec=2.0)
 
         # [추가] 상태 4: 저장해둔 Home 위치로 복귀
         elif self.state == 4:
