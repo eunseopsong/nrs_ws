@@ -7,9 +7,16 @@ src/urdf_files_dataset
 src/Universal_Robots_ROS2_Driver
 src/rtde_handarm2/data
 <<<<<<< HEAD
+<<<<<<< Updated upstream
+=======
+=======
+>>>>>>> Stashed changes
 src/practice_visual/meshes/
 src/practice_visual/urdf/
 src/practice_visual/.vscode/
 .vscode/
+<<<<<<< Updated upstream
 =======
+=======
+>>>>>>> Stashed changes
 >>>>>>> origin/main
