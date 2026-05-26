@@ -1,0 +1,7 @@
+nonlinear_surface_contactsensing:
+  ros__parameters:
+    use_sim_time: true
+    filename: "spindle_link_ass"
+    mesh_directory: "/home/eunseop/urp_2026spring/practice_visual/meshes/spindle_surface.stl"
+    contact_sensor_topic: "/ur10skku/ftdata"
+    mesh_transformation: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.115]
