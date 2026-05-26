@@ -11,6 +11,7 @@
 
 namespace FAAC {
 
+  
 inline constexpr int FAAC_array_size[2] = {12, 12};
 
 inline constexpr double FAAC_DelM_array[13][13] = {

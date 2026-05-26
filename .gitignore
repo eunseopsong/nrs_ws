@@ -6,7 +6,10 @@ log/
 src/urdf_files_dataset
 src/Universal_Robots_ROS2_Driver
 src/rtde_handarm2/data
+<<<<<<< HEAD
 src/practice_visual/meshes/
 src/practice_visual/urdf/
 src/practice_visual/.vscode/
 .vscode/
+=======
+>>>>>>> origin/main
