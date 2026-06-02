@@ -1,7 +1,10 @@
 nonlinear_surface_contactsensing:
   ros__parameters:
-    use_sim_time: true
-    filename: "spindle_link_ass"
-    mesh_directory: "/home/eunseop/urp_2026spring/practice_visual/meshes/spindle_surface.stl"
-    contact_sensor_topic: "/ur10skku/ftdata"
-    mesh_transformation: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.115]
+    # (주의) filename은 사용하지 않더라도 기존 로직과 충돌할 수 있으니 spindle_surface로 맞춰주는 것이 좋습니다.
+    filename: "spindle_surface"
+    
+    mesh_directory: "/home/eunseop/nrs_ws/src/practice_visual/meshes/spindle_surface.stl"
+    contact_sensor_topic: "/ftsensor/measured_Cvalue"
+    
+    # X축 -90도 회전, Z축 0.115 이동 적용
+    mesh_transformation: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0]

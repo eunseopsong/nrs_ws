@@ -6,8 +6,10 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_dir = get_package_share_directory('practice_visual')
     urdf_file = os.path.join(pkg_dir, 'urdf', 'practice.urdf')
-    # 저장한 rviz 설정 파일 경로 추가!
     rviz_config_file = os.path.join(pkg_dir, 'rviz', 'practice.rviz') 
+    
+    # [수정 완료] 이제 올바른 뼈대 파일인 spindle_surface.stl을 정확히 가리킵니다.
+    stl_file_path = os.path.join(pkg_dir, 'meshes', 'spindle_surface.stl')
     
     with open(urdf_file, 'r') as infp:
         robot_desc = infp.read()
@@ -18,9 +20,11 @@ def generate_launch_description():
             executable='ifs_node',
             name='nonlinear_surface_contactsensing',
             output='screen',
-            parameters=[os.path.join(pkg_dir, 'config', 'practice_config.yaml')]
+            parameters=[
+                os.path.join(pkg_dir, 'config', 'practice_config.yaml'),
+                {'mesh_directory': stl_file_path} 
+            ]
         ),
-        # 로봇 뼈대 정보를 퍼블리시하는 노드
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -28,14 +32,11 @@ def generate_launch_description():
             output='screen',
             parameters=[{'robot_description': robot_desc}]
         ),
-        # RViz2 실행 노드
         Node(
             package='rviz2',
             executable='rviz2',
             name='rviz2',
             output='screen',
-            # arguments에 rviz 설정 파일 넘겨주기!
             arguments=['-d', rviz_config_file] 
         )
     ])
-
