@@ -1,10 +1,10 @@
 nonlinear_surface_contactsensing:
   ros__parameters:
-    # (주의) filename은 사용하지 않더라도 기존 로직과 충돌할 수 있으니 spindle_surface로 맞춰주는 것이 좋습니다.
-    filename: "spindle_surface"
+    # 혹시 모르니 filename도 통일해 줍니다.
+    filename: "toolsf" 
     
-    mesh_directory: "/home/eunseop/nrs_ws/src/practice_visual/meshes/spindle_surface.stl"
+    mesh_directory: "/home/eunseop/nrs_ws/src/practice_visual/meshes/toolsf.stl"
     contact_sensor_topic: "/ftsensor/measured_Cvalue"
     
-    # X축 -90도 회전, Z축 0.115 이동 적용
-    mesh_transformation: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0]
+    # [핵심] 모든 회전과 이동을 0으로 초기화한 항등행렬 (1.0 대각선 배치)
+    mesh_transformation: [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0]

@@ -224,34 +224,42 @@ void IfsAlgorithm::draw_arrow(geometry_msgs::msg::PointStamped cp, geometry_msgs
     arrow.action = visualization_msgs::msg::Marker::MODIFY;
   }
 
-  std_msgs::msg::ColorRGBA color;
-  color.r = 1.0; color.g = 0.0; color.b = 0.0; color.a = 1.0;
-  arrow.color = color;
+  // 색상 설정 (빨간색, 불투명)
+  arrow.color.r = 1.0; 
+  arrow.color.g = 0.0; 
+  arrow.color.b = 0.0; 
+  arrow.color.a = 1.0;
 
-  double length_ratio = 0.5; 
-  double mag = sqrt(force.force.x*force.force.x + force.force.y*force.force.y + force.force.z*force.force.z);
+  // [수정] 스케일(Scale) 고정: x=몸통 굵기, y=머리 굵기, z=머리 길이
+  arrow.scale.x = 0.005; // 5mm 굵기 (일정하게 유지)
+  arrow.scale.y = 0.015; // 15mm 머리 굵기
+  arrow.scale.z = 0.015; // 15mm 머리 길이
 
-  arrow.scale.x = mag*length_ratio; // Shaft diameter
-  arrow.scale.y = mag*length_ratio*0.1; // Head diameter
-  arrow.scale.z = mag*length_ratio*0.1; // Head length
+  double length_ratio = 0.01; // 힘(N)을 미터(m) 단위 길이로 변환하는 비율 (예: 10N -> 10cm)
 
-  // 화살표의 꼬리(시작점)를 분홍점(Contact Point) 위치에 정확히 일치시킵니다.
-  arrow.pose.position.x = cp.point.x;
-  arrow.pose.position.y = cp.point.y;
-  arrow.pose.position.z = cp.point.z;
-
-  Eigen::Quaterniond quat;
-  Eigen::Vector3d x(1.0, 0.0, 0.0);
-  Eigen::Vector3d force_vec(-force.force.x, -force.force.y, -force.force.z);
+  // [수정] 시작점과 끝점을 이용한 방향/길이 설정
+  arrow.points.resize(2);
   
-  if (force_vec.norm() > 0) {
-      force_vec = force_vec / force_vec.norm();
-      quat = Eigen::Quaterniond().setFromTwoVectors(x, force_vec);
-      arrow.pose.orientation.w = quat.w();
-      arrow.pose.orientation.x = quat.x();
-      arrow.pose.orientation.y = quat.y();
-      arrow.pose.orientation.z = quat.z();
-  }
+  // 시작점 (접촉점 위치)
+  arrow.points[0].x = cp.point.x;
+  arrow.points[0].y = cp.point.y;
+  arrow.points[0].z = cp.point.z;
+
+  // 끝점 (시작점 + 힘 방향 벡터 * 길이)
+  // (참고: 반작용 방향으로 그리려면 force.force 앞에 마이너스(-)를 붙이세요)
+  arrow.points[1].x = cp.point.x + (force.force.x * length_ratio);
+  arrow.points[1].y = cp.point.y + (force.force.y * length_ratio);
+  arrow.points[1].z = cp.point.z + (force.force.z * length_ratio);
+
+  // [중요] 화살표를 points로 정의할 때는 pose와 orientation은 건드리지 않아야 합니다.
+  arrow.pose.position.x = 0;
+  arrow.pose.position.y = 0;
+  arrow.pose.position.z = 0;
+  arrow.pose.orientation.w = 1.0;
+  arrow.pose.orientation.x = 0.0;
+  arrow.pose.orientation.y = 0.0;
+  arrow.pose.orientation.z = 0.0;
+
   arrow_pub_->publish(arrow);
 }
 

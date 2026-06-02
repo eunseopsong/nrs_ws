@@ -9,7 +9,7 @@ def generate_launch_description():
     rviz_config_file = os.path.join(pkg_dir, 'rviz', 'practice.rviz') 
     
     # [수정 완료] 이제 올바른 뼈대 파일인 spindle_surface.stl을 정확히 가리킵니다.
-    stl_file_path = os.path.join(pkg_dir, 'meshes', 'spindle_surface.stl')
+    stl_file_path = os.path.join(pkg_dir, 'meshes', 'toolsf.stl')
     
     with open(urdf_file, 'r') as infp:
         robot_desc = infp.read()
