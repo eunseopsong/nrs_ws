@@ -46,4 +46,12 @@ install(TARGETS ifs_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(DIRECTORY
+  launch
+  rviz
+  urdf
+  meshes
+  DESTINATION share/${PROJECT_NAME}
+)
+
 ament_package()
