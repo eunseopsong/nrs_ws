@@ -280,7 +280,7 @@ void IfsAlgorithm::run_step(){
     if(ft_measure_flag_){
         geometry_msgs::msg::Wrench force_;
 
-        if(force_norm > 0.3){ 
+        if(force_norm > 5.0){ 
             if(cnt > 3){ 
               cp_ = get_ContactPoint(ft_value_);
 

@@ -4,7 +4,7 @@ nonlinear_surface_contactsensing:
     filename: "toolsf" 
     
     mesh_directory: "/home/eunseop/nrs_ws/src/practice_visual/meshes/toolsf.stl"
-    contact_sensor_topic: "/ftsensor/measured_Cvalue"
+    contact_sensor_topic: "/ur10skku/ftdata"
     
     # [핵심] 모든 회전과 이동을 0으로 초기화한 항등행렬 (1.0 대각선 배치)
     mesh_transformation: [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0]
