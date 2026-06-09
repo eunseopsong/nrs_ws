@@ -36,7 +36,7 @@ IfsAlgorithm::IfsAlgorithm() : Node("nonlinear_surface_contactsensing") {
   
   T << 1.0,  0.0,  0.0,  0.0,
        0.0,  0.0,  1.0,  0.0,
-       0.0, -1.0,  0.0,  0.0,  // ✅ 위치 이동(Z축 0.115 등)은 회전이 맞은 후 나중에 4번째 열에 추가합니다!
+       0.0, -1.0,  0.0,  0.0,  // 
        0.0,  0.0,  0.0,  1.0;
 
   set_ContactShape(mesh_directory, T);
@@ -47,15 +47,13 @@ IfsAlgorithm::IfsAlgorithm() : Node("nonlinear_surface_contactsensing") {
 
 void IfsAlgorithm::ftsensor_cb(const geometry_msgs::msg::WrenchStamped::SharedPtr msg){
   if(!ft_measure_flag_){
-    double algor_sign = -1.0; 
+    double algor_sign = 1.0;
     double lambda = 0.05;
 
-    // ✅ lambda 곱하기를 모두 지워서 진짜 힘의 크기를 구합니다.
     force_norm = abs(msg->wrench.force.x) + abs(msg->wrench.force.y) + abs(msg->wrench.force.z);
-
-    ft_value_[0] = lambda*algor_sign*msg->wrench.force.x + (1-lambda)*algor_sign*ft_value_[0];
-    ft_value_[1] = lambda*algor_sign*msg->wrench.force.y + (1-lambda)*algor_sign*ft_value_[1];
-    ft_value_[2] = lambda*algor_sign*msg->wrench.force.z + (1-lambda)*algor_sign*ft_value_[2];
+    ft_value_[0] = lambda*algor_sign*msg->wrench.force.x  + (1-lambda)*algor_sign*ft_value_[0];
+    ft_value_[1] = lambda*algor_sign*msg->wrench.force.y  + (1-lambda)*algor_sign*ft_value_[1];
+    ft_value_[2] = lambda*algor_sign*msg->wrench.force.z  + (1-lambda)*algor_sign*ft_value_[2];
     ft_value_[3] = lambda*algor_sign*msg->wrench.torque.x + (1-lambda)*algor_sign*ft_value_[3];
     ft_value_[4] = lambda*algor_sign*msg->wrench.torque.y + (1-lambda)*algor_sign*ft_value_[4];
     ft_value_[5] = lambda*algor_sign*msg->wrench.torque.z + (1-lambda)*algor_sign*ft_value_[5];
@@ -200,6 +198,7 @@ std::vector<float> IfsAlgorithm::get_ContactPoint(std::vector<float> ft){
     idx = get_ClosestSurface(r);
     std::vector<int> vert_idx;
     while(!bContact) {
+      vert_idx.clear();
       bContact = is_SurfaceContact(idx, r, vert_idx, cp);
       if(!bContact) idx = get_NextTriangle(idx, vert_idx);
       iter++;
@@ -231,25 +230,24 @@ void IfsAlgorithm::draw_arrow(geometry_msgs::msg::PointStamped cp, geometry_msgs
   arrow.color.a = 1.0;
 
   // [수정] 스케일(Scale) 고정: x=몸통 굵기, y=머리 굵기, z=머리 길이
-  arrow.scale.x = 0.005; // 5mm 굵기 (일정하게 유지)
-  arrow.scale.y = 0.015; // 15mm 머리 굵기
-  arrow.scale.z = 0.015; // 15mm 머리 길이
+  arrow.scale.x = 0.002; // mm 굵기 (일정하게 유지)
+  arrow.scale.y = 0.004; // mm 머리 굵기
+  arrow.scale.z = 0.002; // mm 머리 길이
 
-  double length_ratio = 0.01; // 힘(N)을 미터(m) 단위 길이로 변환하는 비율 (예: 10N -> 10cm)
+  double length_ratio = 0.001; // 힘(N)을 미터(m) 단위 길이로 변환하는 비율 (예: 10N -> 1cm)
 
-  // [수정] 시작점과 끝점을 이용한 방향/길이 설정
   arrow.points.resize(2);
-  
-  // 시작점 (접촉점 위치)
-  arrow.points[0].x = cp.point.x;
-  arrow.points[0].y = cp.point.y;
-  arrow.points[0].z = cp.point.z;
 
-  // 끝점 (시작점 + 힘 방향 벡터 * 길이)
-  // (참고: 반작용 방향으로 그리려면 force.force 앞에 마이너스(-)를 붙이세요)
-  arrow.points[1].x = cp.point.x + (force.force.x * length_ratio);
-  arrow.points[1].y = cp.point.y + (force.force.y * length_ratio);
-  arrow.points[1].z = cp.point.z + (force.force.z * length_ratio);
+  // 시작점 (꼬리): 접촉점에서 힘 벡터의 *반대* 방향으로 뻗어나간 위치
+  // (이렇게 해야 화살표가 가리키는 고유의 방향이 기존과 똑같이 유지됩니다.)
+  arrow.points[0].x = cp.point.x + (force.force.x * length_ratio);
+  arrow.points[0].y = cp.point.y + (force.force.y * length_ratio);
+  arrow.points[0].z = cp.point.z + (force.force.z * length_ratio);
+
+  // 끝점 (머리): 보라색 접촉점 위치에 정확히 안착
+  arrow.points[1].x = cp.point.x;
+  arrow.points[1].y = cp.point.y;
+  arrow.points[1].z = cp.point.z;
 
   // [중요] 화살표를 points로 정의할 때는 pose와 orientation은 건드리지 않아야 합니다.
   arrow.pose.position.x = 0;
@@ -280,7 +278,7 @@ void IfsAlgorithm::run_step(){
     if(ft_measure_flag_){
         geometry_msgs::msg::Wrench force_;
 
-        if(force_norm > 5.0){ 
+        if(force_norm > 0.5){ 
             if(cnt > 3){ 
               cp_ = get_ContactPoint(ft_value_);
 
@@ -301,13 +299,13 @@ void IfsAlgorithm::run_step(){
               force_.force.z = ft_value_[2];
 
               // RCLCPP_INFO 사용 (std::cout 대체)
-              RCLCPP_INFO(this->get_logger(), "Cx = %.4f, Cy = %.4f, Cz = %.4f", cp_pubdata_.point.x, cp_pubdata_.point.y, cp_pubdata_.point.z);
+              RCLCPP_INFO(this->get_logger(), "[mm] Cx: %.1f, Cy: %.1f, Cz: %.1f", cp_pubdata_.point.x * 1000.0,cp_pubdata_.point.y * 1000.0, cp_pubdata_.point.z * 1000.0);
 
               draw_arrow(cp_pubdata_, force_);
 
-              if(cp_[0] == 0.0 && cp_[1] == 0.0 && cp_[2] == 0.0){
-                  delete_arrow(cp_pubdata_, force_);
-              }
+              //if(cp_[0] == 0.0 && cp_[1] == 0.0 && cp_[2] == 0.0){
+              //    delete_arrow(cp_pubdata_, force_);
+              //}
             }
             cnt++;
         } else {
