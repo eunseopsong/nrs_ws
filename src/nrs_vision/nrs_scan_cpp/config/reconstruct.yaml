@@ -1,0 +1,14 @@
+nrs_reconstruct_node:
+  ros__parameters:
+    scan_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_safe
+    voxel_size_m: 0.003
+    sor_mean_k: 30
+    sor_stddev_mul: 1.5
+    ror_radius_m: 0.010
+    ror_min_neighbors: 4
+    normal_radius_m: 0.015
+    poisson_depth: 9
+    gp3_search_radius_m: 0.012
+    gp3_mu: 2.5
+    gp3_max_neighbors: 100
+    preview_size_px: 1024

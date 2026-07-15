@@ -1,0 +1,65 @@
+nrs_scan_capture_node:
+  ros__parameters:
+    service_name: /singleArm_cmd/single_arm_command
+    pointcloud_topic: /camera
+    joint_state_topic: /isaac_joint_states
+    output_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_candidate_9view
+    spatial_angle_unit: degree
+
+    workpiece_center_m: [0.650000, 0.300000, 0.06545485]
+    workpiece_size_m: [0.4238959, 0.4238959, 0.1309097]
+    scan_target_offset_from_center_m: [0.0, 0.0, 0.040]
+    scan_radius_m: 0.650
+    bbox_margin_m: 0.020
+
+    T_ee_tcp_m: [
+      -1.0, 0.0,  0.0, 0.0,
+       0.0, 1.0,  0.0, 0.0,
+       0.0, 0.0, -1.0, 0.111,
+       0.0, 0.0,  0.0, 1.0
+    ]
+    T_ee_camera_opengl_m: [
+       1.0,  0.0,  0.0,  0.0,
+       0.0, -1.0,  0.0, -0.150,
+       0.0,  0.0, -1.0, -0.020,
+       0.0,  0.0,  0.0,  1.0
+    ]
+    T_camera_opengl_camera_ros: [
+       1.0,  0.0,  0.0, 0.0,
+       0.0, -1.0,  0.0, 0.0,
+       0.0,  0.0, -1.0, 0.0,
+       0.0,  0.0,  0.0, 1.0
+    ]
+
+    # Candidate coverage plan. Do NOT set run_all=true until every index has
+    # been tested separately after moving the workpiece.
+    view_names: [
+      top,
+      upper_phi20_theta045,
+      upper_phi20_theta135,
+      upper_phi20_theta225,
+      upper_phi20_theta315,
+      lower_phi35_theta000,
+      lower_phi35_theta090,
+      lower_phi35_theta180,
+      lower_phi35_theta270
+    ]
+    view_azimuth_deg: [0.0, 45.0, 135.0, 225.0, 315.0, 0.0, 90.0, 180.0, 270.0]
+    view_elevation_deg: [90.0, 70.0, 70.0, 70.0, 70.0, 55.0, 55.0, 55.0, 55.0]
+
+    plan_only: false
+    run_all: false
+    view_index: 0
+    continue_on_failure: false
+
+    service_wait_timeout_sec: 20.0
+    service_call_timeout_sec: 45.0
+    sensor_startup_timeout_sec: 30.0
+    pointcloud_timeout_sec: 10.0
+    minimum_settle_sec: 2.0
+    maximum_settle_sec: 15.0
+    stable_window_sec: 1.0
+    joint_position_window_threshold_rad: 0.0015
+    depth_min_m: 0.05
+    depth_max_m: 3.0
+    preview_size_px: 1024
