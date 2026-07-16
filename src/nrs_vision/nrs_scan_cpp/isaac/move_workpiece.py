@@ -8,7 +8,7 @@ PRIM_PATH = "/World/workpiece_8"
 
 # 새 workpiece 중심 위치 [m]
 # Z는 기존 높이를 그대로 유지한다.
-TARGET_CENTER_X_M = 0.650
+TARGET_CENTER_X_M = 0.550
 TARGET_CENTER_Y_M = 0.300
 
 
