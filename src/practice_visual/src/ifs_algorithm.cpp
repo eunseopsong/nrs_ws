@@ -50,7 +50,7 @@ void IfsAlgorithm::ftsensor_cb(const geometry_msgs::msg::WrenchStamped::SharedPt
     double algor_sign = 1.0;
     double lambda = 0.05;
 
-    force_norm = abs(msg->wrench.force.x) + abs(msg->wrench.force.y) + abs(msg->wrench.force.z);
+    force_norm = std::abs(msg->wrench.force.x) + std::abs(msg->wrench.force.y) + std::abs(msg->wrench.force.z);
     ft_value_[0] = lambda*algor_sign*msg->wrench.force.x  + (1-lambda)*algor_sign*ft_value_[0];
     ft_value_[1] = lambda*algor_sign*msg->wrench.force.y  + (1-lambda)*algor_sign*ft_value_[1];
     ft_value_[2] = lambda*algor_sign*msg->wrench.force.z  + (1-lambda)*algor_sign*ft_value_[2];
@@ -278,7 +278,9 @@ void IfsAlgorithm::run_step(){
     if(ft_measure_flag_){
         geometry_msgs::msg::Wrench force_;
 
-        if(force_norm > 0.5){ 
+        double filtered_force_norm = std::abs(ft_value_[0]) + std::abs(ft_value_[1]) + std::abs(ft_value_[2]);
+
+        if(filtered_force_norm > 0.5){ 
             if(cnt > 3){ 
               cp_ = get_ContactPoint(ft_value_);
 
