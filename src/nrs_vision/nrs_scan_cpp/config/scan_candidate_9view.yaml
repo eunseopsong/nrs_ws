@@ -3,13 +3,13 @@ nrs_scan_capture_node:
     service_name: /singleArm_cmd/single_arm_command
     pointcloud_topic: /camera
     joint_state_topic: /isaac_joint_states
-    output_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_candidate_55
+    output_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_candidate_9view
     spatial_angle_unit: degree
 
     workpiece_center_m: [0.550000, 0.300000, 0.06545485]
     workpiece_size_m: [0.4238959, 0.4238959, 0.1309097]
     scan_target_offset_from_center_m: [0.0, 0.0, 0.040]
-    scan_radius_m: 0.680
+    scan_radius_m: 0.650
     bbox_margin_m: 0.020
 
     T_ee_tcp_m: [
@@ -45,7 +45,7 @@ nrs_scan_capture_node:
       lower_phi35_theta270
     ]
     view_azimuth_deg: [0.0, 45.0, 135.0, 225.0, 315.0, 0.0, 90.0, 180.0, 270.0]
-    view_elevation_deg: [90.0, 65.0, 65.0, 65.0, 65.0, 55.0, 55.0, 55.0, 55.0]
+    view_elevation_deg: [90.0, 70.0, 70.0, 70.0, 70.0, 55.0, 55.0, 55.0, 55.0]
 
     plan_only: false
     run_all: false

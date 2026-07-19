@@ -12,6 +12,10 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_eigen REQUIRED)
 find_package(y2_rob_motion_interfaces REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -31,6 +35,10 @@ ament_target_dependencies(
   scan_capture_node
   rclcpp
   sensor_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_eigen
   y2_rob_motion_interfaces
   pcl_conversions
 )

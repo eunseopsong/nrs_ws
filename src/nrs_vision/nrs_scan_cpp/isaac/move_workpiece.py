@@ -1,114 +1,108 @@
+"""Move the workpiece AABB center in Isaac Sim and print matching ROS parameters.
+
+Run this file from Isaac Sim Script Editor while the stage is open:
+
+    exec(open('/path/to/move_workpiece.py').read())
+
+The script intentionally uses Isaac Sim/USD Python because changing a live USD
+stage is an Isaac-specific operation; the ROS scan and reconstruction pipeline
+is implemented in C++.
+"""
+
 import omni.usd
 from pxr import Gf, Usd, UsdGeom
 
-# ---------------------------------------------------------
-# 사용자가 수정할 값
-# ---------------------------------------------------------
 PRIM_PATH = "/World/workpiece_8"
-
-# 새 workpiece 중심 위치 [m]
-# Z는 기존 높이를 그대로 유지한다.
-TARGET_CENTER_X_M = 0.550
-TARGET_CENTER_Y_M = 0.300
-
-
-def get_world_bbox(stage, prim):
-    # Transform 수정 후 매번 새 BBoxCache를 만들어야 갱신된 값이 계산된다.
-    cache = UsdGeom.BBoxCache(
-        Usd.TimeCode.Default(),
-        [
-            UsdGeom.Tokens.default_,
-            UsdGeom.Tokens.render,
-            UsdGeom.Tokens.proxy,
-        ],
-        useExtentsHint=True,
-    )
-
-    aligned_range = cache.ComputeWorldBound(prim).ComputeAlignedRange()
-
-    minimum = aligned_range.GetMin()
-    maximum = aligned_range.GetMax()
-    center = (minimum + maximum) * 0.5
-    size = maximum - minimum
-
-    return minimum, maximum, center, size
-
+DESIRED_CENTER_X_M = 0.550
+DESIRED_CENTER_Y_M = 0.300
+PRESERVE_CURRENT_CENTER_Z = True
+DESIRED_CENTER_Z_M = 0.06545485
 
 stage = omni.usd.get_context().get_stage()
-
 if stage is None:
-    raise RuntimeError("현재 열린 USD Stage가 없습니다.")
+    raise RuntimeError("No USD stage is open")
 
 prim = stage.GetPrimAtPath(PRIM_PATH)
-
 if not prim.IsValid():
-    raise RuntimeError(f"Workpiece prim을 찾지 못했습니다: {PRIM_PATH}")
+    raise RuntimeError(f"Workpiece prim not found: {PRIM_PATH}")
 
-old_minimum, old_maximum, old_center, old_size = get_world_bbox(
-    stage,
-    prim,
+bbox_cache = UsdGeom.BBoxCache(
+    Usd.TimeCode.Default(),
+    [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+    useExtentsHint=True,
 )
 
-print("==================================================")
-print("[BEFORE]")
-print("prim path =", PRIM_PATH)
-print("center    =", [float(value) for value in old_center])
-print("size      =", [float(value) for value in old_size])
-print("minimum   =", [float(value) for value in old_minimum])
-print("maximum   =", [float(value) for value in old_maximum])
 
-# 기존 Z 중심은 유지한다.
+def aligned_world_range():
+    return bbox_cache.ComputeWorldBound(prim).ComputeAlignedRange()
+
+
+old_range = aligned_world_range()
+old_min = old_range.GetMin()
+old_max = old_range.GetMax()
+old_center = (old_min + old_max) * 0.5
+old_size = old_max - old_min
+
+desired_center_z = (
+    float(old_center[2]) if PRESERVE_CURRENT_CENTER_Z else DESIRED_CENTER_Z_M
+)
 desired_center = Gf.Vec3d(
-    TARGET_CENTER_X_M,
-    TARGET_CENTER_Y_M,
-    float(old_center[2]),
+    DESIRED_CENTER_X_M,
+    DESIRED_CENTER_Y_M,
+    desired_center_z,
 )
-
-delta_world = desired_center - Gf.Vec3d(old_center)
-
-print("\ndesired center =", [float(value) for value in desired_center])
-print("world delta    =", [float(value) for value in delta_world])
+delta = desired_center - Gf.Vec3d(old_center)
 
 xformable = UsdGeom.Xformable(prim)
-
 translate_op = None
-
-for operation in xformable.GetOrderedXformOps():
-    if operation.GetOpType() == UsdGeom.XformOp.TypeTranslate:
-        translate_op = operation
+for op in xformable.GetOrderedXformOps():
+    if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+        translate_op = op
         break
 
 if translate_op is None:
     translate_op = xformable.AddTranslateOp(
         UsdGeom.XformOp.PrecisionDouble,
-        "nrs_move",
+        "nrs_workpiece_move",
     )
-    current_translation = Gf.Vec3d(0.0, 0.0, 0.0)
+    old_translation = Gf.Vec3d(0.0, 0.0, 0.0)
 else:
-    current_value = translate_op.Get()
+    old_translation_value = translate_op.Get()
+    old_translation = Gf.Vec3d(old_translation_value)
 
-    if current_value is None:
-        current_translation = Gf.Vec3d(0.0, 0.0, 0.0)
-    else:
-        current_translation = Gf.Vec3d(
-            float(current_value[0]),
-            float(current_value[1]),
-            float(current_value[2]),
-        )
-
-new_translation = current_translation + delta_world
+new_translation = old_translation + delta
 translate_op.Set(new_translation)
 
-new_minimum, new_maximum, new_center, new_size = get_world_bbox(
-    stage,
-    prim,
+# Recreate the cache after changing the stage.
+bbox_cache = UsdGeom.BBoxCache(
+    Usd.TimeCode.Default(),
+    [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+    useExtentsHint=True,
 )
+new_range = aligned_world_range()
+new_min = new_range.GetMin()
+new_max = new_range.GetMax()
+new_center = (new_min + new_max) * 0.5
+new_size = new_max - new_min
 
-print("\n[AFTER]")
-print("translate =", [float(value) for value in new_translation])
-print("center    =", [float(value) for value in new_center])
-print("size      =", [float(value) for value in new_size])
-print("minimum   =", [float(value) for value in new_minimum])
-print("maximum   =", [float(value) for value in new_maximum])
-print("==================================================")
-print("[주의] 화면에서 위치를 확인한 뒤에만 USD를 저장하세요.")
+print("========== WORKPIECE MOVED ==========")
+print("prim_path:", PRIM_PATH)
+print("old_center_world_m:", [float(v) for v in old_center])
+print("old_size_m:", [float(v) for v in old_size])
+print("delta_world_m:", [float(v) for v in delta])
+print("new_translate_op_m:", [float(v) for v in new_translation])
+print("new_center_world_m:", [float(v) for v in new_center])
+print("new_size_m:", [float(v) for v in new_size])
+print()
+print("Copy these values into scan YAML:")
+print(
+    "workpiece_center_m: ["
+    + ", ".join(f"{float(v):.9f}" for v in new_center)
+    + "]"
+)
+print(
+    "workpiece_size_m: ["
+    + ", ".join(f"{float(v):.9f}" for v in new_size)
+    + "]"
+)
+print("=====================================")

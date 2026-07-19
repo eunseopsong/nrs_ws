@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>nrs_scan_cpp</name>
-  <version>0.1.0</version>
-  <description>UR10e wrist-camera scan capture and PCL reconstruction nodes.</description>
+  <version>0.2.0</version>
+  <description>UR10e wrist-camera scan capture using timestamped actual TF poses and PCL reconstruction.</description>
   <maintainer email="eunseop@example.com">eunseop</maintainer>
   <license>Apache-2.0</license>
 
@@ -10,6 +10,10 @@
 
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_eigen</depend>
   <depend>y2_rob_motion_interfaces</depend>
   <depend>pcl_conversions</depend>
 

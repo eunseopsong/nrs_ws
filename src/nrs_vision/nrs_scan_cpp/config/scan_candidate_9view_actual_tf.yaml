@@ -1,0 +1,101 @@
+nrs_scan_capture_node:
+  ros__parameters:
+    service_name: /singleArm_cmd/single_arm_command
+    pointcloud_topic: /camera
+    joint_state_topic: /isaac_joint_states
+    output_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_actual_tf_run1
+    spatial_angle_unit: degree
+
+    # 실제 촬영 pose는 TF에서 가져온다.
+    # 먼저 아래 명령으로 frame 이름이 맞는지 확인한다.
+    #   ros2 run tf2_ros tf2_echo world sim_camera
+    # TF tree의 이름이 World라면 world_frame을 World로 바꾼다.
+    world_frame: World
+    tf_camera_frame: Camera
+    tf_lookup_timeout_sec: 1.0
+
+    # cloud timestamp의 TF를 우선 사용한다. exact timestamp가 TF cache에 없고
+    # 로봇이 이미 정지한 경우에만 latest TF fallback을 허용한다.
+    allow_latest_tf_fallback: true
+
+    # 단순 정지뿐 아니라 계획 camera pose에 실제 camera pose가 도달해야 촬영한다.
+    require_target_reached: true
+    target_position_tolerance_m: 0.005
+    target_orientation_tolerance_deg: 1.0
+    capture_delay_after_settle_sec: 0.20
+
+    # cloud_world.pcd는 actual TF로 생성한다.
+    # 비교용으로 계획 pose 결과도 cloud_world_planned_debug.pcd에 저장한다.
+    save_planned_world_debug: true
+
+    # TF frame과 PointCloud2 frame이 같은 ROS optical frame이면 identity.
+    T_tf_camera_pointcloud_frame: [
+       1.0, 0.0, 0.0, 0.0,
+       0.0, 1.0, 0.0, 0.0,
+       0.0, 0.0, 1.0, 0.0,
+       0.0, 0.0, 0.0, 1.0
+    ]
+
+    # 현재 촬영에 사용한 workpiece/scan 설정.
+    workpiece_center_m: [0.550000, 0.300000, 0.06545485]
+    workpiece_size_m: [0.4238959, 0.4238959, 0.1309097]
+    scan_target_offset_from_center_m: [0.0, 0.0, 0.040]
+    scan_radius_m: 0.680
+
+    # XY crop margin. Z 하한은 별도로 공작물 바닥보다 3 mm 위로 올려
+    # GroundPlane을 reconstruction 입력에서 제외한다.
+    bbox_margin_m: 0.010
+    roi_bottom_offset_m: 0.003
+    roi_top_margin_m: 0.020
+
+    T_ee_tcp_m: [
+      -1.0, 0.0,  0.0, 0.0,
+       0.0, 1.0,  0.0, 0.0,
+       0.0, 0.0, -1.0, 0.111,
+       0.0, 0.0,  0.0, 1.0
+    ]
+    T_ee_camera_opengl_m: [
+       1.0,  0.0,  0.0,  0.0,
+       0.0, -1.0,  0.0, -0.150,
+       0.0,  0.0, -1.0, -0.020,
+       0.0,  0.0,  0.0,  1.0
+    ]
+    T_camera_opengl_camera_ros: [
+       1.0,  0.0,  0.0, 0.0,
+       0.0, -1.0,  0.0, 0.0,
+       0.0,  0.0, -1.0, 0.0,
+       0.0,  0.0,  0.0, 1.0
+    ]
+
+    view_names: [
+      top,
+      upper_phi20_theta045,
+      upper_phi20_theta135,
+      upper_phi20_theta225,
+      upper_phi20_theta315,
+      lower_phi35_theta000,
+      lower_phi35_theta090,
+      lower_phi35_theta180,
+      lower_phi35_theta270
+    ]
+    view_azimuth_deg: [0.0, 45.0, 135.0, 225.0, 315.0, 0.0, 90.0, 180.0, 270.0]
+    view_elevation_deg: [90.0, 70.0, 70.0, 70.0, 70.0, 55.0, 55.0, 55.0, 55.0]
+
+    plan_only: false
+    run_all: false
+    view_index: 0
+    continue_on_failure: false
+
+    service_wait_timeout_sec: 20.0
+    service_call_timeout_sec: 45.0
+    sensor_startup_timeout_sec: 30.0
+    pointcloud_timeout_sec: 10.0
+
+    minimum_settle_sec: 2.0
+    maximum_settle_sec: 25.0
+    stable_window_sec: 1.5
+    joint_position_window_threshold_rad: 0.0015
+
+    depth_min_m: 0.05
+    depth_max_m: 3.0
+    preview_size_px: 1024

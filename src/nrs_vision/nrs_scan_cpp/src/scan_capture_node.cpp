@@ -29,10 +29,27 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <tf2/exceptions.h>
+#if __has_include(<tf2_eigen/tf2_eigen.hpp>)
+#include <tf2_eigen/tf2_eigen.hpp>
+#else
+#include <tf2_eigen/tf2_eigen.h>
+#endif
+#if __has_include(<tf2_ros/buffer.hpp>)
+#include <tf2_ros/buffer.hpp>
+#else
+#include <tf2_ros/buffer.h>
+#endif
+#if __has_include(<tf2_ros/transform_listener.hpp>)
+#include <tf2_ros/transform_listener.hpp>
+#else
+#include <tf2_ros/transform_listener.h>
+#endif
 #include <y2_rob_motion_interfaces/srv/single_arm_command.hpp>
 
 namespace fs = std::filesystem;
@@ -51,6 +68,22 @@ struct ViewPlan
   Eigen::Matrix4d t_world_camera_ros_m{Eigen::Matrix4d::Identity()};
   Eigen::Matrix4d t_world_tcp_m{Eigen::Matrix4d::Identity()};
   std::vector<double> service_pose_mm_spatial;
+};
+
+struct PoseError
+{
+  double position_m{std::numeric_limits<double>::infinity()};
+  double orientation_deg{std::numeric_limits<double>::infinity()};
+};
+
+struct ActualPoseResult
+{
+  Eigen::Matrix4d t_world_pointcloud_m{Eigen::Matrix4d::Identity()};
+  geometry_msgs::msg::TransformStamped transform_message;
+  std::string world_frame;
+  std::string tf_camera_frame;
+  std::string pointcloud_frame;
+  bool used_latest_fallback{false};
 };
 
 static Eigen::Matrix4d matrixFromFlat16(const std::vector<double> & values)
@@ -83,6 +116,8 @@ static Eigen::Matrix4d makeLookAtCameraPoseRos(
   const Eigen::Vector3d & target_position,
   const bool top_view)
 {
+  // ROS optical convention used by the PointCloud2:
+  // +Z forward, +X right, +Y down.
   Eigen::Vector3d z_axis = target_position - camera_position;
   const double norm = z_axis.norm();
   if (norm < 1.0e-9) {
@@ -127,8 +162,6 @@ static Eigen::Vector3d rotationMatrixToRotationVector(
     vector *= 180.0 / M_PI;
   }
 
-  // A 180-degree rotation admits both +axis and -axis. Stabilize the sign so
-  // generated plans are deterministic and easier to compare with service logs.
   if (std::abs(std::abs(angle) - M_PI) < 1.0e-8) {
     for (int i = 0; i < 3; ++i) {
       if (std::abs(vector[i]) > 1.0e-9) {
@@ -149,6 +182,29 @@ static std::string matrixToString(const Eigen::Matrix4d & matrix)
   return stream.str();
 }
 
+static std::string normalizeFrameId(std::string frame)
+{
+  while (!frame.empty() && frame.front() == '/') {
+    frame.erase(frame.begin());
+  }
+  return frame;
+}
+
+static PoseError calculatePoseError(
+  const Eigen::Matrix4d & planned,
+  const Eigen::Matrix4d & actual)
+{
+  PoseError error;
+  error.position_m =
+    (planned.block<3, 1>(0, 3) - actual.block<3, 1>(0, 3)).norm();
+
+  const Eigen::Matrix3d relative_rotation =
+    planned.block<3, 3>(0, 0).transpose() * actual.block<3, 3>(0, 0);
+  Eigen::AngleAxisd angle_axis(relative_rotation);
+  error.orientation_deg = std::abs(angle_axis.angle()) * 180.0 / M_PI;
+  return error;
+}
+
 class ScanCaptureNode : public rclcpp::Node
 {
 public:
@@ -157,6 +213,9 @@ public:
   {
     declareParameters();
     readParameters();
+
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     auto reliable_qos = rclcpp::QoS(rclcpp::KeepLast(1));
     reliable_qos.reliable();
@@ -196,7 +255,7 @@ public:
     }
 
     waitForService();
-    waitForSensors();
+    waitForSensorsAndTf();
 
     std::vector<int> indices;
     if (run_all_) {
@@ -215,10 +274,9 @@ public:
     for (const int index : indices) {
       const ViewPlan & plan = plans.at(static_cast<std::size_t>(index));
       try {
-        const std::uint64_t sequence_before_motion = currentCloudSequence();
         callCommand("PTP", plan.service_pose_mm_spatial);
 
-        if (!waitUntilSettled()) {
+        if (!waitUntilSettledAndReached(plan)) {
           ++failed;
           callIdlingNoThrow();
           if (!continue_on_failure_) {
@@ -227,7 +285,9 @@ public:
           continue;
         }
 
-        auto cloud_message = captureCloudAfter(sequence_before_motion);
+        waitWithSpin(capture_delay_after_settle_sec_);
+        const std::uint64_t sequence_before_capture = currentCloudSequence();
+        auto cloud_message = captureCloudAfter(sequence_before_capture);
         saveView(plan, *cloud_message);
         ++completed;
       } catch (const std::exception & error) {
@@ -255,6 +315,29 @@ private:
     declare_parameter<std::string>("output_dir", "/tmp/nrs_scan_cpp");
     declare_parameter<std::string>("spatial_angle_unit", "degree");
 
+    // Actual-pose source. The transform must map the TF camera frame into world.
+    // When tf_camera_frame is empty, PointCloud2.header.frame_id is used.
+    declare_parameter<std::string>("world_frame", "world");
+    declare_parameter<std::string>("tf_camera_frame", "");
+    declare_parameter<double>("tf_lookup_timeout_sec", 1.0);
+    declare_parameter<bool>("allow_latest_tf_fallback", true);
+    declare_parameter<bool>("require_target_reached", true);
+    declare_parameter<double>("target_position_tolerance_m", 0.005);
+    declare_parameter<double>("target_orientation_tolerance_deg", 1.0);
+    declare_parameter<double>("capture_delay_after_settle_sec", 0.20);
+    declare_parameter<bool>("save_planned_world_debug", true);
+
+    // T_tf_camera_pointcloud_frame converts the TF-published camera frame into
+    // the coordinate frame used by PointCloud2. Keep identity when both frames
+    // are the same ROS optical frame. Use Rx(pi) when TF is USD/OpenGL camera
+    // (+Y up, -Z forward) and PointCloud2 is ROS optical (+Y down, +Z forward).
+    declare_parameter<std::vector<double>>(
+      "T_tf_camera_pointcloud_frame",
+      {1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0});
+
     declare_parameter<std::vector<double>>(
       "workpiece_center_m", {0.65, 0.30, 0.06545485});
     declare_parameter<std::vector<double>>(
@@ -263,6 +346,8 @@ private:
       "scan_target_offset_from_center_m", {0.0, 0.0, 0.06545485});
     declare_parameter<double>("scan_radius_m", 0.60);
     declare_parameter<double>("bbox_margin_m", 0.02);
+    declare_parameter<double>("roi_bottom_offset_m", 0.003);
+    declare_parameter<double>("roi_top_margin_m", 0.020);
 
     declare_parameter<std::vector<double>>(
       "T_ee_tcp_m",
@@ -329,6 +414,20 @@ private:
     output_dir_ = get_parameter("output_dir").as_string();
     spatial_angle_degrees_ = get_parameter("spatial_angle_unit").as_string() == "degree";
 
+    world_frame_ = normalizeFrameId(get_parameter("world_frame").as_string());
+    tf_camera_frame_ = normalizeFrameId(get_parameter("tf_camera_frame").as_string());
+    tf_lookup_timeout_sec_ = get_parameter("tf_lookup_timeout_sec").as_double();
+    allow_latest_tf_fallback_ = get_parameter("allow_latest_tf_fallback").as_bool();
+    require_target_reached_ = get_parameter("require_target_reached").as_bool();
+    target_position_tolerance_m_ = get_parameter("target_position_tolerance_m").as_double();
+    target_orientation_tolerance_deg_ =
+      get_parameter("target_orientation_tolerance_deg").as_double();
+    capture_delay_after_settle_sec_ =
+      get_parameter("capture_delay_after_settle_sec").as_double();
+    save_planned_world_debug_ = get_parameter("save_planned_world_debug").as_bool();
+    t_tf_camera_pointcloud_m_ = matrixFromFlat16(
+      get_parameter("T_tf_camera_pointcloud_frame").as_double_array());
+
     workpiece_center_m_ = vector3FromParameter(
       get_parameter("workpiece_center_m").as_double_array(), "workpiece_center_m");
     workpiece_size_m_ = vector3FromParameter(
@@ -338,6 +437,8 @@ private:
       "scan_target_offset_from_center_m");
     scan_radius_m_ = get_parameter("scan_radius_m").as_double();
     bbox_margin_m_ = get_parameter("bbox_margin_m").as_double();
+    roi_bottom_offset_m_ = get_parameter("roi_bottom_offset_m").as_double();
+    roi_top_margin_m_ = get_parameter("roi_top_margin_m").as_double();
 
     t_ee_tcp_m_ = matrixFromFlat16(get_parameter("T_ee_tcp_m").as_double_array());
     t_ee_camera_gl_m_ = matrixFromFlat16(
@@ -374,6 +475,13 @@ private:
     depth_min_m_ = get_parameter("depth_min_m").as_double();
     depth_max_m_ = get_parameter("depth_max_m").as_double();
     preview_size_px_ = static_cast<int>(get_parameter("preview_size_px").as_int());
+
+    if (world_frame_.empty()) {
+      throw std::runtime_error("world_frame must not be empty");
+    }
+    if (target_position_tolerance_m_ <= 0.0 || target_orientation_tolerance_deg_ <= 0.0) {
+      throw std::runtime_error("Target pose tolerances must be positive");
+    }
   }
 
   std::vector<ViewPlan> makePlans() const
@@ -429,6 +537,10 @@ private:
       "Workpiece center [m]=[%.6f %.6f %.6f], scan target [m]=[%.6f %.6f %.6f]",
       workpiece_center_m_.x(), workpiece_center_m_.y(), workpiece_center_m_.z(),
       target.x(), target.y(), target.z());
+    RCLCPP_INFO(
+      get_logger(),
+      "Actual camera pose source: TF %s -> %s, correction frame matrix enabled",
+      world_frame_.c_str(), tf_camera_frame_.empty() ? "<PointCloud frame>" : tf_camera_frame_.c_str());
 
     for (const auto & plan : plans) {
       const auto & p = plan.service_pose_mm_spatial;
@@ -454,6 +566,9 @@ private:
     output << "workpiece_size_m " << workpiece_size_m_.transpose() << '\n';
     output << "scan_target_m " << (workpiece_center_m_ + scan_target_offset_m_).transpose() << '\n';
     output << "scan_radius_m " << scan_radius_m_ << '\n';
+    output << "world_frame " << world_frame_ << '\n';
+    output << "tf_camera_frame " << (tf_camera_frame_.empty() ? "<PointCloud frame>" : tf_camera_frame_) << '\n';
+    output << "T_tf_camera_pointcloud_frame\n" << t_tf_camera_pointcloud_m_ << '\n';
     for (const auto & plan : plans) {
       output << "\nview " << plan.index << ' ' << plan.name << '\n';
       output << "azimuth_deg " << plan.azimuth_deg << '\n';
@@ -464,8 +579,8 @@ private:
         output << ' ' << value;
       }
       output << '\n';
-      output << "T_world_camera_ros_m\n" << plan.t_world_camera_ros_m << '\n';
-      output << "T_world_tcp_m\n" << plan.t_world_tcp_m << '\n';
+      output << "T_world_camera_ros_planned_m\n" << plan.t_world_camera_ros_m << '\n';
+      output << "T_world_tcp_planned_m\n" << plan.t_world_tcp_m << '\n';
     }
     RCLCPP_INFO(get_logger(), "Plan saved: %s", path.c_str());
   }
@@ -478,31 +593,68 @@ private:
     }
   }
 
-  void waitForSensors()
+  std::string resolvePointcloudFrame(const std::string & message_frame) const
+  {
+    const std::string frame = normalizeFrameId(message_frame);
+    if (frame.empty()) {
+      throw std::runtime_error("PointCloud2.header.frame_id is empty");
+    }
+    return frame;
+  }
+
+  std::string resolveTfCameraFrame(const std::string & pointcloud_frame) const
+  {
+    return tf_camera_frame_.empty() ? pointcloud_frame : tf_camera_frame_;
+  }
+
+  void waitForSensorsAndTf()
   {
     const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::duration<double>(sensor_startup_timeout_sec_);
+    std::string last_tf_error;
 
     while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
       rclcpp::spin_some(shared_from_this());
-      bool cloud_ready = false;
+      sensor_msgs::msg::PointCloud2::SharedPtr cloud;
       bool joint_ready = false;
       {
         std::lock_guard<std::mutex> lock(data_mutex_);
-        cloud_ready = static_cast<bool>(latest_cloud_);
+        cloud = latest_cloud_;
         joint_ready = static_cast<bool>(latest_joint_state_);
       }
-      if (cloud_ready && joint_ready) {
-        RCLCPP_INFO(
-          get_logger(), "Sensor streams ready: cloud_sequence=%lu joint_sequence=%lu",
-          static_cast<unsigned long>(currentCloudSequence()),
-          static_cast<unsigned long>(currentJointSequence()));
-        return;
+
+      if (cloud && joint_ready) {
+        try {
+          const std::string pointcloud_frame = resolvePointcloudFrame(cloud->header.frame_id);
+          const std::string tf_frame = resolveTfCameraFrame(pointcloud_frame);
+          const rclcpp::Time latest_time(0, 0, get_clock()->get_clock_type());
+          if (tf_buffer_->canTransform(
+              world_frame_, tf_frame, latest_time,
+              rclcpp::Duration::from_seconds(0.10), &last_tf_error))
+          {
+            RCLCPP_INFO(
+              get_logger(),
+              "Sensor and TF ready: cloud=%lu joint=%lu TF=%s <- %s PointCloud=%s",
+              static_cast<unsigned long>(currentCloudSequence()),
+              static_cast<unsigned long>(currentJointSequence()),
+              world_frame_.c_str(), tf_frame.c_str(), pointcloud_frame.c_str());
+            return;
+          }
+        } catch (const std::exception & error) {
+          last_tf_error = error.what();
+        }
       }
-      std::this_thread::sleep_for(10ms);
+      std::this_thread::sleep_for(20ms);
     }
-    throw std::runtime_error(
-            "No messages received from /camera or /isaac_joint_states before timeout");
+
+    std::ostringstream message;
+    message << "Sensor/TF startup timeout. Need PointCloud2, JointState, and TF "
+            << world_frame_ << " <- "
+            << (tf_camera_frame_.empty() ? "PointCloud2.header.frame_id" : tf_camera_frame_);
+    if (!last_tf_error.empty()) {
+      message << ". Last TF error: " << last_tf_error;
+    }
+    throw std::runtime_error(message.str());
   }
 
   void callCommand(const std::string & mode, const std::vector<double> & pose)
@@ -549,7 +701,71 @@ private:
     }
   }
 
-  bool waitUntilSettled()
+  Eigen::Matrix4d transformMessageToMatrix(
+    const geometry_msgs::msg::TransformStamped & transform) const
+  {
+    const Eigen::Isometry3d eigen_transform = tf2::transformToEigen(transform);
+    return eigen_transform.matrix();
+  }
+
+  ActualPoseResult lookupActualCameraPose(
+    const std::string & pointcloud_message_frame,
+    const rclcpp::Time & requested_time,
+    const bool allow_fallback)
+  {
+    ActualPoseResult result;
+    result.world_frame = world_frame_;
+    result.pointcloud_frame = resolvePointcloudFrame(pointcloud_message_frame);
+    result.tf_camera_frame = resolveTfCameraFrame(result.pointcloud_frame);
+
+    try {
+      result.transform_message = tf_buffer_->lookupTransform(
+        result.world_frame, result.tf_camera_frame, requested_time,
+        rclcpp::Duration::from_seconds(tf_lookup_timeout_sec_));
+    } catch (const tf2::TransformException & exact_error) {
+      if (!allow_fallback || !allow_latest_tf_fallback_) {
+        throw std::runtime_error(
+                "Exact TF lookup failed at requested timestamp: " +
+                std::string(exact_error.what()));
+      }
+      const rclcpp::Time latest_time(0, 0, get_clock()->get_clock_type());
+      try {
+        result.transform_message = tf_buffer_->lookupTransform(
+          result.world_frame, result.tf_camera_frame, latest_time,
+          rclcpp::Duration::from_seconds(tf_lookup_timeout_sec_));
+        result.used_latest_fallback = true;
+        RCLCPP_WARN(
+          get_logger(),
+          "Exact TF lookup failed; using latest TF because robot is settled. Exact error: %s",
+          exact_error.what());
+      } catch (const tf2::TransformException & latest_error) {
+        throw std::runtime_error(
+                "TF lookup failed. Exact: " + std::string(exact_error.what()) +
+                " | Latest: " + std::string(latest_error.what()));
+      }
+    }
+
+    const Eigen::Matrix4d t_world_tf_camera =
+      transformMessageToMatrix(result.transform_message);
+    result.t_world_pointcloud_m = t_world_tf_camera * t_tf_camera_pointcloud_m_;
+    return result;
+  }
+
+  ActualPoseResult lookupLatestActualCameraPose()
+  {
+    sensor_msgs::msg::PointCloud2::SharedPtr cloud;
+    {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      cloud = latest_cloud_;
+    }
+    if (!cloud) {
+      throw std::runtime_error("Cannot resolve actual pose before PointCloud2 is received");
+    }
+    const rclcpp::Time latest_time(0, 0, get_clock()->get_clock_type());
+    return lookupActualCameraPose(cloud->header.frame_id, latest_time, false);
+  }
+
+  bool waitUntilSettledAndReached(const ViewPlan & plan)
   {
     using Clock = std::chrono::steady_clock;
     struct PositionSample
@@ -560,7 +776,9 @@ private:
 
     std::deque<PositionSample> samples;
     const auto start = Clock::now();
+    auto last_status_log = start - 10s;
     std::uint64_t last_sequence = 0;
+    std::optional<PoseError> last_pose_error;
 
     while (rclcpp::ok()) {
       rclcpp::spin_some(shared_from_this());
@@ -610,20 +828,60 @@ private:
           }
 
           if (consistent_size && maximum_range <= joint_position_window_threshold_rad_) {
-            RCLCPP_INFO(
-              get_logger(),
-              "Robot settled: max joint position range over %.2f s = %.8f rad",
-              covered_window, maximum_range);
-            return true;
+            try {
+              const ActualPoseResult actual = lookupLatestActualCameraPose();
+              const PoseError pose_error = calculatePoseError(
+                plan.t_world_camera_ros_m, actual.t_world_pointcloud_m);
+              last_pose_error = pose_error;
+
+              const bool target_reached =
+                pose_error.position_m <= target_position_tolerance_m_ &&
+                pose_error.orientation_deg <= target_orientation_tolerance_deg_;
+
+              if (!require_target_reached_ || target_reached) {
+                RCLCPP_INFO(
+                  get_logger(),
+                  "Robot settled and target reached: joint_range=%.8f rad, "
+                  "camera_position_error=%.6f m, camera_orientation_error=%.4f deg",
+                  maximum_range, pose_error.position_m, pose_error.orientation_deg);
+                return true;
+              }
+
+              if (now - last_status_log >= 1s) {
+                last_status_log = now;
+                RCLCPP_WARN(
+                  get_logger(),
+                  "Robot is stationary but target pose is outside tolerance: "
+                  "position=%.6f m (limit %.6f), orientation=%.4f deg (limit %.4f)",
+                  pose_error.position_m, target_position_tolerance_m_,
+                  pose_error.orientation_deg, target_orientation_tolerance_deg_);
+              }
+            } catch (const std::exception & error) {
+              if (now - last_status_log >= 1s) {
+                last_status_log = now;
+                RCLCPP_WARN(
+                  get_logger(), "Robot is stationary but actual camera TF is unavailable: %s",
+                  error.what());
+              }
+            }
           }
         }
       }
 
       if (elapsed >= maximum_settle_sec_) {
-        RCLCPP_ERROR(
-          get_logger(),
-          "Robot did not settle within %.1f s. Capture is forbidden.",
-          maximum_settle_sec_);
+        if (last_pose_error.has_value()) {
+          RCLCPP_ERROR(
+            get_logger(),
+            "Capture forbidden after %.1f s: final camera error position=%.6f m, "
+            "orientation=%.4f deg",
+            maximum_settle_sec_, last_pose_error->position_m,
+            last_pose_error->orientation_deg);
+        } else {
+          RCLCPP_ERROR(
+            get_logger(),
+            "Capture forbidden: robot did not settle/reach target within %.1f s",
+            maximum_settle_sec_);
+        }
         return false;
       }
       std::this_thread::sleep_for(10ms);
@@ -631,8 +889,21 @@ private:
     return false;
   }
 
+  void waitWithSpin(const double seconds)
+  {
+    if (seconds <= 0.0) {
+      return;
+    }
+    const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::duration<double>(seconds);
+    while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+      rclcpp::spin_some(shared_from_this());
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+
   sensor_msgs::msg::PointCloud2::SharedPtr captureCloudAfter(
-    const std::uint64_t sequence_before_motion)
+    const std::uint64_t sequence_before_capture)
   {
     const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::duration<double>(pointcloud_timeout_sec_);
@@ -640,16 +911,23 @@ private:
       rclcpp::spin_some(shared_from_this());
       {
         std::lock_guard<std::mutex> lock(data_mutex_);
-        if (latest_cloud_ && cloud_sequence_ > sequence_before_motion) {
+        if (latest_cloud_ && cloud_sequence_ > sequence_before_capture) {
           RCLCPP_INFO(
-            get_logger(), "Using post-command cloud: sequence=%lu frame=%s",
-            static_cast<unsigned long>(cloud_sequence_), latest_cloud_->header.frame_id.c_str());
+            get_logger(), "Using fresh post-settle cloud: sequence=%lu frame=%s stamp=%d.%09u",
+            static_cast<unsigned long>(cloud_sequence_), latest_cloud_->header.frame_id.c_str(),
+            latest_cloud_->header.stamp.sec, latest_cloud_->header.stamp.nanosec);
           return latest_cloud_;
         }
       }
       std::this_thread::sleep_for(10ms);
     }
-    throw std::runtime_error("No fresh PointCloud2 received after motion command");
+    throw std::runtime_error("No fresh PointCloud2 received after settle completion");
+  }
+
+  sensor_msgs::msg::JointState::SharedPtr latestJointStateSnapshot() const
+  {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    return latest_joint_state_;
   }
 
   void saveDepthImages(
@@ -714,8 +992,8 @@ private:
     const int size = std::max(256, preview_size_px_);
     cv::Mat height_image(size, size, CV_32FC1, cv::Scalar(-1.0f));
 
-    const double width_x = bbox_max.x() - bbox_min.x();
-    const double width_y = bbox_max.y() - bbox_min.y();
+    const double width_x = std::max(1.0e-9, bbox_max.x() - bbox_min.x());
+    const double width_y = std::max(1.0e-9, bbox_max.y() - bbox_min.y());
     const double width_z = std::max(1.0e-9, bbox_max.z() - bbox_min.z());
 
     for (const auto & point : cloud.points) {
@@ -748,7 +1026,7 @@ private:
     }
   }
 
-  void saveView(const ViewPlan & plan, const sensor_msgs::msg::PointCloud2 & message) const
+  void saveView(const ViewPlan & plan, const sensor_msgs::msg::PointCloud2 & message)
   {
     std::ostringstream directory_name;
     directory_name << std::setw(2) << std::setfill('0') << plan.index << '_' << plan.name;
@@ -764,19 +1042,53 @@ private:
     }
     saveDepthImages(*cloud_camera, view_dir);
 
+    const rclcpp::Time cloud_time(message.header.stamp, get_clock()->get_clock_type());
+    const ActualPoseResult actual_pose = lookupActualCameraPose(
+      message.header.frame_id, cloud_time, true);
+    const PoseError capture_error = calculatePoseError(
+      plan.t_world_camera_ros_m, actual_pose.t_world_pointcloud_m);
+
+    if (require_target_reached_ &&
+      (capture_error.position_m > target_position_tolerance_m_ ||
+      capture_error.orientation_deg > target_orientation_tolerance_deg_))
+    {
+      std::ostringstream error;
+      error << std::fixed << std::setprecision(6)
+            << "Fresh cloud arrived, but actual camera pose left target tolerance. position="
+            << capture_error.position_m << " m, orientation="
+            << capture_error.orientation_deg << " deg. Capture rejected.";
+      throw std::runtime_error(error.str());
+    }
+
     auto cloud_world = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     pcl::transformPointCloud(
-      *cloud_camera, *cloud_world, plan.t_world_camera_ros_m.cast<float>());
+      *cloud_camera, *cloud_world, actual_pose.t_world_pointcloud_m.cast<float>());
     const fs::path world_pcd = view_dir / "cloud_world.pcd";
     if (pcl::io::savePCDFileBinary(world_pcd.string(), *cloud_world) != 0) {
-      throw std::runtime_error("Failed to save world-frame PCD");
+      throw std::runtime_error("Failed to save actual-pose world-frame PCD");
+    }
+
+    if (save_planned_world_debug_) {
+      auto cloud_world_planned = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+      pcl::transformPointCloud(
+        *cloud_camera, *cloud_world_planned, plan.t_world_camera_ros_m.cast<float>());
+      const fs::path planned_debug_pcd = view_dir / "cloud_world_planned_debug.pcd";
+      if (pcl::io::savePCDFileBinary(
+          planned_debug_pcd.string(), *cloud_world_planned) != 0)
+      {
+        throw std::runtime_error("Failed to save planned-pose debug PCD");
+      }
     }
 
     const Eigen::Vector3d half_size = 0.5 * workpiece_size_m_;
-    const Eigen::Vector3d bbox_min = workpiece_center_m_ - half_size -
-      Eigen::Vector3d::Constant(bbox_margin_m_);
-    const Eigen::Vector3d bbox_max = workpiece_center_m_ + half_size +
-      Eigen::Vector3d::Constant(bbox_margin_m_);
+    Eigen::Vector3d bbox_min = workpiece_center_m_ - half_size;
+    Eigen::Vector3d bbox_max = workpiece_center_m_ + half_size;
+    bbox_min.x() -= bbox_margin_m_;
+    bbox_min.y() -= bbox_margin_m_;
+    bbox_max.x() += bbox_margin_m_;
+    bbox_max.y() += bbox_margin_m_;
+    bbox_min.z() += roi_bottom_offset_m_;
+    bbox_max.z() += roi_top_margin_m_;
 
     auto cloud_roi = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     cloud_roi->reserve(cloud_world->size());
@@ -804,27 +1116,69 @@ private:
     saveTopDownPreview(
       *cloud_roi, bbox_min, bbox_max, view_dir / "pcd_topdown_preview.png");
 
+    const auto joint_state = latestJointStateSnapshot();
+    const Eigen::Vector3d actual_camera_position =
+      actual_pose.t_world_pointcloud_m.block<3, 1>(0, 3);
+
     const fs::path metadata_path = view_dir / "metadata.txt";
     std::ofstream metadata(metadata_path);
+    if (!metadata) {
+      throw std::runtime_error("Failed to write metadata.txt");
+    }
     metadata << std::fixed << std::setprecision(9);
     metadata << "view_index " << plan.index << '\n';
     metadata << "view_name " << plan.name << '\n';
     metadata << "pointcloud_frame_id " << message.header.frame_id << '\n';
+    metadata << "pointcloud_stamp_sec " << message.header.stamp.sec << '\n';
+    metadata << "pointcloud_stamp_nanosec " << message.header.stamp.nanosec << '\n';
+    metadata << "world_frame " << actual_pose.world_frame << '\n';
+    metadata << "tf_camera_frame " << actual_pose.tf_camera_frame << '\n';
+    metadata << "tf_used_latest_fallback "
+             << (actual_pose.used_latest_fallback ? "true" : "false") << '\n';
+    metadata << "tf_stamp_sec " << actual_pose.transform_message.header.stamp.sec << '\n';
+    metadata << "tf_stamp_nanosec " << actual_pose.transform_message.header.stamp.nanosec << '\n';
     metadata << "organized_width " << cloud_camera->width << '\n';
     metadata << "organized_height " << cloud_camera->height << '\n';
     metadata << "raw_point_slots " << cloud_camera->size() << '\n';
     metadata << "roi_point_count " << cloud_roi->size() << '\n';
-    metadata << "camera_position_world_m " << plan.camera_position_world_m.transpose() << '\n';
+    metadata << "camera_position_world_m " << actual_camera_position.transpose() << '\n';
+    metadata << "camera_position_planned_world_m "
+             << plan.camera_position_world_m.transpose() << '\n';
+    metadata << "camera_position_actual_world_m "
+             << actual_camera_position.transpose() << '\n';
+    metadata << "camera_position_error_m " << capture_error.position_m << '\n';
+    metadata << "camera_orientation_error_deg " << capture_error.orientation_deg << '\n';
+    metadata << "roi_bbox_min_world_m " << bbox_min.transpose() << '\n';
+    metadata << "roi_bbox_max_world_m " << bbox_max.transpose() << '\n';
     metadata << "service_pose_mm_spatial";
     for (const double value : plan.service_pose_mm_spatial) {
       metadata << ' ' << value;
     }
     metadata << '\n';
-    metadata << "T_world_camera_ros_m\n" << plan.t_world_camera_ros_m << '\n';
+    metadata << "T_world_camera_ros_planned_m\n" << plan.t_world_camera_ros_m << '\n';
+    metadata << "T_world_camera_ros_actual_m\n" << actual_pose.t_world_pointcloud_m << '\n';
+    metadata << "T_tf_camera_pointcloud_frame\n" << t_tf_camera_pointcloud_m_ << '\n';
+
+    if (joint_state) {
+      metadata << "joint_state_stamp_sec " << joint_state->header.stamp.sec << '\n';
+      metadata << "joint_state_stamp_nanosec " << joint_state->header.stamp.nanosec << '\n';
+      metadata << "joint_names";
+      for (const auto & name : joint_state->name) {
+        metadata << ' ' << name;
+      }
+      metadata << '\n';
+      metadata << "joint_positions_rad";
+      for (const double position : joint_state->position) {
+        metadata << ' ' << position;
+      }
+      metadata << '\n';
+    }
 
     RCLCPP_INFO(
-      get_logger(), "CAPTURED %s: raw_slots=%zu roi=%zu output=%s",
-      plan.name.c_str(), cloud_camera->size(), cloud_roi->size(), view_dir.c_str());
+      get_logger(),
+      "CAPTURED %s: raw=%zu roi=%zu actual_pose_error=[%.6f m, %.4f deg] output=%s",
+      plan.name.c_str(), cloud_camera->size(), cloud_roi->size(),
+      capture_error.position_m, capture_error.orientation_deg, view_dir.c_str());
   }
 
   std::uint64_t currentCloudSequence() const
@@ -845,11 +1199,24 @@ private:
   std::string output_dir_;
   bool spatial_angle_degrees_{true};
 
+  std::string world_frame_{"world"};
+  std::string tf_camera_frame_;
+  double tf_lookup_timeout_sec_{1.0};
+  bool allow_latest_tf_fallback_{true};
+  bool require_target_reached_{true};
+  double target_position_tolerance_m_{0.005};
+  double target_orientation_tolerance_deg_{1.0};
+  double capture_delay_after_settle_sec_{0.20};
+  bool save_planned_world_debug_{true};
+  Eigen::Matrix4d t_tf_camera_pointcloud_m_{Eigen::Matrix4d::Identity()};
+
   Eigen::Vector3d workpiece_center_m_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d workpiece_size_m_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d scan_target_offset_m_{Eigen::Vector3d::Zero()};
   double scan_radius_m_{0.6};
   double bbox_margin_m_{0.02};
+  double roi_bottom_offset_m_{0.003};
+  double roi_top_margin_m_{0.020};
 
   Eigen::Matrix4d t_ee_tcp_m_{Eigen::Matrix4d::Identity()};
   Eigen::Matrix4d t_ee_camera_gl_m_{Eigen::Matrix4d::Identity()};
@@ -882,6 +1249,8 @@ private:
   std::uint64_t cloud_sequence_{0};
   std::uint64_t joint_sequence_{0};
 
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_sub_;
   rclcpp::Client<y2_rob_motion_interfaces::srv::SingleArmCommand>::SharedPtr command_client_;

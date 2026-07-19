@@ -15,6 +15,7 @@
 #include <pcl/common/common.h>
 #include <pcl/common/io.h>
 #include <pcl/features/normal_3d_omp.h>
+#include <pcl/filters/passthrough.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
@@ -26,7 +27,6 @@
 #include <pcl/search/kdtree.h>
 #include <pcl/surface/gp3.h>
 #include <pcl/surface/poisson.h>
-
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -53,6 +53,11 @@ public:
     declare_parameter<double>("gp3_mu", 2.5);
     declare_parameter<int>("gp3_max_neighbors", 100);
     declare_parameter<int>("preview_size_px", 1024);
+    declare_parameter<bool>("crop_z_enabled", true);
+    declare_parameter<double>("crop_min_z_m", 0.003);
+    declare_parameter<double>("crop_max_z_m", 0.180);
+    declare_parameter<std::vector<std::string>>(
+      "excluded_view_names", std::vector<std::string>{});
 
     scan_dir_ = get_parameter("scan_dir").as_string();
     voxel_size_m_ = get_parameter("voxel_size_m").as_double();
@@ -66,6 +71,13 @@ public:
     gp3_mu_ = get_parameter("gp3_mu").as_double();
     gp3_max_neighbors_ = static_cast<int>(get_parameter("gp3_max_neighbors").as_int());
     preview_size_px_ = static_cast<int>(get_parameter("preview_size_px").as_int());
+    crop_z_enabled_ = get_parameter("crop_z_enabled").as_bool();
+    crop_min_z_m_ = get_parameter("crop_min_z_m").as_double();
+    crop_max_z_m_ = get_parameter("crop_max_z_m").as_double();
+    excluded_view_names_ = get_parameter("excluded_view_names").as_string_array();
+    if (crop_z_enabled_ && crop_min_z_m_ >= crop_max_z_m_) {
+      throw std::runtime_error("crop_min_z_m must be smaller than crop_max_z_m");
+    }
   }
 
   int run()
@@ -89,14 +101,41 @@ public:
     auto merged = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     std::vector<std::pair<std::string, std::size_t>> per_view_counts;
     for (const auto & file : input_files) {
-      pcl::PointCloud<pcl::PointXYZ> cloud;
-      if (pcl::io::loadPCDFile(file.string(), cloud) != 0) {
+      const std::string view_name = file.parent_path().filename().string();
+      if (std::find(
+          excluded_view_names_.begin(), excluded_view_names_.end(), view_name) !=
+        excluded_view_names_.end())
+      {
+        RCLCPP_WARN(get_logger(), "SKIP excluded view: %s", view_name.c_str());
+        continue;
+      }
+
+      auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+      if (pcl::io::loadPCDFile(file.string(), *cloud) != 0) {
         throw std::runtime_error("Failed to load PCD: " + file.string());
       }
-      per_view_counts.emplace_back(file.parent_path().filename().string(), cloud.size());
-      *merged += cloud;
+      const std::size_t loaded_count = cloud->size();
+
+      if (crop_z_enabled_) {
+        auto cropped = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+        pcl::PassThrough<pcl::PointXYZ> pass;
+        pass.setInputCloud(cloud);
+        pass.setFilterFieldName("z");
+        pass.setFilterLimits(
+          static_cast<float>(crop_min_z_m_), static_cast<float>(crop_max_z_m_));
+        pass.filter(*cropped);
+        cloud = cropped;
+      }
+
+      per_view_counts.emplace_back(view_name, cloud->size());
+      *merged += *cloud;
       RCLCPP_INFO(
-        get_logger(), "LOAD %s points=%zu", file.c_str(), cloud.size());
+        get_logger(), "LOAD %s points=%zu -> %zu after Z crop",
+        file.c_str(), loaded_count, cloud->size());
+    }
+
+    if (merged->empty()) {
+      throw std::runtime_error("No points remain after view exclusion/Z crop");
     }
 
     merged->width = static_cast<std::uint32_t>(merged->size());
@@ -171,9 +210,9 @@ public:
     gp3.setSearchRadius(gp3_search_radius_m_);
     gp3.setMu(gp3_mu_);
     gp3.setMaximumNearestNeighbors(gp3_max_neighbors_);
-    gp3.setMaximumSurfaceAngle(M_PI / 4.0);
-    gp3.setMinimumAngle(M_PI / 18.0);
-    gp3.setMaximumAngle(2.0 * M_PI / 3.0);
+    gp3.setMaximumSurfaceAngle(75.0 * M_PI / 180.0);
+    gp3.setMinimumAngle(5.0 * M_PI / 180.0);
+    gp3.setMaximumAngle(150.0 * M_PI / 180.0);
     gp3.setNormalConsistency(false);
     gp3.setInputCloud(point_normals);
     gp3.setSearchMethod(gp3_tree);
@@ -256,6 +295,12 @@ private:
     report << "filtered_point_count " << filtered_count << '\n';
     report << "voxel_size_m " << voxel_size_m_ << '\n';
     report << "normal_radius_m " << normal_radius_m_ << '\n';
+    report << "crop_z_enabled " << (crop_z_enabled_ ? "true" : "false") << '\n';
+    report << "crop_min_z_m " << crop_min_z_m_ << '\n';
+    report << "crop_max_z_m " << crop_max_z_m_ << '\n';
+    for (const auto & name : excluded_view_names_) {
+      report << "excluded_view " << name << '\n';
+    }
     report << "poisson_polygon_count " << poisson_polygons << '\n';
     report << "gp3_polygon_count " << gp3_polygons << '\n';
   }
@@ -272,6 +317,10 @@ private:
   double gp3_mu_{2.5};
   int gp3_max_neighbors_{100};
   int preview_size_px_{1024};
+  bool crop_z_enabled_{true};
+  double crop_min_z_m_{0.003};
+  double crop_max_z_m_{0.180};
+  std::vector<std::string> excluded_view_names_;
 };
 
 }  // namespace nrs_scan_cpp
