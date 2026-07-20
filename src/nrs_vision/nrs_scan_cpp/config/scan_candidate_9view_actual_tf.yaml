@@ -3,7 +3,7 @@ nrs_scan_capture_node:
     service_name: /singleArm_cmd/single_arm_command
     pointcloud_topic: /camera
     joint_state_topic: /isaac_joint_states
-    output_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_actual_tf_run1
+    output_dir: /home/eunseop/urp_data/sim_scan/workpiece_8_cpp_actual_tf_run2
     spatial_angle_unit: degree
 
     # 실제 촬영 pose는 TF에서 가져온다.
@@ -37,9 +37,9 @@ nrs_scan_capture_node:
     ]
 
     # 현재 촬영에 사용한 workpiece/scan 설정.
-    workpiece_center_m: [0.550000, 0.300000, 0.06545485]
-    workpiece_size_m: [0.4238959, 0.4238959, 0.1309097]
-    scan_target_offset_from_center_m: [0.0, 0.0, 0.040]
+    workpiece_center_m: [0.550000, 0.300000, 0.035]
+    workpiece_size_m: [0.38, 0.220, 0.08]
+    scan_target_offset_from_center_m: [0.0, 0.0, 0.0150]
     scan_radius_m: 0.680
 
     # XY crop margin. Z 하한은 별도로 공작물 바닥보다 3 mm 위로 올려

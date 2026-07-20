@@ -1,0 +1,36 @@
+reconstruct_regularized_node:
+  ros__parameters:
+    scan_dir: ""
+    view_filename: "cloud_world_roi.pcd"
+
+    voxel_leaf_size_m: 0.003
+
+    enable_sor: true
+    sor_mean_k: 20
+    sor_stddev_mul: 3.0
+
+    normal_radius_m: 0.012
+
+    gp3_search_radius_m: 0.016
+    gp3_mu: 3.5
+    gp3_max_neighbors: 150
+    gp3_max_surface_angle_deg: 75.0
+    gp3_min_triangle_angle_deg: 5.0
+    gp3_max_triangle_angle_deg: 150.0
+    gp3_normal_consistency: false
+
+    enable_mesh_regularization: true
+    mesh_smooth_iterations: 20
+    mesh_smooth_passband: 0.10
+    mesh_normalize_coordinates: true
+    mesh_boundary_smoothing: false
+    mesh_feature_edge_smoothing: false
+    mesh_feature_angle_deg: 60.0
+    mesh_edge_angle_deg: 15.0
+    mesh_target_faces: 3000
+
+    merged_raw_name: "merged_raw_regularized.pcd"
+    merged_filtered_name: "merged_filtered_regularized.pcd"
+    gp3_raw_name: "reconstructed_gp3_raw.stl"
+    gp3_smoothed_name: "reconstructed_gp3_smoothed.stl"
+    gp3_regularized_name: "reconstructed_gp3_regularized.stl"

@@ -68,39 +68,4 @@ install(DIRECTORY config isaac scripts
   DESTINATION share/${PROJECT_NAME}
 )
 
-
-# ------------------------------------------------------------------
-# Regularized GP3 reconstruction node
-# ------------------------------------------------------------------
-add_executable(reconstruct_regularized_node
-  src/reconstruct_regularized_node.cpp
-)
-
-target_compile_features(reconstruct_regularized_node PUBLIC cxx_std_17)
-
-ament_target_dependencies(reconstruct_regularized_node
-  rclcpp
-)
-
-target_include_directories(reconstruct_regularized_node PRIVATE
-  ${PCL_INCLUDE_DIRS}
-)
-
-target_compile_definitions(reconstruct_regularized_node PRIVATE
-  ${PCL_DEFINITIONS}
-)
-
-target_link_directories(reconstruct_regularized_node PRIVATE
-  ${PCL_LIBRARY_DIRS}
-)
-
-target_link_libraries(reconstruct_regularized_node
-  ${PCL_LIBRARIES}
-)
-
-install(TARGETS
-  reconstruct_regularized_node
-  DESTINATION lib/${PROJECT_NAME}
-)
-
 ament_package()

@@ -13,13 +13,14 @@ nrs_reconstruct_node:
     crop_max_z_m: 0.180
 
     voxel_size_m: 0.003
-    sor_mean_k: 30
-    sor_stddev_mul: 1.5
+    sor_mean_k: 20
+    sor_stddev_mul: 3.0
     ror_radius_m: 0.010
     ror_min_neighbors: 4
-    normal_radius_m: 0.015
+    normal_radius_m: 0.012
     poisson_depth: 9
-    gp3_search_radius_m: 0.018
-    gp3_mu: 3.0
-    gp3_max_neighbors: 100
+    gp3_search_radius_m: 0.016
+    gp3_mu: 3.5
+    gp3_max_neighbors: 150
     preview_size_px: 1024
+    
