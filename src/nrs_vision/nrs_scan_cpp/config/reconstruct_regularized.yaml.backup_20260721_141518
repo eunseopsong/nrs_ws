@@ -3,24 +3,16 @@ reconstruct_regularized_node:
     scan_dir: ""
     view_filename: "cloud_world_roi.pcd"
 
-    # 기존 reconstruct_node와 동일:
-    # 각 view를 병합하기 전에 world Z 범위를 먼저 자른다.
-    crop_z_enabled: true
-    crop_min_z_m: 0.003
-    crop_max_z_m: 0.180
-
-    # 현재 성공했던 메쉬 입력 밀도 설정
     voxel_leaf_size_m: 0.003
 
-    # SOR는 현재의 완화값 유지
+    # World 좌표계 바닥 높이가 z=0일 때 권장 시작값.
+    # z <= 0.006 m 점을 제거한다.
+    enable_ground_z_filter: true
+    ground_z_max_m: 0.006
+
     enable_sor: true
     sor_mean_k: 20
     sor_stddev_mul: 3.0
-
-    # 기존 reconstruct_node와 동일한 ROR 단계
-    enable_ror: true
-    ror_radius_m: 0.010
-    ror_min_neighbors: 4
 
     normal_radius_m: 0.012
 
@@ -42,17 +34,9 @@ reconstruct_regularized_node:
     mesh_edge_angle_deg: 15.0
     mesh_target_faces: 3000
 
-    # Blender Edit Mode의 Recalculate Outside에 해당.
-    # 최종 face winding을 연결 성분별로 일관화하고 바깥쪽으로 정렬한다.
-    enable_mesh_orientation_fix: true
-    mesh_orientation_hint_x: 0.0
-    mesh_orientation_hint_y: 0.0
-    mesh_orientation_hint_z: 1.0
-
     merged_raw_name: "merged_raw_regularized.pcd"
-    z_cropped_merged_name: "merged_z_cropped_regularized.pcd"
+    ground_removed_name: "merged_ground_removed.pcd"
     merged_filtered_name: "merged_filtered_regularized.pcd"
     gp3_raw_name: "reconstructed_gp3_raw.stl"
     gp3_smoothed_name: "reconstructed_gp3_smoothed.stl"
-    gp3_unoriented_name: "reconstructed_gp3_regularized_unoriented.stl"
     gp3_regularized_name: "reconstructed_gp3_regularized.stl"

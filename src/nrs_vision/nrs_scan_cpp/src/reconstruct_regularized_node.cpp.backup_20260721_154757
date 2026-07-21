@@ -1,15 +1,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <queue>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
@@ -108,16 +103,6 @@ public:
     mesh_target_faces_ =
       declare_parameter<int>("mesh_target_faces", 3000);
 
-    // Blender의 Recalculate Outside에 해당하는 최종 face winding 정리.
-    enable_mesh_orientation_fix_ =
-      declare_parameter<bool>("enable_mesh_orientation_fix", true);
-    mesh_orientation_hint_x_ =
-      declare_parameter<double>("mesh_orientation_hint_x", 0.0);
-    mesh_orientation_hint_y_ =
-      declare_parameter<double>("mesh_orientation_hint_y", 0.0);
-    mesh_orientation_hint_z_ =
-      declare_parameter<double>("mesh_orientation_hint_z", 1.0);
-
     merged_raw_name_ =
       declare_parameter<std::string>("merged_raw_name", "merged_raw_regularized.pcd");
     z_cropped_merged_name_ =
@@ -131,9 +116,6 @@ public:
     gp3_smoothed_name_ =
       declare_parameter<std::string>(
       "gp3_smoothed_name", "reconstructed_gp3_smoothed.stl");
-    gp3_unoriented_name_ =
-      declare_parameter<std::string>(
-      "gp3_unoriented_name", "reconstructed_gp3_regularized_unoriented.stl");
     gp3_regularized_name_ =
       declare_parameter<std::string>(
       "gp3_regularized_name", "reconstructed_gp3_regularized.stl");
@@ -216,14 +198,6 @@ public:
       final_mesh = decimateMesh(smoothed_mesh, mesh_target_faces_);
     }
 
-    // 비교용으로 orientation 수정 전 결과도 남긴다.
-    saveMesh(scan_dir / gp3_unoriented_name_, final_mesh);
-
-    if (enable_mesh_orientation_fix_) {
-      final_mesh = orientMeshOutside(final_mesh);
-    }
-
-    // 경로 생성에는 이 파일을 사용한다.
     saveMesh(scan_dir / gp3_regularized_name_, final_mesh);
 
     RCLCPP_INFO(
@@ -302,16 +276,6 @@ private:
     {
       throw std::runtime_error(
               "mesh_smooth_passband must be in the range (0, 2].");
-    }
-
-    const double hint_norm = std::sqrt(
-      mesh_orientation_hint_x_ * mesh_orientation_hint_x_ +
-      mesh_orientation_hint_y_ * mesh_orientation_hint_y_ +
-      mesh_orientation_hint_z_ * mesh_orientation_hint_z_);
-
-    if (enable_mesh_orientation_fix_ && hint_norm <= 1.0e-12) {
-      throw std::runtime_error(
-              "mesh orientation hint vector must not be zero.");
     }
   }
 
@@ -580,430 +544,6 @@ private:
     return output;
   }
 
-
-  struct Vec3d
-  {
-    double x{0.0};
-    double y{0.0};
-    double z{0.0};
-  };
-
-  struct EdgeKey
-  {
-    std::uint32_t a{0U};
-    std::uint32_t b{0U};
-
-    bool operator==(const EdgeKey & other) const
-    {
-      return a == other.a && b == other.b;
-    }
-  };
-
-  struct EdgeKeyHash
-  {
-    std::size_t operator()(const EdgeKey & edge) const noexcept
-    {
-      const std::size_t h1 = std::hash<std::uint32_t>{}(edge.a);
-      const std::size_t h2 = std::hash<std::uint32_t>{}(edge.b);
-      return h1 ^ (h2 + 0x9e3779b9U + (h1 << 6U) + (h1 >> 2U));
-    }
-  };
-
-  struct EdgeUse
-  {
-    std::size_t face_index{0U};
-    int direction{1};  // +1: min->max, -1: max->min
-  };
-
-  struct FaceNeighbor
-  {
-    std::size_t face_index{0U};
-    bool xor_flip{false};
-  };
-
-  static Vec3d subtract(const PointT & a, const PointT & b)
-  {
-    return Vec3d{
-      static_cast<double>(a.x - b.x),
-      static_cast<double>(a.y - b.y),
-      static_cast<double>(a.z - b.z)};
-  }
-
-  static Vec3d subtract(const Vec3d & a, const Vec3d & b)
-  {
-    return Vec3d{a.x - b.x, a.y - b.y, a.z - b.z};
-  }
-
-  static Vec3d cross(const Vec3d & a, const Vec3d & b)
-  {
-    return Vec3d{
-      a.y * b.z - a.z * b.y,
-      a.z * b.x - a.x * b.z,
-      a.x * b.y - a.y * b.x};
-  }
-
-  static double dot(const Vec3d & a, const Vec3d & b)
-  {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-  }
-
-  static double norm(const Vec3d & value)
-  {
-    return std::sqrt(dot(value, value));
-  }
-
-  pcl::PolygonMesh orientMeshOutside(
-    const pcl::PolygonMesh & input) const
-  {
-    if (input.polygons.empty()) {
-      throw std::runtime_error(
-              "orientMeshOutside received an empty mesh.");
-    }
-
-    pcl::PolygonMesh output = input;
-
-    pcl::PointCloud<PointT> vertices;
-    pcl::fromPCLPointCloud2(output.cloud, vertices);
-
-    if (vertices.empty()) {
-      throw std::runtime_error(
-              "Mesh contains no vertices.");
-    }
-
-    using EdgeMap =
-      std::unordered_map<EdgeKey, std::vector<EdgeUse>, EdgeKeyHash>;
-
-    EdgeMap edge_uses;
-    std::vector<bool> valid_face(output.polygons.size(), true);
-    std::size_t invalid_face_count = 0U;
-
-    // 1. 모든 polygon edge의 방향을 기록한다.
-    for (std::size_t face_index = 0U;
-      face_index < output.polygons.size();
-      ++face_index)
-    {
-      const auto & polygon = output.polygons[face_index];
-      const auto & ids = polygon.vertices;
-
-      if (ids.size() < 3U) {
-        valid_face[face_index] = false;
-        ++invalid_face_count;
-        continue;
-      }
-
-      bool indices_valid = true;
-      for (const std::uint32_t id : ids) {
-        if (id >= vertices.size()) {
-          indices_valid = false;
-          break;
-        }
-      }
-
-      if (!indices_valid) {
-        valid_face[face_index] = false;
-        ++invalid_face_count;
-        continue;
-      }
-
-      for (std::size_t i = 0U; i < ids.size(); ++i) {
-        const std::uint32_t u = ids[i];
-        const std::uint32_t v = ids[(i + 1U) % ids.size()];
-
-        if (u == v) {
-          continue;
-        }
-
-        const EdgeKey key{
-          std::min(u, v),
-          std::max(u, v)};
-
-        const int direction =
-          (u == key.a && v == key.b) ? 1 : -1;
-
-        edge_uses[key].push_back(
-          EdgeUse{face_index, direction});
-      }
-    }
-
-    // 2. 공유 edge를 따라 이웃 face winding이 서로 반대가 되도록
-    //    XOR 제약 그래프를 만든다.
-    std::vector<std::vector<FaceNeighbor>> adjacency(
-      output.polygons.size());
-
-    std::size_t boundary_edge_count = 0U;
-    std::size_t nonmanifold_edge_count = 0U;
-
-    for (const auto & [edge, uses] : edge_uses) {
-      (void)edge;
-
-      if (uses.size() == 1U) {
-        ++boundary_edge_count;
-        continue;
-      }
-
-      if (uses.size() > 2U) {
-        ++nonmanifold_edge_count;
-      }
-
-      // 비매니폴드 edge도 첫 face를 기준으로 가능한 만큼 정렬한다.
-      const EdgeUse & reference = uses.front();
-
-      for (std::size_t i = 1U; i < uses.size(); ++i) {
-        const EdgeUse & current = uses[i];
-
-        // 원래 같은 방향으로 edge를 순회하면 둘 중 하나를 뒤집어야 한다.
-        const bool xor_flip =
-          reference.direction == current.direction;
-
-        adjacency[reference.face_index].push_back(
-          FaceNeighbor{current.face_index, xor_flip});
-        adjacency[current.face_index].push_back(
-          FaceNeighbor{reference.face_index, xor_flip});
-      }
-    }
-
-    // 3. 연결 성분별 BFS로 local winding을 일관화한다.
-    std::vector<int> face_flip(output.polygons.size(), -1);
-    std::vector<int> component_id(output.polygons.size(), -1);
-    std::vector<std::vector<std::size_t>> components;
-
-    std::size_t winding_conflict_count = 0U;
-
-    for (std::size_t start = 0U;
-      start < output.polygons.size();
-      ++start)
-    {
-      if (!valid_face[start] || face_flip[start] != -1) {
-        continue;
-      }
-
-      const int current_component =
-        static_cast<int>(components.size());
-
-      components.emplace_back();
-      std::queue<std::size_t> pending;
-
-      face_flip[start] = 0;
-      component_id[start] = current_component;
-      pending.push(start);
-
-      while (!pending.empty()) {
-        const std::size_t face_index = pending.front();
-        pending.pop();
-
-        components.back().push_back(face_index);
-
-        for (const FaceNeighbor & neighbor :
-          adjacency[face_index])
-        {
-          if (!valid_face[neighbor.face_index]) {
-            continue;
-          }
-
-          const int expected_flip =
-            face_flip[face_index] ^
-            static_cast<int>(neighbor.xor_flip);
-
-          if (face_flip[neighbor.face_index] == -1) {
-            face_flip[neighbor.face_index] = expected_flip;
-            component_id[neighbor.face_index] = current_component;
-            pending.push(neighbor.face_index);
-          } else if (
-            face_flip[neighbor.face_index] != expected_flip)
-          {
-            ++winding_conflict_count;
-          }
-        }
-      }
-    }
-
-    std::size_t locally_flipped_faces = 0U;
-
-    for (std::size_t i = 0U; i < output.polygons.size(); ++i) {
-      if (face_flip[i] == 1) {
-        std::reverse(
-          output.polygons[i].vertices.begin(),
-          output.polygons[i].vertices.end());
-        ++locally_flipped_faces;
-      }
-    }
-
-    // 방향 힌트. 열린 상부 가공면에서 안/밖 판정이 애매할 때 사용.
-    Vec3d orientation_hint{
-      mesh_orientation_hint_x_,
-      mesh_orientation_hint_y_,
-      mesh_orientation_hint_z_};
-
-    const double hint_length = norm(orientation_hint);
-    orientation_hint.x /= hint_length;
-    orientation_hint.y /= hint_length;
-    orientation_hint.z /= hint_length;
-
-    // 4. 연결 성분 전체가 안쪽을 향하면 component 전체를 뒤집는다.
-    std::size_t globally_flipped_components = 0U;
-
-    for (std::size_t component = 0U;
-      component < components.size();
-      ++component)
-    {
-      const auto & faces = components[component];
-
-      if (faces.empty()) {
-        continue;
-      }
-
-      std::unordered_set<std::uint32_t> component_vertices;
-
-      for (const std::size_t face_index : faces) {
-        for (const std::uint32_t vertex_id :
-          output.polygons[face_index].vertices)
-        {
-          component_vertices.insert(vertex_id);
-        }
-      }
-
-      Vec3d centroid;
-
-      for (const std::uint32_t id : component_vertices) {
-        centroid.x += vertices[id].x;
-        centroid.y += vertices[id].y;
-        centroid.z += vertices[id].z;
-      }
-
-      const double vertex_count =
-        static_cast<double>(component_vertices.size());
-
-      centroid.x /= vertex_count;
-      centroid.y /= vertex_count;
-      centroid.z /= vertex_count;
-
-      bool component_closed = true;
-
-      for (const auto & [edge, uses] : edge_uses) {
-        (void)edge;
-        std::size_t uses_in_component = 0U;
-
-        for (const EdgeUse & use : uses) {
-          if (
-            use.face_index < component_id.size() &&
-            component_id[use.face_index] ==
-            static_cast<int>(component))
-          {
-            ++uses_in_component;
-          }
-        }
-
-        if (uses_in_component != 0U &&
-          uses_in_component != 2U)
-        {
-          component_closed = false;
-          break;
-        }
-      }
-
-      double signed_volume = 0.0;
-      double radial_score = 0.0;
-      double hint_score = 0.0;
-      double doubled_area_sum = 0.0;
-
-      for (const std::size_t face_index : faces) {
-        const auto & ids =
-          output.polygons[face_index].vertices;
-
-        if (ids.size() < 3U) {
-          continue;
-        }
-
-        const PointT & p0 = vertices[ids[0]];
-
-        for (std::size_t k = 1U; k + 1U < ids.size(); ++k) {
-          const PointT & p1 = vertices[ids[k]];
-          const PointT & p2 = vertices[ids[k + 1U]];
-
-          const Vec3d e1 = subtract(p1, p0);
-          const Vec3d e2 = subtract(p2, p0);
-          const Vec3d area_normal = cross(e1, e2);
-
-          const Vec3d p0_vec{
-            static_cast<double>(p0.x),
-            static_cast<double>(p0.y),
-            static_cast<double>(p0.z)};
-
-          const Vec3d triangle_center{
-            (
-              static_cast<double>(p0.x) +
-              static_cast<double>(p1.x) +
-              static_cast<double>(p2.x)) / 3.0,
-            (
-              static_cast<double>(p0.y) +
-              static_cast<double>(p1.y) +
-              static_cast<double>(p2.y)) / 3.0,
-            (
-              static_cast<double>(p0.z) +
-              static_cast<double>(p1.z) +
-              static_cast<double>(p2.z)) / 3.0};
-
-          signed_volume +=
-            dot(p0_vec, area_normal) / 6.0;
-
-          radial_score +=
-            dot(
-            area_normal,
-            subtract(triangle_center, centroid));
-
-          hint_score +=
-            dot(area_normal, orientation_hint);
-
-          doubled_area_sum += norm(area_normal);
-        }
-      }
-
-      const double tolerance =
-        std::max(1.0e-15, doubled_area_sum * 1.0e-12);
-
-      bool flip_component = false;
-
-      if (component_closed &&
-        std::abs(signed_volume) > tolerance)
-      {
-        // 닫힌 메쉬는 signed volume이 양수가 되도록 정렬.
-        flip_component = signed_volume < 0.0;
-      } else if (std::abs(radial_score) > tolerance) {
-        // 열린 메쉬는 centroid에서 바깥쪽으로 향하는지 판정.
-        flip_component = radial_score < 0.0;
-      } else if (std::abs(hint_score) > tolerance) {
-        // 마지막 fallback: 기본 +Z 방향을 우세하게 만든다.
-        flip_component = hint_score < 0.0;
-      }
-
-      if (flip_component) {
-        for (const std::size_t face_index : faces) {
-          std::reverse(
-            output.polygons[face_index].vertices.begin(),
-            output.polygons[face_index].vertices.end());
-        }
-
-        ++globally_flipped_components;
-      }
-    }
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Mesh orientation fix: components=%zu, "
-      "local_face_flips=%zu, global_component_flips=%zu, "
-      "boundary_edges=%zu, nonmanifold_edges=%zu, "
-      "winding_conflicts=%zu, invalid_faces=%zu",
-      components.size(),
-      locally_flipped_faces,
-      globally_flipped_components,
-      boundary_edge_count,
-      nonmanifold_edge_count,
-      winding_conflict_count,
-      invalid_face_count);
-
-    return output;
-  }
-
   void saveCloud(
     const fs::path & output_path,
     const CloudT::ConstPtr & cloud) const
@@ -1067,16 +607,11 @@ private:
   double mesh_feature_angle_deg_;
   double mesh_edge_angle_deg_;
   int mesh_target_faces_;
-  bool enable_mesh_orientation_fix_;
-  double mesh_orientation_hint_x_;
-  double mesh_orientation_hint_y_;
-  double mesh_orientation_hint_z_;
   std::string merged_raw_name_;
   std::string z_cropped_merged_name_;
   std::string merged_filtered_name_;
   std::string gp3_raw_name_;
   std::string gp3_smoothed_name_;
-  std::string gp3_unoriented_name_;
   std::string gp3_regularized_name_;
 };
 

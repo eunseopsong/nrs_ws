@@ -42,17 +42,9 @@ reconstruct_regularized_node:
     mesh_edge_angle_deg: 15.0
     mesh_target_faces: 3000
 
-    # Blender Edit Mode의 Recalculate Outside에 해당.
-    # 최종 face winding을 연결 성분별로 일관화하고 바깥쪽으로 정렬한다.
-    enable_mesh_orientation_fix: true
-    mesh_orientation_hint_x: 0.0
-    mesh_orientation_hint_y: 0.0
-    mesh_orientation_hint_z: 1.0
-
     merged_raw_name: "merged_raw_regularized.pcd"
     z_cropped_merged_name: "merged_z_cropped_regularized.pcd"
     merged_filtered_name: "merged_filtered_regularized.pcd"
     gp3_raw_name: "reconstructed_gp3_raw.stl"
     gp3_smoothed_name: "reconstructed_gp3_smoothed.stl"
-    gp3_unoriented_name: "reconstructed_gp3_regularized_unoriented.stl"
     gp3_regularized_name: "reconstructed_gp3_regularized.stl"
